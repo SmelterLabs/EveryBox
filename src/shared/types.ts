@@ -254,6 +254,7 @@ export interface AISettings {
 
 export interface DiscoveredModel {
   id: string
+  label?: string
   sizeBytes?: number
   parameterSize?: string
 }
@@ -274,10 +275,16 @@ export interface LocalAIStatus {
   lmStudioModels: DiscoveredModel[]
   claudeCliAvailable: boolean
   codexCliAvailable: boolean
+  codexCliModels: DiscoveredModel[]
   apiKeysConfigured: {
     anthropic: boolean
     gemini: boolean
     openai: boolean
+  }
+  cloudModels: {
+    anthropic: DiscoveredModel[]
+    gemini: DiscoveredModel[]
+    openai: DiscoveredModel[]
   }
 }
 
