@@ -4,7 +4,7 @@ import { BookOpen, Clock, Send, Sparkles, X } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 
 export const Composer: React.FC = () => {
-  const { composer, accounts, snippets, settings, closeComposer, showToast, refreshAll } = useAppStore()
+  const { composer, accounts, snippets, settings, closeComposer, showToast, refreshAll, queueSendWithUndo } = useAppStore()
 
   const [accountId, setAccountId] = useState(composer.accountId)
   const [to, setTo] = useState(composer.to)
@@ -121,26 +121,45 @@ export const Composer: React.FC = () => {
       void executeSend(scheduleAt)
       return
     }
-    const secs = settings?.undoSendSeconds ?? 5
-    if (secs <= 0) {
-      void executeSend()
+    const recipients = to
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+    if (recipients.length === 0) {
+      showToast('Please enter at least one recipient.')
       return
     }
-    setUndoCountdown(secs)
-    pendingSendRef.current = () => executeSend()
-    let remaining = secs
-    undoTimerRef.current = setInterval(() => {
-      remaining -= 1
-      if (remaining <= 0) {
-        if (undoTimerRef.current) clearInterval(undoTimerRef.current)
-        setUndoCountdown(null)
-        const fn = pendingSendRef.current
-        pendingSendRef.current = null
-        if (fn) void fn()
-      } else {
-        setUndoCountdown(remaining)
-      }
-    }, 1000)
+    const payload = {
+      accountId: activeAccount?.id || accountId,
+      to: recipients,
+      cc: cc
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+      bcc: bcc
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+      subject: subject || '(No subject)',
+      bodyHtml: buildHtml(),
+      bodyText: body,
+      replyToMessageId: composer.replyToMessageId,
+      threadId: composer.replyToThreadId
+    }
+    const draftRestore = {
+      mode: composer.mode,
+      accountId: activeAccount?.id || accountId,
+      to,
+      cc,
+      bcc,
+      subject,
+      body,
+      replyToThreadId: composer.replyToThreadId,
+      replyToMessageId: composer.replyToMessageId
+    }
+    const secs = settings?.undoSendSeconds ?? 5
+    closeComposer()
+    queueSendWithUndo(payload, draftRestore, secs)
   }
 
   const cancelUndoSend = () => {
