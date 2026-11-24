@@ -305,11 +305,14 @@ export const App: React.FC = () => {
       <CommandPalette />
       <SettingsModal />
 
-      {/* Undo / Notification Toast */}
+      {/* Bottom-Left Translucent Undo / Notification Toast */}
       {toast && (
         <div
-          className="fixed bottom-5 right-5 z-50 flex items-center gap-3 rounded-xl border px-4 py-2.5 text-[13px] shadow-2xl"
-          style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-strong)' }}
+          className="fixed bottom-5 left-5 z-50 flex items-center gap-3 rounded-xl border px-4 py-2.5 text-[13px] shadow-2xl backdrop-blur-md"
+          style={{
+            background: 'color-mix(in srgb, var(--bg-elevated) 84%, transparent)',
+            borderColor: 'var(--border-strong)'
+          }}
         >
           <span>{toast.message}</span>
           {toast.undo && (
@@ -319,8 +322,8 @@ export const App: React.FC = () => {
                 clearToast()
                 if (fn) await fn()
               }}
-              className="font-semibold hover:underline"
-              style={{ color: 'var(--accent-text)' }}
+              className="rounded-md px-2 py-0.5 font-semibold transition hover:opacity-90"
+              style={{ background: 'var(--accent-soft)', color: 'var(--accent-text)' }}
             >
               Undo
             </button>
