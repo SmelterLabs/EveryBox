@@ -1,4 +1,4 @@
-import { execFile } from 'child_process'
+import { execFile, spawn } from 'child_process'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import { promisify } from 'util'
@@ -6,6 +6,54 @@ import type { AISettings, DiscoveredModel, LocalAIStatus } from '../../shared/ty
 import type { SecretStore } from '../security/secrets'
 
 const execFileAsync = promisify(execFile)
+
+function spawnWithStdin(cmd: string, args: string[], stdinText: string, timeoutMs = 90_000): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, {
+      shell: process.platform === 'win32',
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe']
+    })
+    let stdout = ''
+    let stderr = ''
+    let settled = false
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      child.kill()
+      reject(new Error(`${cmd} timed out after ${Math.round(timeoutMs / 1000)}s`))
+    }, timeoutMs)
+
+    child.stdout.on('data', (chunk) => {
+      stdout += String(chunk)
+    })
+    child.stderr.on('data', (chunk) => {
+      stderr += String(chunk)
+    })
+    child.on('error', (err) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      reject(err)
+    })
+    child.on('close', (code) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (code === 0) {
+        resolve(stdout.trim())
+      } else {
+        reject(new Error(`${cmd} exited with code ${code}: ${(stderr || stdout).trim().slice(0, 300)}`))
+      }
+    })
+    child.stdin.write(stdinText)
+    child.stdin.end()
+  })
+}
+
+function stripThinkingTags(raw: string): string {
+  return raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
+}
 
 export interface AICompletionRequest {
   system: string
@@ -277,7 +325,7 @@ export async function completeAI(
       body: JSON.stringify({
         model,
         temperature: 0.3,
-        max_tokens: req.maxTokens || 1200,
+        max_tokens: req.maxTokens || 4096,
         response_format: req.jsonMode ? { type: 'json_object' } : undefined,
         messages: [
           { role: 'system', content: system },
@@ -290,7 +338,7 @@ export async function completeAI(
     const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }
     const gpu = await detectGpuName()
     return {
-      text: data.choices?.[0]?.message?.content || '',
+      text: stripThinkingTags(data.choices?.[0]?.message?.content || ''),
       providerLabel: `${probed.serverName || 'Local Server'} (${model}) · Local${gpu ? ` (${gpu})` : ''}`
     }
   }
@@ -369,27 +417,19 @@ export async function completeAI(
 
   if (settings.provider === 'claude-cli') {
     const fullPrompt = `${system}\n\n---\n\n${req.prompt}`
-    const { stdout } = await execFileAsync('claude', ['-p', fullPrompt], {
-      timeout: 90_000,
-      maxBuffer: 4 * 1024 * 1024,
-      shell: true
-    })
+    const stdout = await spawnWithStdin('claude', ['-p', '-'], fullPrompt, 90_000)
     return {
-      text: stdout.trim(),
-      providerLabel: 'Claude CLI · Subscription ($0 extra API)'
+      text: stripThinkingTags(stdout),
+      providerLabel: 'Claude CLI · Local CLI Subscription'
     }
   }
 
   if (settings.provider === 'codex-cli') {
     const fullPrompt = `${system}\n\n---\n\n${req.prompt}`
-    const { stdout } = await execFileAsync('codex', ['exec', fullPrompt], {
-      timeout: 90_000,
-      maxBuffer: 4 * 1024 * 1024,
-      shell: true
-    })
+    const stdout = await spawnWithStdin('codex', ['exec', '-'], fullPrompt, 90_000)
     return {
-      text: stdout.trim(),
-      providerLabel: 'Codex CLI · Subscription ($0 extra API)'
+      text: stripThinkingTags(stdout),
+      providerLabel: 'Codex CLI · Local CLI Subscription'
     }
   }
 
@@ -472,10 +512,11 @@ export async function completeAI(
 }
 
 export function extractJsonBlock<T>(raw: string): T | null {
+  const cleaned = stripThinkingTags(raw)
   try {
-    return JSON.parse(raw) as T
+    return JSON.parse(cleaned) as T
   } catch {
-    const match = raw.match(/```(?:json)?\s*([\s\S]*?)```/) || raw.match(/(\{[\s\S]*\})/)
+    const match = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/) || cleaned.match(/(\{[\s\S]*\})/)
     if (match?.[1]) {
       try {
         return JSON.parse(match[1]) as T
