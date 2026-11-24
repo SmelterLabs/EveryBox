@@ -4,6 +4,7 @@ import { useAppStore } from '../store/useAppStore'
 
 export const TodayBrief: React.FC = () => {
   const {
+    settings,
     accounts,
     counts,
     threads,
@@ -13,6 +14,10 @@ export const TodayBrief: React.FC = () => {
     selectThread,
     showToast
   } = useAppStore()
+
+  const readerWidthMode = settings?.readerWidth || 'comfortable'
+  const briefMaxWidth =
+    readerWidthMode === 'narrow' ? '600px' : readerWidthMode === 'wide' ? 'none' : '820px'
 
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
@@ -27,8 +32,8 @@ export const TodayBrief: React.FC = () => {
   const headingGreeting = firstAccountName ? `${greeting}, ${firstAccountName}` : greeting
 
   return (
-    <div className="flex h-full flex-1 flex-col overflow-y-auto px-12 py-12">
-      <div className="mx-auto w-full max-w-[600px]">
+    <div className={`flex h-full flex-1 flex-col overflow-y-auto py-10 ${readerWidthMode === 'wide' ? 'px-8' : 'px-12'}`}>
+      <div className="mx-auto w-full" style={{ maxWidth: briefMaxWidth }}>
         <div className="text-[11px] font-semibold tracking-wider" style={{ color: 'var(--text-muted)' }}>
           {dateLabel}
         </div>

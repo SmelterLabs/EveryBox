@@ -29,12 +29,9 @@ export const ThreadReader: React.FC = () => {
     refreshTodayEvents
   } = useAppStore()
 
-  const readerWidthClass =
-    settings?.readerWidth === 'narrow'
-      ? 'max-w-[680px]'
-      : settings?.readerWidth === 'wide'
-        ? 'max-w-none'
-        : 'max-w-[860px]'
+  const readerWidthMode = settings?.readerWidth || 'comfortable'
+  const readerMaxWidth =
+    readerWidthMode === 'narrow' ? '680px' : readerWidthMode === 'wide' ? 'none' : '860px'
 
   const [summary, setSummary] = useState<ThreadAISummary | null>(null)
   const [loadingSummary, setLoadingSummary] = useState(false)
@@ -206,8 +203,8 @@ export const ThreadReader: React.FC = () => {
       </div>
 
       {/* Scrollable Thread Content */}
-      <div className="flex-1 overflow-y-auto px-8 py-6">
-        <div className={`mx-auto ${readerWidthClass}`}>
+      <div className={`flex-1 overflow-y-auto py-6 ${readerWidthMode === 'wide' ? 'px-6' : 'px-8'}`}>
+        <div className="mx-auto w-full" style={{ maxWidth: readerMaxWidth }}>
           {/* Subject + Summarize Pill */}
           <h1 className="text-[21px] font-semibold leading-snug tracking-tight">{selectedThread.subject}</h1>
           <div className="mt-2 flex flex-wrap items-center gap-2.5 text-[12.5px]" style={{ color: 'var(--text-secondary)' }}>
@@ -374,7 +371,7 @@ export const ThreadReader: React.FC = () => {
 
                 {/* Body */}
                 <div
-                  className="email-prose mt-4 select-text"
+                  className={`email-prose mt-4 select-text ${readerWidthMode === 'wide' ? 'email-prose-wide' : ''}`}
                   dangerouslySetInnerHTML={{
                     __html: m.bodyHtml || `<p>${m.bodyText.replace(/\n/g, '<br/>')}</p>`
                   }}
@@ -409,8 +406,8 @@ export const ThreadReader: React.FC = () => {
       </div>
 
       {/* Bottom Glassmail Quick Reply Bar */}
-      <div className="border-t px-8 py-3" style={{ borderColor: 'var(--border-subtle)' }}>
-        <div className={`mx-auto ${readerWidthClass}`}>
+      <div className={`border-t py-3 ${readerWidthMode === 'wide' ? 'px-6' : 'px-8'}`} style={{ borderColor: 'var(--border-subtle)' }}>
+        <div className="mx-auto w-full" style={{ maxWidth: readerMaxWidth }}>
           <button
             onClick={() => handleReply('reply')}
             className="flex w-full items-center justify-between rounded-xl border px-4 py-2.5 text-[13px] transition hover:bg-[var(--bg-hover)]"
