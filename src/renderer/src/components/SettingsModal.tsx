@@ -304,7 +304,13 @@ export const SettingsModal: React.FC = () => {
                   className="space-y-3 rounded-xl border p-4"
                   style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
                 >
-                  <h4 className="text-[13.5px] font-semibold">Add IMAP / SMTP Account (+ Optional CalDAV / ICS Calendar)</h4>
+                  <div>
+                    <h4 className="text-[13.5px] font-semibold">Add IMAP / SMTP Account</h4>
+                    <p className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                      Includes a built-in local calendar automatically (import from Classic Outlook or .ics in the
+                      Calendar tab). CalDAV and ICS feed URLs are optional for server sync.
+                    </p>
+                  </div>
                   <div className="grid grid-cols-2 gap-2.5">
                     <input
                       placeholder="Display Name (e.g. Work IMAP)"
@@ -420,7 +426,7 @@ export const SettingsModal: React.FC = () => {
                     className="w-full rounded-lg border px-3 py-2 text-[13px] outline-none"
                     style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-strong)' }}
                   >
-                    <option value="ollama">Ollama — Local ($0, 100% private)</option>
+                    <option value="ollama">Ollama — Local AI ($0, 100% private)</option>
                     <option value="lmstudio">LM Studio — Local ($0, 100% private)</option>
                     <option value="claude-cli">Claude CLI — Existing Subscription ($0 extra API)</option>
                     <option value="codex-cli">Codex CLI — Existing Subscription ($0 extra API)</option>

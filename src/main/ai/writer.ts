@@ -35,7 +35,7 @@ export async function draftVoiceMatchedReply(opts: {
           .slice(0, 4)
           .map((s, i) => `Sample ${i + 1}:\n${s.slice(0, 300)}`)
           .join('\n---\n')}`
-      : `Write in a calm, natural, concise voice signed as ${account?.name || 'Alex'}.`
+      : `Write in a calm, natural, concise voice${account?.name ? ` signed as ${account.name}` : ''}.`
 
   try {
     const res = await completeAI(
@@ -57,7 +57,7 @@ ${calendarLines || '(No conflicts listed)'}`
     return { draft: res.text.trim(), providerLabel: res.providerLabel }
   } catch {
     const recipient = detail?.latestFrom.name?.split(' ')[0] || 'there'
-    const sender = account?.name || 'Alex'
+    const sender = account?.name || ''
     return {
       draft: `Hi ${recipient},\n\n${opts.instruction.charAt(0).toUpperCase() + opts.instruction.slice(1)}.\n\nBest,\n${sender}`,
       providerLabel: 'Quick Draft Template (Configure Ollama / CLI in Settings › AI)'

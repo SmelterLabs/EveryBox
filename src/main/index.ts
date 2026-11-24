@@ -1,5 +1,6 @@
-import { app, BrowserWindow, clipboard, ipcMain, Notification, shell } from 'electron'
-import { join } from 'path'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, shell } from 'electron'
+import { basename, join } from 'path'
+import { readFile, writeFile } from 'fs/promises'
 import { randomUUID } from 'crypto'
 import { GlassmailDB } from './db/database'
 import { seedDemoDataIfEmpty } from './db/seed'
@@ -217,7 +218,7 @@ function registerIpc(): void {
         caldavUrl: input.caldavUrl,
         caldavUsername: input.caldavUsername,
         icsFeedUrl: input.icsFeedUrl,
-        calendarEnabled: Boolean(input.caldavUrl || input.icsFeedUrl),
+        calendarEnabled: true,
         syncStatus: 'syncing'
       })
       broadcastDataUpdated()
@@ -334,6 +335,49 @@ function registerIpc(): void {
   ipcMain.handle('calendar:delete', async (_, eventId: string) => {
     const res = await calendarManager.deleteEvent(eventId)
     broadcastDataUpdated()
+    return res
+  })
+  ipcMain.handle('calendar:import-ics', async (_, accountId: string) => {
+    const pick = await dialog.showOpenDialog({
+      title: 'Import iCalendar (.ics) File',
+      properties: ['openFile'],
+      filters: [{ name: 'iCalendar Files', extensions: ['ics'] }]
+    })
+    if (pick.canceled || pick.filePaths.length === 0) {
+      return { ok: false, imported: 0, cancelled: true }
+    }
+    try {
+      const filePath = pick.filePaths[0]
+      const text = await readFile(filePath, 'utf8')
+      const label = basename(filePath).replace(/\.ics$/i, '')
+      const res = calendarManager.importIcsText(accountId, text, label)
+      if (res.ok) broadcastDataUpdated()
+      return res
+    } catch (err) {
+      return { ok: false, imported: 0, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+  ipcMain.handle('calendar:export-ics', async (_, accountIds?: string[]) => {
+    const save = await dialog.showSaveDialog({
+      title: 'Export Calendar (.ics)',
+      defaultPath: 'everybox-calendar.ics',
+      filters: [{ name: 'iCalendar Files', extensions: ['ics'] }]
+    })
+    if (save.canceled || !save.filePath) {
+      return { ok: false, count: 0, cancelled: true }
+    }
+    try {
+      const { ics, count } = calendarManager.exportIcs(accountIds)
+      await writeFile(save.filePath, ics, 'utf8')
+      return { ok: true, count, filePath: save.filePath }
+    } catch (err) {
+      return { ok: false, count: 0, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+  ipcMain.handle('calendar:outlook-list', () => calendarManager.listOutlookCalendars())
+  ipcMain.handle('calendar:outlook-import', async (_, accountId: string, folderPath: string) => {
+    const res = await calendarManager.importOutlookCalendar(accountId, folderPath)
+    if (res.ok) broadcastDataUpdated()
     return res
   })
 
