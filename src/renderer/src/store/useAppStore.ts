@@ -197,7 +197,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     const filterIds = activeAccountIds.length > 0 ? activeAccountIds : undefined
 
     if (searchQuery.trim()) {
-      const { parsed, threads } = await window.glassmail.searchMail(searchQuery, filterIds)
+      // Top bar is universal search across all accounts
+      const { parsed, threads } = await window.glassmail.searchMail(searchQuery, undefined)
       set({ parsedSearch: parsed, threads })
       return
     }

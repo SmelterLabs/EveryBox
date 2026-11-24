@@ -105,61 +105,61 @@ export const ThreadReader: React.FC = () => {
       {zoomBadge}
       {/* Action Bar */}
       <div
-        className="flex items-center justify-between border-b px-6 py-2"
+        className="flex items-center justify-between border-b px-6 py-3"
         style={{ borderColor: 'var(--border-subtle)' }}
       >
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1.5">
           <button
             onClick={() => void selectThread(null)}
-            className="rounded-lg p-1.5 transition hover:bg-[var(--bg-hover)]"
+            className="rounded-xl p-2.5 transition hover:bg-[var(--bg-hover)]"
             title="Back to Inbox Home (Today Brief)"
           >
-            <Home size={15} />
+            <Home size={24} />
           </button>
-          <div className="mx-1 h-4 w-px" style={{ background: 'var(--border-subtle)' }} />
+          <div className="mx-1.5 h-6 w-px" style={{ background: 'var(--border-subtle)' }} />
           <button
             onClick={() => handleReply('reply')}
-            className="rounded-lg p-1.5 transition hover:bg-[var(--bg-hover)]"
+            className="rounded-xl p-2.5 transition hover:bg-[var(--bg-hover)]"
             title="Reply (R)"
           >
-            <Reply size={15} />
+            <Reply size={24} />
           </button>
           <button
             onClick={() => handleReply('replyAll')}
-            className="rounded-lg p-1.5 transition hover:bg-[var(--bg-hover)]"
+            className="rounded-xl p-2.5 transition hover:bg-[var(--bg-hover)]"
             title="Reply All (A)"
           >
-            <ReplyAll size={15} />
+            <ReplyAll size={24} />
           </button>
           <button
             onClick={() => handleReply('forward')}
-            className="rounded-lg p-1.5 transition hover:bg-[var(--bg-hover)]"
+            className="rounded-xl p-2.5 transition hover:bg-[var(--bg-hover)]"
             title="Forward (F)"
           >
-            <Forward size={15} />
+            <Forward size={24} />
           </button>
-          <div className="mx-1 h-4 w-px" style={{ background: 'var(--border-subtle)' }} />
+          <div className="mx-1.5 h-6 w-px" style={{ background: 'var(--border-subtle)' }} />
           <button
             onClick={() => void archiveThreads([selectedThread.id])}
-            className="rounded-lg p-1.5 transition hover:bg-[var(--bg-hover)]"
+            className="rounded-xl p-2.5 transition hover:bg-[var(--bg-hover)]"
             title="Archive (E)"
           >
-            <Archive size={15} />
+            <Archive size={24} />
           </button>
           <button
             onClick={() => void trashThreads([selectedThread.id])}
-            className="rounded-lg p-1.5 transition hover:bg-[var(--bg-hover)]"
+            className="rounded-xl p-2.5 transition hover:bg-[var(--bg-hover)]"
             title="Delete"
           >
-            <Trash2 size={15} />
+            <Trash2 size={24} />
           </button>
           <button
             onClick={() => void toggleStarThread(selectedThread.id, selectedThread.isStarred)}
-            className="rounded-lg p-1.5 transition hover:bg-[var(--bg-hover)]"
+            className="rounded-xl p-2.5 transition hover:bg-[var(--bg-hover)]"
             title="Star (S)"
           >
             <Star
-              size={15}
+              size={24}
               fill={selectedThread.isStarred ? '#f5b841' : 'none'}
               style={{ color: selectedThread.isStarred ? '#f5b841' : 'currentColor' }}
             />
@@ -168,14 +168,14 @@ export const ThreadReader: React.FC = () => {
           <div className="relative">
             <button
               onClick={() => setShowSnoozeMenu((v) => !v)}
-              className="rounded-lg p-1.5 transition hover:bg-[var(--bg-hover)]"
+              className="rounded-xl p-2.5 transition hover:bg-[var(--bg-hover)]"
               title="Snooze (H)"
             >
-              <Clock size={15} />
+              <Clock size={24} />
             </button>
             {showSnoozeMenu && (
               <div
-                className="absolute left-0 top-9 z-30 w-44 rounded-xl border p-1 shadow-xl"
+                className="absolute left-0 top-12 z-30 w-44 rounded-xl border p-1 shadow-xl"
                 style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-strong)' }}
               >
                 <button
@@ -207,15 +207,15 @@ export const ThreadReader: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 text-[11.5px]" style={{ color: 'var(--text-muted)' }}>
+        <div className="flex items-center gap-2.5 text-[12.5px]" style={{ color: 'var(--text-muted)' }}>
           {selectedThread.trackersBlocked > 0 && (
-            <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5" style={{ background: 'var(--bg-elevated)' }}>
-              <ShieldCheck size={12} style={{ color: 'var(--success)' }} />
+            <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1" style={{ background: 'var(--bg-elevated)' }}>
+              <ShieldCheck size={14} style={{ color: 'var(--success)' }} />
               {selectedThread.trackersBlocked} tracker{selectedThread.trackersBlocked === 1 ? '' : 's'} blocked
             </span>
           )}
           <span className="inline-flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full" style={{ background: selectedThread.accountColor }} />
+            <span className="h-2.5 w-2.5 rounded-full" style={{ background: selectedThread.accountColor }} />
             {selectedThread.accountEmail}
           </span>
         </div>
