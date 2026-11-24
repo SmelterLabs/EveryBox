@@ -76,6 +76,8 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
   const { ref: zoomRef, zoom, zoomBadge } = usePaneZoom<HTMLElement>('sidebar')
   const [showFolders, setShowFolders] = useState(true)
   const [showWorkspacesMenu, setShowWorkspacesMenu] = useState(false)
+  const [newWorkspaceName, setNewWorkspaceName] = useState('')
+  const [addingWorkspace, setAddingWorkspace] = useState(false)
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)
   const [editName, setEditName] = useState('')
   const [editColor, setEditColor] = useState('#E87A48')
@@ -184,32 +186,134 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
 
           {showWorkspacesMenu && (
             <div
-              className="absolute left-0 top-9 z-40 w-52 rounded-xl border p-1.5 shadow-2xl"
+              className="absolute left-0 top-9 z-40 w-60 rounded-xl border p-1.5 shadow-2xl"
               style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-strong)' }}
             >
               <div className="px-2 py-1 text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
-                Workspaces
+                Workspaces (Account Groups)
               </div>
               {workspaces.map((ws) => (
-                <button
+                <div
                   key={ws.id}
-                  onClick={() => {
-                    void selectWorkspace(ws)
-                    setShowWorkspacesMenu(false)
-                  }}
-                  className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-[12.5px] transition hover:bg-[var(--bg-hover)]"
+                  className="group flex items-center justify-between rounded-lg px-2 py-1.5 text-[12.5px] transition hover:bg-[var(--bg-hover)]"
                 >
-                  <span className="flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full" style={{ background: ws.color }} />
-                    {ws.name}
-                  </span>
-                  {ws.shortcutIndex && (
-                    <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                      {modKeyPrefix}{ws.shortcutIndex}
-                    </span>
-                  )}
-                </button>
+                  <button
+                    onClick={() => {
+                      void selectWorkspace(ws)
+                      setShowWorkspacesMenu(false)
+                    }}
+                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                  >
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: ws.color }} />
+                    <span className="truncate">{ws.name}</span>
+                  </button>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {ws.shortcutIndex && (
+                      <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                        {modKeyPrefix}{ws.shortcutIndex}
+                      </span>
+                    )}
+                    {ws.id !== 'ws-all' && (
+                      <button
+                        type="button"
+                        onClick={async (e) => {
+                          e.stopPropagation()
+                          await window.glassmail.deleteWorkspace(ws.id)
+                          await refreshAll()
+                          showToast(`Deleted workspace "${ws.name}"`)
+                        }}
+                        className="hidden rounded p-0.5 hover:bg-[var(--bg-selected)] group-hover:flex"
+                        style={{ color: 'var(--danger)' }}
+                        title={`Delete ${ws.name}`}
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    )}
+                  </div>
+                </div>
               ))}
+
+              <div className="mt-1 border-t pt-1.5" style={{ borderColor: 'var(--border-subtle)' }}>
+                {!addingWorkspace ? (
+                  <button
+                    type="button"
+                    disabled={activeAccountIds.length === 0}
+                    onClick={() => setAddingWorkspace(true)}
+                    className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-[12px] font-medium transition hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-45"
+                    style={{ color: 'var(--accent-text)' }}
+                    title={
+                      activeAccountIds.length === 0
+                        ? 'Select 1 or more accounts (Ctrl+Click) first to save them as a Workspace'
+                        : 'Save currently selected accounts as a Workspace'
+                    }
+                  >
+                    <Plus size={12} />
+                    <span>
+                      {activeAccountIds.length > 0
+                        ? `Save ${activeAccountIds.length} selected as Workspace…`
+                        : 'Select accounts first to save group'}
+                    </span>
+                  </button>
+                ) : (
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault()
+                      const name = newWorkspaceName.trim()
+                      if (!name || activeAccountIds.length === 0) return
+                      const usedShortcuts = new Set(workspaces.map((w) => w.shortcutIndex).filter(Boolean))
+                      let nextShortcut: number | undefined
+                      for (let i = 2; i <= 9; i++) {
+                        if (!usedShortcuts.has(i)) {
+                          nextShortcut = i
+                          break
+                        }
+                      }
+                      const color = COLOR_SWATCHES[workspaces.length % COLOR_SWATCHES.length]
+                      await window.glassmail.saveWorkspace({
+                        id: `ws-${Date.now()}`,
+                        name,
+                        accountIds: [...activeAccountIds],
+                        color,
+                        shortcutIndex: nextShortcut
+                      })
+                      setNewWorkspaceName('')
+                      setAddingWorkspace(false)
+                      setShowWorkspacesMenu(false)
+                      await refreshAll()
+                      showToast(`Saved workspace "${name}"`)
+                    }}
+                    className="space-y-1.5 px-1 py-0.5"
+                  >
+                    <input
+                      autoFocus
+                      value={newWorkspaceName}
+                      onChange={(e) => setNewWorkspaceName(e.target.value)}
+                      placeholder="Workspace name (e.g. Work)"
+                      className="w-full rounded-md border bg-transparent px-2 py-1 text-[12px] outline-none"
+                      style={{ borderColor: 'var(--border-strong)' }}
+                    />
+                    <div className="flex justify-end gap-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAddingWorkspace(false)
+                          setNewWorkspaceName('')
+                        }}
+                        className="rounded px-2 py-0.5 text-[11px] hover:bg-[var(--bg-hover)]"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="rounded px-2.5 py-0.5 text-[11px] font-semibold text-white"
+                        style={{ background: 'var(--accent)' }}
+                      >
+                        Save
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -226,8 +330,32 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
 
       {/* Scrollable Nav */}
       <div className="flex-1 overflow-y-auto px-2 pb-3 pt-2" style={{ zoom }}>
-        {/* Assistant & Combined Calendar */}
+        {/* Top Modes: Email, Calendar, Assistant */}
         <div className="space-y-0.5">
+          <button
+            onClick={() => setActiveView('mail')}
+            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition hover:bg-[var(--bg-hover)]"
+            style={{
+              background: activeView === 'mail' ? 'var(--bg-selected)' : 'transparent',
+              color: activeView === 'mail' ? 'var(--accent-text)' : 'var(--text-primary)'
+            }}
+          >
+            <Mail size={15} style={{ color: activeView === 'mail' ? 'var(--accent)' : 'var(--text-secondary)' }} />
+            <span>Email</span>
+          </button>
+
+          <button
+            onClick={() => setActiveView('calendar')}
+            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition hover:bg-[var(--bg-hover)]"
+            style={{
+              background: activeView === 'calendar' ? 'var(--bg-selected)' : 'transparent',
+              color: activeView === 'calendar' ? 'var(--accent-text)' : 'var(--text-primary)'
+            }}
+          >
+            <Calendar size={15} style={{ color: activeView === 'calendar' ? 'var(--accent)' : 'var(--text-secondary)' }} />
+            <span>Calendar</span>
+          </button>
+
           <button
             onClick={() => toggleAssistant()}
             className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition hover:bg-[var(--bg-hover)]"
@@ -239,18 +367,6 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
           >
             <Sparkles size={15} style={{ color: 'var(--accent)' }} />
             <span>Assistant</span>
-          </button>
-
-          <button
-            onClick={() => setActiveView('calendar')}
-            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition"
-            style={{
-              background: activeView === 'calendar' ? 'var(--bg-selected)' : 'transparent',
-              color: activeView === 'calendar' ? 'var(--accent-text)' : 'var(--text-primary)'
-            }}
-          >
-            <Calendar size={15} style={{ color: activeView === 'calendar' ? 'var(--accent)' : 'var(--text-secondary)' }} />
-            <span>Calendar</span>
           </button>
         </div>
 
