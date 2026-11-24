@@ -72,6 +72,13 @@ export async function syncGoogleCalendar(
             email: a.email || '',
             status: a.responseStatus || undefined
           })),
+          attachments: (item.attachments || [])
+            .filter((att) => Boolean(att.fileUrl))
+            .map((att) => ({
+              title: att.title || 'Attachment',
+              fileUrl: att.fileUrl!,
+              mimeType: att.mimeType || undefined
+            })),
           status: (item.status as 'confirmed' | 'tentative' | 'cancelled') || 'confirmed',
           source: 'google',
           readOnly: cal.accessRole === 'reader' || cal.accessRole === 'freeBusyReader'

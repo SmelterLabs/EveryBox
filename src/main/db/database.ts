@@ -219,6 +219,7 @@ export class GlassmailDB {
         end_at INTEGER NOT NULL,
         all_day INTEGER DEFAULT 0,
         attendees_json TEXT DEFAULT '[]',
+        attachments_json TEXT DEFAULT '[]',
         status TEXT DEFAULT 'confirmed',
         source TEXT NOT NULL,
         read_only INTEGER DEFAULT 0
@@ -256,6 +257,12 @@ export class GlassmailDB {
         created_at INTEGER NOT NULL
       );
     `)
+    // Safe additive schema migrations for existing user databases
+    try {
+      this.db.exec(`ALTER TABLE calendar_events ADD COLUMN attachments_json TEXT DEFAULT '[]'`)
+    } catch {
+      // Column already exists
+    }
   }
 
   // ---- Settings ----
@@ -958,8 +965,8 @@ export class GlassmailDB {
       .prepare(`
         INSERT INTO calendar_events (
           id, account_id, calendar_id, calendar_name, remote_id, title, description,
-          location, meeting_url, start_at, end_at, all_day, attendees_json, status, source, read_only
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          location, meeting_url, start_at, end_at, all_day, attendees_json, attachments_json, status, source, read_only
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           title = excluded.title,
           description = excluded.description,
@@ -969,6 +976,7 @@ export class GlassmailDB {
           end_at = excluded.end_at,
           all_day = excluded.all_day,
           attendees_json = excluded.attendees_json,
+          attachments_json = excluded.attachments_json,
           status = excluded.status
       `)
       .run(
@@ -985,6 +993,7 @@ export class GlassmailDB {
         ev.endAt,
         ev.allDay ? 1 : 0,
         JSON.stringify(ev.attendees || []),
+        JSON.stringify(ev.attachments || []),
         ev.status,
         ev.source,
         ev.readOnly ? 1 : 0
@@ -1024,6 +1033,7 @@ export class GlassmailDB {
       endAt: Number(r.end_at),
       allDay: Boolean(r.all_day),
       attendees: JSON.parse(String(r.attendees_json || '[]')),
+      attachments: JSON.parse(String(r.attachments_json || '[]')),
       status: r.status as CalendarEvent['status'],
       source: r.source as CalendarEvent['source'],
       readOnly: Boolean(r.read_only)
