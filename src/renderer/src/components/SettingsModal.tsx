@@ -1,6 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertCircle, Check, Copy, Key, Mail, Palette, Plus, RefreshCw, Shield, Sparkles, Terminal, Trash2, X } from 'lucide-react'
+import { AlertCircle, Check, Copy, Key, Keyboard, Mail, Palette, Plus, RefreshCw, RotateCcw, Shield, Sparkles, Terminal, Trash2, X } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
+import { isMac } from '../utils/platform'
+import {
+  SHORTCUT_DEFINITIONS,
+  eventToCombo,
+  formatComboForDisplay,
+  getDefaultShortcut,
+  getEffectiveShortcut
+} from '../utils/shortcuts'
 import type {
   AccountSwitchBehavior,
   AIProviderType,
@@ -8,6 +16,7 @@ import type {
   DiscoveredModel,
   LocalAIStatus,
   ReaderWidth,
+  ShortcutActionId,
   ThemeId
 } from '../../../shared/types'
 
@@ -65,6 +74,33 @@ export const SettingsModal: React.FC = () => {
 
   // MCP config
   const [mcpConfigJson, setMcpConfigJson] = useState('')
+
+  // Shortcut recording
+  const [recordingShortcutId, setRecordingShortcutId] = useState<ShortcutActionId | null>(null)
+
+  useEffect(() => {
+    if (!recordingShortcutId || !draft) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (e.key === 'Escape') {
+        setRecordingShortcutId(null)
+        return
+      }
+      const combo = eventToCombo(e)
+      if (!combo) return
+      const next: AppSettings = {
+        ...draft,
+        shortcuts: { ...(draft.shortcuts || {}), [recordingShortcutId]: combo }
+      }
+      setRecordingShortcutId(null)
+      setDraft(next)
+      void saveSettings(next)
+      showToast(`Shortcut updated to ${formatComboForDisplay(combo)}`)
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [recordingShortcutId, draft, saveSettings, showToast])
 
   const runLocalAIDetection = useCallback(
     async (overrides?: { localOpenAiUrl?: string; ollamaUrl?: string; lmStudioUrl?: string }) => {
@@ -206,6 +242,7 @@ export const SettingsModal: React.FC = () => {
     { id: 'accounts', label: 'Accounts', icon: <Mail size={14} className="shrink-0" /> },
     { id: 'ai', label: 'AI Providers', icon: <Sparkles size={14} className="shrink-0" /> },
     { id: 'general', label: 'Appearance', icon: <Palette size={14} className="shrink-0" /> },
+    { id: 'shortcuts', label: 'Shortcut Keys', icon: <Keyboard size={14} className="shrink-0" /> },
     { id: 'privacy', label: 'Privacy', icon: <Shield size={14} className="shrink-0" /> },
     { id: 'snippets', label: 'Snippets', icon: <Plus size={14} className="shrink-0" /> },
     { id: 'mcp', label: 'MCP Agents', icon: <Terminal size={14} className="shrink-0" /> }
@@ -1092,6 +1129,98 @@ export const SettingsModal: React.FC = () => {
                     style={{ borderColor: 'var(--border-strong)' }}
                   />
                 </div>
+              </div>
+            )}
+
+            {/* SHORTCUT KEYS TAB */}
+            {tab === 'shortcuts' && (
+              <div className="space-y-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[13px] font-semibold">
+                      Keyboard Shortcuts ({isMac ? 'macOS' : 'Windows'} Defaults)
+                    </div>
+                    <div className="text-[11.5px]" style={{ color: 'var(--text-muted)' }}>
+                      Click any shortcut to rebind it. Press Esc to cancel while recording.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRecordingShortcutId(null)
+                      void updateAndSave({ ...draft, shortcuts: {} })
+                      showToast('Reset all shortcuts to defaults')
+                    }}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12px] font-medium transition hover:bg-[var(--bg-hover)]"
+                    style={{ borderColor: 'var(--border-strong)' }}
+                  >
+                    <RotateCcw size={12} />
+                    Reset Defaults
+                  </button>
+                </div>
+
+                {(['Mail Actions', 'Navigation', 'App & Search'] as const).map((category) => (
+                  <div key={category} className="space-y-1.5">
+                    <div
+                      className="text-[11.5px] font-semibold uppercase tracking-wide"
+                      style={{ color: 'var(--text-muted)' }}
+                    >
+                      {category}
+                    </div>
+                    <div
+                      className="divide-y rounded-xl border"
+                      style={{
+                        background: 'var(--bg-elevated)',
+                        borderColor: 'var(--border-subtle)'
+                      }}
+                    >
+                      {SHORTCUT_DEFINITIONS.filter((d) => d.category === category).map((def) => {
+                        const effective = getEffectiveShortcut(def.id, draft.shortcuts)
+                        const isDefault = effective === getDefaultShortcut(def.id)
+                        const isRecording = recordingShortcutId === def.id
+                        return (
+                          <div
+                            key={def.id}
+                            className="flex items-center justify-between gap-3 px-3.5 py-2.5"
+                            style={{ borderColor: 'var(--border-subtle)' }}
+                          >
+                            <span className="text-[12.5px] font-medium">{def.label}</span>
+                            <div className="flex items-center gap-1.5">
+                              {!isDefault && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const nextShortcuts = { ...(draft.shortcuts || {}) }
+                                    delete nextShortcuts[def.id]
+                                    void updateAndSave({ ...draft, shortcuts: nextShortcuts })
+                                  }}
+                                  className="rounded p-1 transition hover:bg-[var(--bg-hover)]"
+                                  style={{ color: 'var(--text-muted)' }}
+                                  title="Reset to default"
+                                >
+                                  <RotateCcw size={12} />
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setRecordingShortcutId(isRecording ? null : def.id)}
+                                className="min-w-[96px] rounded-lg border px-2.5 py-1 text-center font-mono text-[12px] font-semibold transition"
+                                style={{
+                                  background: isRecording ? 'var(--accent-soft)' : 'var(--bg-main)',
+                                  borderColor: isRecording ? 'var(--accent)' : 'var(--border-strong)',
+                                  color: isRecording ? 'var(--accent-text)' : 'var(--text-primary)'
+                                }}
+                                title="Click to assign a new key or combo"
+                              >
+                                {isRecording ? 'Press keys…' : formatComboForDisplay(effective)}
+                              </button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
 
