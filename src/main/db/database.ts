@@ -39,9 +39,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
     lmStudioModel: '',
     claudeCliModel: 'sonnet',
     codexCliModel: 'default',
+    antigravityCliModel: 'default',
     anthropicModel: 'claude-sonnet-4-5',
     geminiModel: 'gemini-2.5-flash',
     openaiModel: 'gpt-4.1-mini',
+    grokModel: 'grok-3-mini',
     responseLanguage: 'auto'
   },
   privacy: {

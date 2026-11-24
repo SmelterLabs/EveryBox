@@ -601,17 +601,32 @@ export const SettingsModal: React.FC = () => {
                   subtitle: localAI?.codexCliAvailable
                     ? 'Detected on this PC · Uses your existing Codex subscription ($0 extra API)'
                     : 'Not installed on this PC. Uses your existing Codex subscription when installed.'
+                },
+                {
+                  id: 'antigravity-cli',
+                  name: 'Antigravity CLI (Gemini)',
+                  available: Boolean(localAI?.antigravityCliAvailable),
+                  statusBadge: !localAI
+                    ? 'Scanning…'
+                    : localAI.antigravityCliAvailable
+                      ? `Available · ${localAI.antigravityCliModels.length} models`
+                      : 'Not installed',
+                  statusTone: localAI?.antigravityCliAvailable ? 'ok' : 'off',
+                  subtitle: localAI?.antigravityCliAvailable
+                    ? 'Detected on this PC · Uses your Antigravity / Gemini CLI ($0 extra API)'
+                    : 'Not installed on this PC. Install the Antigravity CLI (agy) to use Gemini & Antigravity models.'
                 }
               ]
 
               const cloudProviders: {
-                id: 'anthropic' | 'gemini' | 'openai'
+                id: 'anthropic' | 'gemini' | 'openai' | 'grok'
                 name: string
                 keySaved: boolean
               }[] = [
-                { id: 'anthropic', name: 'Anthropic API (Claude)', keySaved: Boolean(localAI?.apiKeysConfigured.anthropic) },
+                { id: 'anthropic', name: 'Anthropic API', keySaved: Boolean(localAI?.apiKeysConfigured.anthropic) },
                 { id: 'gemini', name: 'Google Gemini API', keySaved: Boolean(localAI?.apiKeysConfigured.gemini) },
-                { id: 'openai', name: 'OpenAI API', keySaved: Boolean(localAI?.apiKeysConfigured.openai) }
+                { id: 'openai', name: 'OpenAI API', keySaved: Boolean(localAI?.apiKeysConfigured.openai) },
+                { id: 'grok', name: 'Grok (xAI API)', keySaved: Boolean(localAI?.apiKeysConfigured.grok) }
               ]
 
               const activeLocalEntry = localProviders.find((p) => p.id === draft.ai.provider)
@@ -907,9 +922,15 @@ export const SettingsModal: React.FC = () => {
                         className="w-full rounded-lg border px-3 py-2 text-[13px] outline-none"
                         style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
                       >
-                        <option value="sonnet">Sonnet — Recommended (fast &amp; high quota)</option>
-                        <option value="haiku">Haiku — Fastest &amp; lightest</option>
-                        <option value="opus">Opus — Deepest reasoning</option>
+                        <option value="sonnet">
+                          Sonnet{localAI.claudeCliTierVersions?.sonnet ? ` ${localAI.claudeCliTierVersions.sonnet}` : ''} — Recommended (auto-updates to latest Sonnet)
+                        </option>
+                        <option value="haiku">
+                          Haiku{localAI.claudeCliTierVersions?.haiku ? ` ${localAI.claudeCliTierVersions.haiku}` : ''} — Fastest &amp; lightest (auto-updates to latest Haiku)
+                        </option>
+                        <option value="opus">
+                          Opus{localAI.claudeCliTierVersions?.opus ? ` ${localAI.claudeCliTierVersions.opus}` : ''} — Deepest reasoning (auto-updates to latest Opus)
+                        </option>
                         <option value="default">CLI Default (uses your local Claude CLI setting)</option>
                       </select>
                     </div>
@@ -942,6 +963,41 @@ export const SettingsModal: React.FC = () => {
                       >
                         <option value="default">CLI Default (auto-updates with Codex CLI)</option>
                         {localAI.codexCliModels.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.label && m.label !== m.id ? `${m.label} (${m.id})` : m.id}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Antigravity CLI Model Picker (live from `agy models`) */}
+                  {draft.ai.provider === 'antigravity-cli' && localAI?.antigravityCliAvailable && (
+                    <div
+                      className="space-y-2 rounded-xl border p-4"
+                      style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <label className="text-[12.5px] font-semibold">Antigravity / Gemini Model (Discovered)</label>
+                        <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                          {localAI.antigravityCliModels.length > 0
+                            ? `${localAI.antigravityCliModels.length} live models from agy CLI`
+                            : 'Auto-tracks Antigravity CLI default'}
+                        </span>
+                      </div>
+                      <select
+                        value={draft.ai.antigravityCliModel || 'default'}
+                        onChange={(e) =>
+                          void updateAndSave({
+                            ...draft,
+                            ai: { ...draft.ai, antigravityCliModel: e.target.value }
+                          })
+                        }
+                        className="w-full rounded-lg border px-3 py-2 text-[13px] outline-none"
+                        style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
+                      >
+                        <option value="default">CLI Default (auto-updates with Antigravity CLI)</option>
+                        {localAI.antigravityCliModels.map((m) => (
                           <option key={m.id} value={m.id}>
                             {m.label && m.label !== m.id ? `${m.label} (${m.id})` : m.id}
                           </option>
@@ -1010,7 +1066,7 @@ export const SettingsModal: React.FC = () => {
                     <div className="text-[11.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
                       Cloud API Keys (Optional)
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-2 gap-2">
                       {cloudProviders.map((c) => {
                         const selected = draft.ai.provider === c.id
                         return (
@@ -1045,15 +1101,17 @@ export const SettingsModal: React.FC = () => {
                     </div>
                   </div>
 
-                  {['anthropic', 'gemini', 'openai'].includes(draft.ai.provider) && (() => {
-                    const cloudKey = draft.ai.provider as 'anthropic' | 'gemini' | 'openai'
+                  {['anthropic', 'gemini', 'openai', 'grok'].includes(draft.ai.provider) && (() => {
+                    const cloudKey = draft.ai.provider as 'anthropic' | 'gemini' | 'openai' | 'grok'
                     const discoveredCloud = localAI?.cloudModels?.[cloudKey] || []
                     const currentCloudModel =
                       cloudKey === 'anthropic'
                         ? draft.ai.anthropicModel
                         : cloudKey === 'gemini'
                           ? draft.ai.geminiModel
-                          : draft.ai.openaiModel
+                          : cloudKey === 'grok'
+                            ? draft.ai.grokModel || 'grok-3-mini'
+                            : draft.ai.openaiModel
                     return (
                       <div className="space-y-3">
                         <div className="space-y-2">
@@ -1115,7 +1173,9 @@ export const SettingsModal: React.FC = () => {
                                     ? { anthropicModel: val }
                                     : cloudKey === 'gemini'
                                       ? { geminiModel: val }
-                                      : { openaiModel: val }
+                                      : cloudKey === 'grok'
+                                        ? { grokModel: val }
+                                        : { openaiModel: val }
                                 void updateAndSave({ ...draft, ai: { ...draft.ai, ...patch } })
                               }}
                               className="w-full rounded-lg border px-3 py-2 text-[13px] outline-none"
