@@ -645,7 +645,7 @@ export const CalendarView: React.FC = () => {
           >
             <div
               onClick={(e) => e.stopPropagation()}
-              className="flex max-h-[84vh] w-[52vw] min-w-[480px] max-w-[820px] flex-col overflow-hidden rounded-2xl border shadow-2xl"
+              className="flex h-[78vh] max-h-[88vh] w-[70vw] min-w-[640px] max-w-[1100px] flex-col overflow-hidden rounded-2xl border shadow-2xl"
               style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-strong)' }}
             >
               {/* Color Accent Top Bar */}
