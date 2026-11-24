@@ -6,6 +6,24 @@ export type ReaderWidth = 'narrow' | 'comfortable' | 'wide'
 
 export type AccountSwitchBehavior = 'home' | 'last-email' | 'first-email'
 
+export type ShortcutActionId =
+  | 'delete'
+  | 'archive'
+  | 'compose'
+  | 'reply'
+  | 'replyAll'
+  | 'forward'
+  | 'star'
+  | 'toggleRead'
+  | 'snooze'
+  | 'nextThread'
+  | 'prevThread'
+  | 'search'
+  | 'commandPalette'
+  | 'settings'
+  | 'undo'
+  | 'inboxHome'
+
 export type MailboxId =
   | 'inbox'
   | 'starred'
@@ -283,6 +301,7 @@ export interface AppSettings {
   readerWidth?: ReaderWidth
   accountSwitchBehavior?: AccountSwitchBehavior
   accountOrder?: string[]
+  shortcuts?: Partial<Record<ShortcutActionId, string>>
   defaultReplyAll: boolean
   undoSendSeconds: number
   ai: AISettings

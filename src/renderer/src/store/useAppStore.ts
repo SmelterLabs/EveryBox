@@ -73,7 +73,7 @@ interface AppState {
   assistantOpen: boolean
   commandPaletteOpen: boolean
   settingsOpen: boolean
-  settingsInitialTab: 'accounts' | 'ai' | 'general' | 'privacy' | 'snippets' | 'mcp'
+  settingsInitialTab: 'accounts' | 'ai' | 'general' | 'shortcuts' | 'privacy' | 'snippets' | 'mcp'
   composer: ComposerState
   toast: { message: string; undo?: () => Promise<void> } | null
   isSyncing: boolean
