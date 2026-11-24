@@ -119,8 +119,11 @@ const api = {
     ipcRenderer.invoke('calendar:outlook-import', accountId, folderPath),
 
   // AI Suite
-  detectLocalAI: (overrides?: { ollamaUrl?: string; lmStudioUrl?: string }): Promise<LocalAIStatus> =>
-    ipcRenderer.invoke('ai:detect-local', overrides),
+  detectLocalAI: (overrides?: {
+    localOpenAiUrl?: string
+    ollamaUrl?: string
+    lmStudioUrl?: string
+  }): Promise<LocalAIStatus> => ipcRenderer.invoke('ai:detect-local', overrides),
   askAssistant: (question: string, accountIds?: string[]): Promise<AssistantResponse> =>
     ipcRenderer.invoke('ai:ask', question, accountIds),
   summarizeThread: (threadId: string): Promise<ThreadAISummary> => ipcRenderer.invoke('ai:summarize', threadId),
