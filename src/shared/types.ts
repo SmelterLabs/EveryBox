@@ -180,6 +180,7 @@ export interface CalendarEvent {
   endAt: number // unix ms
   allDay: boolean
   attendees: { name?: string; email: string; status?: string }[]
+  attachments?: { title: string; fileUrl: string; mimeType?: string }[]
   status: 'confirmed' | 'tentative' | 'cancelled'
   source: 'google' | 'caldav' | 'ics' | 'local'
   readOnly: boolean

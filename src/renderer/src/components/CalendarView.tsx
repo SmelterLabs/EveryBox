@@ -1,5 +1,25 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Check, ChevronLeft, ChevronRight, Download, Layers, MapPin, Plus, RefreshCw, Trash2, Upload, Video, X } from 'lucide-react'
+import {
+  Calendar as CalendarIcon,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  Copy,
+  Download,
+  ExternalLink,
+  FileText,
+  Layers,
+  MapPin,
+  Paperclip,
+  Plus,
+  RefreshCw,
+  Trash2,
+  Upload,
+  Users,
+  Video,
+  X
+} from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import type { CalendarEvent, OutlookCalendarInfo } from '../../../shared/types'
 
@@ -7,28 +27,95 @@ type CalMode = 'day' | 'week' | 'month'
 
 interface MergedCalendarEvent {
   primary: CalendarEvent
-  occurrences: { email: string; color: string; calendarName: string }[]
+  occurrences: { accountId: string; email: string; color: string; calendarName: string }[]
 }
 
-function mergeDuplicateEvents(list: CalendarEvent[]): MergedCalendarEvent[] {
+function formatDuration(startAt: number, endAt: number): string {
+  const mins = Math.max(0, Math.round((endAt - startAt) / 60_000))
+  if (mins < 60) return `${mins} min`
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  return m > 0 ? `${h} hr ${m} min` : `${h} hr${h === 1 ? '' : 's'}`
+}
+
+function formatAgendaText(raw: string): string {
+  return raw
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<\/div>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '• ')
+    .replace(/<\/li>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+function mergeDuplicateEvents(
+  list: CalendarEvent[],
+  accountPriority: Map<string, number>
+): MergedCalendarEvent[] {
+  const rankOf = (accountId: string) =>
+    accountPriority.has(accountId) ? accountPriority.get(accountId)! : Number.MAX_SAFE_INTEGER
+
   const map = new Map<string, MergedCalendarEvent>()
   for (const ev of list) {
     const key = `${ev.title.trim().toLowerCase()}|${ev.startAt}|${ev.endAt}|${ev.allDay ? '1' : '0'}`
     const existing = map.get(key)
-    const occ = { email: ev.accountEmail, color: ev.accountColor, calendarName: ev.calendarName }
+    const occ = {
+      accountId: ev.accountId,
+      email: ev.accountEmail,
+      color: ev.accountColor,
+      calendarName: ev.calendarName
+    }
     if (!existing) {
       map.set(key, { primary: ev, occurrences: [occ] })
     } else {
-      // Prefer writable event or one with a meeting link/description as primary
-      const score = (e: CalendarEvent) =>
-        (e.readOnly ? 0 : 4) + (e.meetingUrl ? 2 : 0) + (e.description ? 1 : 0)
-      if (score(ev) > score(existing.primary)) {
-        existing.primary = ev
+      // Highest-priority account (lowest index in sidebar) leads; break ties by richness/writable
+      const curRank = rankOf(existing.primary.accountId)
+      const newRank = rankOf(ev.accountId)
+      const richness = (e: CalendarEvent) =>
+        (e.readOnly ? 0 : 4) +
+        (e.meetingUrl ? 2 : 0) +
+        (e.description ? 1 : 0) +
+        ((e.attachments?.length || 0) > 0 ? 1 : 0)
+
+      if (newRank < curRank || (newRank === curRank && richness(ev) > richness(existing.primary))) {
+        // Carry over meetingUrl / description / attachments if the winner is missing them
+        existing.primary = {
+          ...ev,
+          meetingUrl: ev.meetingUrl || existing.primary.meetingUrl,
+          description: ev.description || existing.primary.description,
+          attendees: ev.attendees.length >= existing.primary.attendees.length ? ev.attendees : existing.primary.attendees,
+          attachments:
+            (ev.attachments?.length || 0) >= (existing.primary.attachments?.length || 0)
+              ? ev.attachments
+              : existing.primary.attachments
+        }
+      } else {
+        existing.primary = {
+          ...existing.primary,
+          meetingUrl: existing.primary.meetingUrl || ev.meetingUrl,
+          description: existing.primary.description || ev.description,
+          attendees: existing.primary.attendees.length >= ev.attendees.length ? existing.primary.attendees : ev.attendees,
+          attachments:
+            (existing.primary.attachments?.length || 0) >= (ev.attachments?.length || 0)
+              ? existing.primary.attachments
+              : ev.attachments
+        }
       }
       if (!existing.occurrences.some((o) => o.email === occ.email && o.color === occ.color)) {
         existing.occurrences.push(occ)
       }
     }
+  }
+
+  for (const entry of map.values()) {
+    entry.occurrences.sort((a, b) => rankOf(a.accountId) - rankOf(b.accountId))
   }
   return Array.from(map.values())
 }
@@ -67,6 +154,8 @@ export const CalendarView: React.FC = () => {
 
   const imapAccounts = useMemo(() => accounts.filter((a) => a.provider === 'imap' && !a.isDemo), [accounts])
   const importTargetAccounts = imapAccounts.length > 0 ? imapAccounts : accounts
+  const accountPriority = useMemo(() => new Map(accounts.map((a, idx) => [a.id, idx])), [accounts])
+  const rankOf = (id: string) => (accountPriority.has(id) ? accountPriority.get(id)! : Number.MAX_SAFE_INTEGER)
 
   // Create form state
   const [title, setTitle] = useState('')
@@ -388,17 +477,48 @@ export const CalendarView: React.FC = () => {
             const dayStart = startOfDay(d).getTime()
             const dayEnd = dayStart + 86400_000
             const rawDayEvents = events.filter((ev) => ev.endAt > dayStart && ev.startAt < dayEnd)
-            const dayEvents: MergedCalendarEvent[] = mergeDuplicates
-              ? mergeDuplicateEvents(rawDayEvents)
+            const combinedDayEvents: MergedCalendarEvent[] = mergeDuplicates
+              ? mergeDuplicateEvents(rawDayEvents, accountPriority)
               : rawDayEvents.map((ev) => ({
                   primary: ev,
-                  occurrences: [{ email: ev.accountEmail, color: ev.accountColor, calendarName: ev.calendarName }]
+                  occurrences: [
+                    {
+                      accountId: ev.accountId,
+                      email: ev.accountEmail,
+                      color: ev.accountColor,
+                      calendarName: ev.calendarName
+                    }
+                  ]
                 }))
+
+            // 1. All-day events live strictly in the top bar, ordered by account priority
+            const allDayEvents = combinedDayEvents
+              .filter((item) => item.primary.allDay)
+              .sort((a, b) => {
+                const ra = rankOf(a.primary.accountId)
+                const rb = rankOf(b.primary.accountId)
+                if (ra !== rb) return ra - rb
+                return a.primary.title.localeCompare(b.primary.title)
+              })
+
+            // 2. Timed events live in the schedule below: ordered by hour slot -> account priority -> exact start time
+            const timedEvents = combinedDayEvents
+              .filter((item) => !item.primary.allDay)
+              .sort((a, b) => {
+                const hourA = new Date(a.primary.startAt).getHours()
+                const hourB = new Date(b.primary.startAt).getHours()
+                if (hourA !== hourB) return hourA - hourB
+                const ra = rankOf(a.primary.accountId)
+                const rb = rankOf(b.primary.accountId)
+                if (ra !== rb) return ra - rb
+                if (a.primary.startAt !== b.primary.startAt) return a.primary.startAt - b.primary.startAt
+                return a.primary.title.localeCompare(b.primary.title)
+              })
 
             return (
               <div
                 key={dayStart}
-                className="flex min-h-[130px] flex-col rounded-xl border p-2.5"
+                className="flex min-h-[150px] flex-col rounded-xl border p-2.5"
                 style={{
                   background: isToday ? 'var(--bg-elevated)' : 'var(--bg-list)',
                   borderColor: isToday ? 'var(--accent)' : 'var(--border-subtle)'
@@ -419,8 +539,51 @@ export const CalendarView: React.FC = () => {
                   </span>
                 </div>
 
+                {/* Dedicated All-Day Top Bar */}
+                {allDayEvents.length > 0 && (
+                  <div
+                    className="mb-2 flex flex-wrap gap-1 border-b pb-2"
+                    style={{ borderColor: 'var(--border-subtle)' }}
+                  >
+                    {allDayEvents.map((item) => {
+                      const ev = item.primary
+                      return (
+                        <button
+                          key={ev.id}
+                          onClick={() => setSelectedEvent(item)}
+                          className="inline-flex max-w-full items-center gap-1 rounded-md border-l-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium transition hover:brightness-110"
+                          style={{
+                            background: 'var(--bg-main)',
+                            borderLeftColor: ev.accountColor,
+                            flex: allDayEvents.length === 1 ? '1 1 100%' : '1 1 46%'
+                          }}
+                          title={
+                            item.occurrences.length > 1
+                              ? `${ev.title} · All day (${item.occurrences.map((o) => o.email).join(', ')})`
+                              : `${ev.title} · All day`
+                          }
+                        >
+                          <span className="truncate">{ev.title}</span>
+                          {item.occurrences.length > 1 && (
+                            <span className="ml-auto flex shrink-0 items-center gap-0.5">
+                              {item.occurrences.map((o, idx) => (
+                                <span
+                                  key={`${o.email}-${idx}`}
+                                  className="h-1.5 w-1.5 rounded-full"
+                                  style={{ background: o.color }}
+                                />
+                              ))}
+                            </span>
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+
+                {/* Timed Schedule Events */}
                 <div className="flex-1 space-y-1.5 overflow-y-auto">
-                  {dayEvents.map((item) => {
+                  {timedEvents.map((item) => {
                     const ev = item.primary
                     return (
                       <button
@@ -451,10 +614,13 @@ export const CalendarView: React.FC = () => {
                             </span>
                           )}
                         </div>
-                        <div className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
-                          {ev.allDay
-                            ? 'All day'
-                            : `${new Date(ev.startAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`}
+                        <div className="flex items-center justify-between gap-1 text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+                          <span className="truncate">
+                            {new Date(ev.startAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                            {' – '}
+                            {new Date(ev.endAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                          </span>
+                          {(ev.attachments?.length || 0) > 0 && <Paperclip size={10} className="shrink-0" />}
                         </div>
                       </button>
                     )
@@ -466,107 +632,300 @@ export const CalendarView: React.FC = () => {
         </div>
       </div>
 
-      {/* Selected Event Popover */}
-      {selectedEvent && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          onClick={() => setSelectedEvent(null)}
-        >
+      {/* Selected Event Details Modal (~50% window) */}
+      {selectedEvent && (() => {
+        const ev = selectedEvent.primary
+        const agendaText = ev.description ? formatAgendaText(ev.description) : ''
+        const attachments = ev.attachments || []
+        const locationIsUrl = Boolean(ev.location && /^https?:\/\//i.test(ev.location.trim()))
+        return (
           <div
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md rounded-2xl border p-5 shadow-2xl"
-            style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-strong)' }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6"
+            onClick={() => setSelectedEvent(null)}
           >
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-center gap-2.5">
-                <span className="h-3.5 w-3.5 shrink-0 rounded-full" style={{ background: selectedEvent.primary.accountColor }} />
-                <h3 className="text-[16px] font-semibold">{selectedEvent.primary.title}</h3>
-              </div>
-              <button onClick={() => setSelectedEvent(null)} className="rounded p-1 hover:bg-[var(--bg-hover)]">
-                <X size={15} />
-              </button>
-            </div>
-            <div className="mt-3 space-y-2 text-[13px]" style={{ color: 'var(--text-secondary)' }}>
-              <div>
-                {selectedEvent.primary.allDay
-                  ? new Date(selectedEvent.primary.startAt).toLocaleDateString([], {
-                      weekday: 'short',
-                      month: 'short',
-                      day: 'numeric'
-                    }) + ' · All day'
-                  : `${new Date(selectedEvent.primary.startAt).toLocaleString([], {
-                      weekday: 'short',
-                      month: 'short',
-                      day: 'numeric',
-                      hour: 'numeric',
-                      minute: '2-digit'
-                    })} – ${new Date(selectedEvent.primary.endAt).toLocaleTimeString([], {
-                      hour: 'numeric',
-                      minute: '2-digit'
-                    })}`}
-              </div>
-              <div className="space-y-1 text-[12px]" style={{ color: 'var(--text-muted)' }}>
-                {selectedEvent.occurrences.map((occ, idx) => (
-                  <div key={`${occ.email}-${idx}`} className="flex items-center gap-1.5">
-                    <span className="h-2 w-2 rounded-full" style={{ background: occ.color }} />
-                    <span>
-                      {occ.calendarName} ({occ.email})
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="flex max-h-[84vh] w-[52vw] min-w-[480px] max-w-[820px] flex-col overflow-hidden rounded-2xl border shadow-2xl"
+              style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-strong)' }}
+            >
+              {/* Color Accent Top Bar */}
+              <div className="h-1.5 w-full shrink-0" style={{ background: ev.accountColor }} />
+
+              {/* Header */}
+              <div
+                className="flex items-start justify-between gap-4 border-b px-6 py-4"
+                style={{ borderColor: 'var(--border-subtle)' }}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: ev.accountColor }} />
+                    <h3 className="text-[18px] font-semibold leading-snug">{ev.title}</h3>
+                    <span
+                      className="rounded-full px-2 py-0.5 text-[10.5px] font-medium capitalize"
+                      style={{ background: 'var(--bg-main)', color: 'var(--text-muted)' }}
+                    >
+                      {ev.status}
                     </span>
                   </div>
-                ))}
-              </div>
-              {selectedEvent.primary.location && (
-                <div className="flex items-center gap-1.5">
-                  <MapPin size={13} /> {selectedEvent.primary.location}
+                  <div className="mt-1.5 flex flex-wrap items-center gap-3 text-[13px]" style={{ color: 'var(--text-secondary)' }}>
+                    <span className="inline-flex items-center gap-1.5">
+                      <Clock size={14} style={{ color: 'var(--text-muted)' }} />
+                      {ev.allDay
+                        ? `${new Date(ev.startAt).toLocaleDateString([], {
+                            weekday: 'long',
+                            month: 'long',
+                            day: 'numeric',
+                            year: 'numeric'
+                          })} · All day`
+                        : `${new Date(ev.startAt).toLocaleDateString([], {
+                            weekday: 'long',
+                            month: 'long',
+                            day: 'numeric'
+                          })}, ${new Date(ev.startAt).toLocaleTimeString([], {
+                            hour: 'numeric',
+                            minute: '2-digit'
+                          })} – ${new Date(ev.endAt).toLocaleTimeString([], {
+                            hour: 'numeric',
+                            minute: '2-digit'
+                          })} (${formatDuration(ev.startAt, ev.endAt)})`}
+                    </span>
+                  </div>
                 </div>
-              )}
-              {selectedEvent.primary.description && (
-                <p className="max-h-40 overflow-y-auto pt-1 text-[12.5px] whitespace-pre-wrap">
-                  {selectedEvent.primary.description}
-                </p>
-              )}
-            </div>
 
-            <div className="mt-5 flex items-center justify-between gap-2">
-              {selectedEvent.primary.meetingUrl ? (
-                <button
-                  onClick={() => void window.glassmail.openExternal(selectedEvent.primary.meetingUrl!)}
-                  className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-[12.5px] font-semibold text-white"
-                  style={{ background: 'var(--accent)' }}
+                <div className="flex shrink-0 items-center gap-2">
+                  {ev.meetingUrl && (
+                    <button
+                      onClick={() => void window.glassmail.openExternal(ev.meetingUrl!)}
+                      className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-[12.5px] font-semibold text-white transition hover:opacity-90"
+                      style={{ background: 'var(--accent)' }}
+                    >
+                      <Video size={14} /> Join meeting
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setSelectedEvent(null)}
+                    className="rounded-lg p-1.5 hover:bg-[var(--bg-hover)]"
+                    title="Close"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Scrollable Detail Body */}
+              <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+                {/* Location & Calendars */}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div
+                    className="rounded-xl border p-3.5"
+                    style={{ background: 'var(--bg-main)', borderColor: 'var(--border-subtle)' }}
+                  >
+                    <div className="mb-1.5 flex items-center gap-1.5 text-[11.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+                      <MapPin size={12} /> Location
+                    </div>
+                    {ev.location ? (
+                      <div className="flex items-start justify-between gap-2 text-[13px]">
+                        {locationIsUrl ? (
+                          <button
+                            onClick={() => void window.glassmail.openExternal(ev.location!)}
+                            className="inline-flex items-center gap-1 text-left hover:underline"
+                            style={{ color: 'var(--accent-text)' }}
+                          >
+                            <span className="break-all">{ev.location}</span>
+                            <ExternalLink size={12} className="shrink-0" />
+                          </button>
+                        ) : (
+                          <span className="break-words">{ev.location}</span>
+                        )}
+                        <button
+                          onClick={async () => {
+                            await window.glassmail.copyText(ev.location!, 'Copied location')
+                            showToast('Copied location')
+                          }}
+                          className="shrink-0 rounded p-1 hover:bg-[var(--bg-hover)]"
+                          style={{ color: 'var(--text-muted)' }}
+                          title="Copy location"
+                        >
+                          <Copy size={12} />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="text-[12.5px]" style={{ color: 'var(--text-muted)' }}>
+                        No location specified
+                      </div>
+                    )}
+                  </div>
+
+                  <div
+                    className="rounded-xl border p-3.5"
+                    style={{ background: 'var(--bg-main)', borderColor: 'var(--border-subtle)' }}
+                  >
+                    <div className="mb-1.5 flex items-center gap-1.5 text-[11.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+                      <CalendarIcon size={12} /> Calendar{selectedEvent.occurrences.length > 1 ? 's' : ''}
+                    </div>
+                    <div className="space-y-1.5 text-[12.5px]">
+                      {selectedEvent.occurrences.map((occ, idx) => (
+                        <div key={`${occ.email}-${idx}`} className="flex items-center gap-2">
+                          <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: occ.color }} />
+                          <span className="truncate font-medium">{occ.calendarName}</span>
+                          <span className="truncate text-[11.5px]" style={{ color: 'var(--text-muted)' }}>
+                            ({occ.email})
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Agenda / Notes */}
+                <div
+                  className="rounded-xl border p-4"
+                  style={{ background: 'var(--bg-main)', borderColor: 'var(--border-subtle)' }}
                 >
-                  <Video size={14} /> Join meeting
-                </button>
-              ) : (
-                <div />
-              )}
-              <div className="flex items-center gap-2">
-                {!selectedEvent.primary.readOnly && (
+                  <div className="mb-2 flex items-center gap-1.5 text-[11.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+                    <FileText size={12} /> Agenda &amp; Notes
+                  </div>
+                  {agendaText ? (
+                    <div className="whitespace-pre-wrap break-words text-[13px] leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+                      {agendaText.split(/(https?:\/\/[^\s<>"]+)/g).map((part, i) =>
+                        /^https?:\/\//i.test(part) ? (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => void window.glassmail.openExternal(part)}
+                            className="inline break-all underline hover:opacity-80"
+                            style={{ color: 'var(--accent-text)' }}
+                          >
+                            {part}
+                          </button>
+                        ) : (
+                          <React.Fragment key={i}>{part}</React.Fragment>
+                        )
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-[12.5px]" style={{ color: 'var(--text-muted)' }}>
+                      No agenda or description included.
+                    </div>
+                  )}
+                </div>
+
+                {/* Attendees */}
+                {ev.attendees.length > 0 && (
+                  <div
+                    className="rounded-xl border p-4"
+                    style={{ background: 'var(--bg-main)', borderColor: 'var(--border-subtle)' }}
+                  >
+                    <div className="mb-2.5 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5 text-[11.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+                        <Users size={12} /> Attendees ({ev.attendees.length})
+                      </span>
+                    </div>
+                    <div className="grid max-h-44 grid-cols-1 gap-1.5 overflow-y-auto sm:grid-cols-2">
+                      {ev.attendees.map((att, idx) => {
+                        const label = att.name || att.email
+                        const rsvp =
+                          att.status === 'accepted'
+                            ? { text: 'Accepted', color: 'var(--success)' }
+                            : att.status === 'declined'
+                              ? { text: 'Declined', color: 'var(--danger)' }
+                              : att.status === 'tentative'
+                                ? { text: 'Maybe', color: 'var(--accent-text)' }
+                                : null
+                        return (
+                          <div
+                            key={`${att.email}-${idx}`}
+                            className="flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-[12px]"
+                            style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
+                          >
+                            <div className="min-w-0">
+                              <div className="truncate font-medium">{label}</div>
+                              {att.name && att.email && (
+                                <div className="truncate text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+                                  {att.email}
+                                </div>
+                              )}
+                            </div>
+                            {rsvp && (
+                              <span className="shrink-0 text-[10.5px] font-semibold" style={{ color: rsvp.color }}>
+                                {rsvp.text}
+                              </span>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Attachments */}
+                <div
+                  className="rounded-xl border p-4"
+                  style={{ background: 'var(--bg-main)', borderColor: 'var(--border-subtle)' }}
+                >
+                  <div className="mb-2 flex items-center gap-1.5 text-[11.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+                    <Paperclip size={12} /> Attachments ({attachments.length})
+                  </div>
+                  {attachments.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {attachments.map((att, idx) => (
+                        <button
+                          key={`${att.fileUrl}-${idx}`}
+                          type="button"
+                          onClick={() => void window.glassmail.openExternal(att.fileUrl)}
+                          className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-[12.5px] font-medium transition hover:bg-[var(--bg-hover)]"
+                          style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-strong)' }}
+                        >
+                          <Paperclip size={13} style={{ color: 'var(--accent)' }} />
+                          <span className="max-w-[260px] truncate">{att.title}</span>
+                          <ExternalLink size={12} style={{ color: 'var(--text-muted)' }} />
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-[12.5px]" style={{ color: 'var(--text-muted)' }}>
+                      No attachments on this event.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div
+                className="flex shrink-0 items-center justify-between border-t px-6 py-3.5"
+                style={{ borderColor: 'var(--border-subtle)' }}
+              >
+                {!ev.readOnly ? (
                   <button
                     onClick={async () => {
-                      await window.glassmail.deleteCalendarEvent(selectedEvent.primary.id)
+                      await window.glassmail.deleteCalendarEvent(ev.id)
                       setSelectedEvent(null)
                       await loadEvents()
                       await refreshTodayEvents()
                       showToast('Deleted event')
                     }}
-                    className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[12px] hover:bg-[var(--bg-hover)]"
+                    className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-medium hover:bg-[var(--bg-hover)]"
                     style={{ color: 'var(--danger)' }}
                   >
-                    <Trash2 size={13} /> Delete
+                    <Trash2 size={14} /> Delete event
                   </button>
+                ) : (
+                  <span className="text-[11.5px]" style={{ color: 'var(--text-muted)' }}>
+                    Read-only calendar event
+                  </span>
                 )}
                 <button
                   onClick={() => setSelectedEvent(null)}
-                  className="rounded-lg border px-3 py-1.5 text-[12px] font-medium hover:bg-[var(--bg-hover)]"
-                  style={{ borderColor: 'var(--border-strong)' }}
+                  className="rounded-lg px-4 py-1.5 text-[12.5px] font-semibold text-white transition hover:opacity-90"
+                  style={{ background: 'var(--accent)' }}
                 >
                   Close
                 </button>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {/* Import / Export Modal */}
       {importOpen && (
