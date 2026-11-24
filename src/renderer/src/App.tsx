@@ -23,6 +23,7 @@ export const App: React.FC = () => {
     threads,
     workspaces,
     sidebarVisible,
+    assistantOpen,
     searchQuery,
     toast,
     setSidebarVisible,
@@ -48,6 +49,41 @@ export const App: React.FC = () => {
     const saved = Number(localStorage.getItem('everybox:threadListWidth'))
     return Number.isFinite(saved) && saved >= 250 && saved <= 960 ? saved : 340
   })
+  const [assistantWidth, setAssistantWidth] = useState<number>(() => {
+    const saved = Number(localStorage.getItem('everybox:assistantWidth'))
+    return Number.isFinite(saved) && saved >= 300 && saved <= 640 ? saved : 390
+  })
+
+  const startResizeLeft = (
+    e: React.MouseEvent,
+    startWidth: number,
+    min: number,
+    max: number,
+    storageKey: string,
+    setter: (w: number) => void
+  ) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const prevCursor = document.body.style.cursor
+    const prevSelect = document.body.style.userSelect
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+
+    const onMove = (ev: MouseEvent) => {
+      const dynamicMax = Math.min(max, Math.max(min, window.innerWidth - 420))
+      const next = Math.min(dynamicMax, Math.max(min, startWidth - (ev.clientX - startX)))
+      setter(next)
+      localStorage.setItem(storageKey, String(next))
+    }
+    const onUp = () => {
+      document.body.style.cursor = prevCursor
+      document.body.style.userSelect = prevSelect
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
 
   const startResize = (
     e: React.MouseEvent,
@@ -225,11 +261,10 @@ export const App: React.FC = () => {
           </>
         )}
 
-        {activeView === 'assistant' && <AssistantView />}
         {activeView === 'calendar' && <CalendarView />}
         {activeView === 'triage' && <TriageView />}
         {activeView === 'subscriptions' && <SubscriptionsView />}
-        {activeView === 'mail' && (
+        {(activeView === 'mail' || activeView === 'assistant') && (
           <>
             <ThreadList width={threadListWidth} />
             <div
@@ -244,6 +279,23 @@ export const App: React.FC = () => {
               title="Drag to resize message list (double-click to reset)"
             />
             {selectedThreadId ? <ThreadReader /> : <TodayBrief />}
+          </>
+        )}
+
+        {assistantOpen && activeView !== 'triage' && (
+          <>
+            <div
+              onMouseDown={(e) =>
+                startResizeLeft(e, assistantWidth, 300, 640, 'everybox:assistantWidth', setAssistantWidth)
+              }
+              onDoubleClick={() => {
+                setAssistantWidth(390)
+                localStorage.setItem('everybox:assistantWidth', '390')
+              }}
+              className="group relative z-10 -mr-0.5 w-1.5 shrink-0 cursor-col-resize transition-colors hover:bg-[var(--accent)]/40"
+              title="Drag to resize AI Assistant (double-click to reset)"
+            />
+            <AssistantView width={assistantWidth} />
           </>
         )}
       </main>

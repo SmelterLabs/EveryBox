@@ -69,6 +69,7 @@ interface AppState {
 
   // UI Overlays
   sidebarVisible: boolean
+  assistantOpen: boolean
   commandPaletteOpen: boolean
   settingsOpen: boolean
   settingsInitialTab: 'accounts' | 'ai' | 'general' | 'privacy' | 'snippets' | 'mcp'
@@ -110,6 +111,8 @@ interface AppState {
 
   // Overlays
   setSidebarVisible: (v: boolean) => void
+  setAssistantOpen: (v: boolean) => void
+  toggleAssistant: () => void
   setCommandPaletteOpen: (v: boolean) => void
   openSettings: (tab?: AppState['settingsInitialTab']) => void
   closeSettings: () => void
@@ -150,6 +153,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   calendarEvents: [],
 
   sidebarVisible: true,
+  assistantOpen: false,
   commandPaletteOpen: false,
   settingsOpen: false,
   settingsInitialTab: 'accounts',
@@ -453,6 +457,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setSidebarVisible: (v) => set({ sidebarVisible: v }),
+  setAssistantOpen: (v) => set({ assistantOpen: v }),
+  toggleAssistant: () => set((s) => ({ assistantOpen: !s.assistantOpen })),
   setCommandPaletteOpen: (v) => set({ commandPaletteOpen: v }),
   openSettings: (tab = 'accounts') => set({ settingsOpen: true, settingsInitialTab: tab }),
   closeSettings: () => set({ settingsOpen: false }),

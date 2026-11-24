@@ -23,7 +23,15 @@ export type InboxCategory = 'all' | 'people' | 'updates'
 
 export type ActiveView = 'mail' | 'calendar' | 'assistant' | 'triage' | 'subscriptions'
 
-export type AIProviderType = 'ollama' | 'lmstudio' | 'claude-cli' | 'codex-cli' | 'anthropic' | 'gemini' | 'openai'
+export type AIProviderType =
+  | 'local-openai'
+  | 'ollama'
+  | 'lmstudio'
+  | 'claude-cli'
+  | 'codex-cli'
+  | 'anthropic'
+  | 'gemini'
+  | 'openai'
 
 export interface Account {
   id: string
@@ -212,6 +220,8 @@ export interface Snippet {
 
 export interface AISettings {
   provider: AIProviderType
+  localOpenAiUrl?: string
+  localOpenAiModel?: string
   ollamaUrl: string
   ollamaModel: string
   lmStudioUrl: string
@@ -230,6 +240,10 @@ export interface DiscoveredModel {
 
 export interface LocalAIStatus {
   gpuName: string | null
+  localServerRunning: boolean
+  localServerName: string | null
+  localServerUrlUsed: string
+  localServerModels: DiscoveredModel[]
   ollamaInstalled: boolean
   ollamaRunning: boolean
   ollamaUrlUsed: string
