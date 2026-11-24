@@ -8,6 +8,7 @@ import {
   Clock,
   FileText,
   Folder as FolderIcon,
+  GripVertical,
   Hourglass,
   Inbox,
   Layers,
@@ -74,6 +75,31 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
   const [editName, setEditName] = useState('')
   const [editColor, setEditColor] = useState('#E87A48')
   const [savingAccount, setSavingAccount] = useState(false)
+  const [draggedAccountId, setDraggedAccountId] = useState<string | null>(null)
+  const [dragOverAccountId, setDragOverAccountId] = useState<string | null>(null)
+
+  const handleDropAccount = async (targetId: string) => {
+    if (!draggedAccountId || draggedAccountId === targetId) {
+      setDraggedAccountId(null)
+      setDragOverAccountId(null)
+      return
+    }
+    const ids = accounts.map((a) => a.id)
+    const fromIdx = ids.indexOf(draggedAccountId)
+    const toIdx = ids.indexOf(targetId)
+    if (fromIdx === -1 || toIdx === -1) {
+      setDraggedAccountId(null)
+      setDragOverAccountId(null)
+      return
+    }
+    const next = [...ids]
+    const [moved] = next.splice(fromIdx, 1)
+    next.splice(toIdx, 0, moved)
+    setDraggedAccountId(null)
+    setDragOverAccountId(null)
+    await window.glassmail.reorderAccounts(next)
+    await refreshAll()
+  }
 
   const openEditAccount = (acc: Account) => {
     setEditingAccount(acc)
@@ -336,20 +362,52 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
             {accounts.map((acc) => {
               const isChecked = allSelected || activeAccountIds.includes(acc.id)
               const isSolo = activeAccountIds.length === 1 && activeAccountIds[0] === acc.id
+              const isDragging = draggedAccountId === acc.id
+              const isDragOver = dragOverAccountId === acc.id && draggedAccountId !== acc.id
               return (
                 <div
                   key={acc.id}
+                  draggable
+                  onDragStart={(e) => {
+                    setDraggedAccountId(acc.id)
+                    e.dataTransfer.effectAllowed = 'move'
+                    e.dataTransfer.setData('text/plain', acc.id)
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault()
+                    e.dataTransfer.dropEffect = 'move'
+                    if (dragOverAccountId !== acc.id) setDragOverAccountId(acc.id)
+                  }}
+                  onDragLeave={() => {
+                    if (dragOverAccountId === acc.id) setDragOverAccountId(null)
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    void handleDropAccount(acc.id)
+                  }}
+                  onDragEnd={() => {
+                    setDraggedAccountId(null)
+                    setDragOverAccountId(null)
+                  }}
                   onContextMenu={(e) => {
                     e.preventDefault()
                     openEditAccount(acc)
                   }}
-                  className="group flex items-center justify-between rounded-lg px-2 py-1.5 text-[12.5px] transition hover:bg-[var(--bg-hover)]"
+                  className="group flex items-center justify-between rounded-lg px-1.5 py-1.5 text-[12.5px] transition hover:bg-[var(--bg-hover)]"
                   style={{
                     background: isSolo ? 'var(--bg-selected)' : undefined,
-                    opacity: isChecked ? 1 : 0.45
+                    opacity: isDragging ? 0.35 : isChecked ? 1 : 0.45,
+                    boxShadow: isDragOver ? 'inset 0 2px 0 0 var(--accent)' : undefined
                   }}
                 >
-                  <div className="flex min-w-0 flex-1 items-center gap-2">
+                  <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                    <span
+                      className="cursor-grab opacity-0 transition group-hover:opacity-60 active:cursor-grabbing"
+                      style={{ color: 'var(--text-muted)' }}
+                      title="Drag to reorder account"
+                    >
+                      <GripVertical size={12} />
+                    </span>
                     {/* Multi-select focus toggle checkbox */}
                     <button
                       onClick={(e) => {

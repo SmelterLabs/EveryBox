@@ -1,7 +1,10 @@
-import React from 'react'
-import { Archive, Check, Copy, Paperclip, Star, Trash2, X } from 'lucide-react'
+import React, { useMemo, useState } from 'react'
+import { Archive, ArrowDown, ArrowUp, Check, Copy, Paperclip, Star, Trash2, X } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import type { InboxCategory, ThreadSummary } from '../../../shared/types'
+
+type SortField = 'date' | 'sender' | 'subject' | 'unread' | 'starred' | 'account'
+type SortDir = 'desc' | 'asc'
 
 function formatTime(ms: number): string {
   const d = new Date(ms)
@@ -55,12 +58,85 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
 
   const mailboxTitle = activeFolderName || activeMailbox.charAt(0).toUpperCase() + activeMailbox.slice(1)
 
-  const grouped = threads.reduce<Record<string, ThreadSummary[]>>((acc, t) => {
-    const b = getTimeBucket(t.lastMessageAt)
-    if (!acc[b]) acc[b] = []
-    acc[b].push(t)
-    return acc
-  }, {})
+  const [sortField, setSortField] = useState<SortField>(() => {
+    const saved = localStorage.getItem('everybox:sortField') as SortField | null
+    return saved && ['date', 'sender', 'subject', 'unread', 'starred', 'account'].includes(saved) ? saved : 'date'
+  })
+  const [sortDir, setSortDir] = useState<SortDir>(() => {
+    const saved = localStorage.getItem('everybox:sortDir') as SortDir | null
+    return saved === 'asc' || saved === 'desc' ? saved : 'desc'
+  })
+
+  const updateSortField = (next: SortField) => {
+    setSortField(next)
+    localStorage.setItem('everybox:sortField', next)
+    // Default text fields to A-Z (asc), date/unread/starred to desc
+    const defaultDir: SortDir = next === 'sender' || next === 'subject' || next === 'account' ? 'asc' : 'desc'
+    setSortDir(defaultDir)
+    localStorage.setItem('everybox:sortDir', defaultDir)
+  }
+
+  const toggleSortDir = () => {
+    const next: SortDir = sortDir === 'desc' ? 'asc' : 'desc'
+    setSortDir(next)
+    localStorage.setItem('everybox:sortDir', next)
+  }
+
+  const sortedThreads = useMemo(() => {
+    const copy = [...threads]
+    const mult = sortDir === 'asc' ? 1 : -1
+    copy.sort((a, b) => {
+      let cmp = 0
+      if (sortField === 'date') {
+        cmp = a.lastMessageAt - b.lastMessageAt
+      } else if (sortField === 'sender') {
+        const sa = (a.latestFrom.name || a.latestFrom.email || '').toLowerCase()
+        const sb = (b.latestFrom.name || b.latestFrom.email || '').toLowerCase()
+        cmp = sa.localeCompare(sb)
+      } else if (sortField === 'subject') {
+        const sa = (a.subject || '').replace(/^(re|fwd|fw):\s*/gi, '').toLowerCase()
+        const sb = (b.subject || '').replace(/^(re|fwd|fw):\s*/gi, '').toLowerCase()
+        cmp = sa.localeCompare(sb)
+      } else if (sortField === 'unread') {
+        cmp = (a.isRead ? 0 : 1) - (b.isRead ? 0 : 1)
+      } else if (sortField === 'starred') {
+        cmp = (a.isStarred ? 1 : 0) - (b.isStarred ? 1 : 0)
+      } else if (sortField === 'account') {
+        cmp = a.accountEmail.toLowerCase().localeCompare(b.accountEmail.toLowerCase())
+      }
+      if (cmp !== 0) return cmp * mult
+      return b.lastMessageAt - a.lastMessageAt
+    })
+    return copy
+  }, [threads, sortField, sortDir])
+
+  const grouped = useMemo(() => {
+    if (sortField !== 'date') {
+      const labels: Record<SortField, string> = {
+        date: 'Date',
+        sender: 'Sender',
+        subject: 'Subject',
+        unread: 'Unread',
+        starred: 'Starred',
+        account: 'Account'
+      }
+      const dirLabel =
+        sortField === 'sender' || sortField === 'subject' || sortField === 'account'
+          ? sortDir === 'asc'
+            ? 'A–Z'
+            : 'Z–A'
+          : sortDir === 'desc'
+            ? 'First'
+            : 'Last'
+      return { [`Sorted by ${labels[sortField]} (${dirLabel})`]: sortedThreads }
+    }
+    return sortedThreads.reduce<Record<string, ThreadSummary[]>>((acc, t) => {
+      const b = getTimeBucket(t.lastMessageAt)
+      if (!acc[b]) acc[b] = []
+      acc[b].push(t)
+      return acc
+    }, {})
+  }, [sortedThreads, sortField, sortDir])
 
   const categories: { id: InboxCategory; label: string; count?: number }[] = [
     { id: 'all', label: 'All' },
@@ -81,29 +157,66 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
     >
       {/* Header */}
       <div className="border-b px-3.5 pb-2.5 pt-3" style={{ borderColor: 'var(--border-subtle)' }}>
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-[14px] font-semibold leading-tight">{mailboxTitle}</h2>
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <h2 className="truncate text-[14px] font-semibold leading-tight">{mailboxTitle}</h2>
             <p className="text-[11.5px]" style={{ color: 'var(--text-muted)' }}>
               {activeMailbox === 'inbox' ? `${counts.inbox || 0} unread` : `${threads.length} conversations`}
             </p>
           </div>
-          {(activeMailbox === 'trash' || activeMailbox === 'junk') && threads.length > 0 && (
-            <button
-              onClick={async () => {
-                await window.glassmail.emptyFolder(
-                  activeMailbox,
-                  activeAccountIds.length ? activeAccountIds : undefined
-                )
-                await refreshAll()
-                showToast(`Emptied ${mailboxTitle}`)
-              }}
-              className="rounded-md px-2 py-1 text-[11px] font-medium transition hover:opacity-80"
-              style={{ background: 'var(--bg-elevated)', color: 'var(--danger)' }}
-            >
-              Empty {mailboxTitle}
-            </button>
-          )}
+          <div className="flex shrink-0 items-center gap-1">
+            {activeMailbox !== 'scheduled' && (
+              <>
+                <select
+                  value={sortField}
+                  onChange={(e) => updateSortField(e.target.value as SortField)}
+                  className="rounded-md border px-1.5 py-1 text-[11px] outline-none"
+                  style={{
+                    background: 'var(--bg-elevated)',
+                    borderColor: 'var(--border-subtle)',
+                    color: 'var(--text-secondary)'
+                  }}
+                  title="Sort emails by"
+                >
+                  <option value="date">Date</option>
+                  <option value="sender">Sender</option>
+                  <option value="subject">Subject</option>
+                  <option value="unread">Unread</option>
+                  <option value="starred">Starred</option>
+                  <option value="account">Account</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={toggleSortDir}
+                  className="rounded-md border p-1 transition hover:bg-[var(--bg-hover)]"
+                  style={{
+                    background: 'var(--bg-elevated)',
+                    borderColor: 'var(--border-subtle)',
+                    color: 'var(--text-secondary)'
+                  }}
+                  title={sortDir === 'desc' ? 'Descending (click to flip)' : 'Ascending (click to flip)'}
+                >
+                  {sortDir === 'desc' ? <ArrowDown size={12} /> : <ArrowUp size={12} />}
+                </button>
+              </>
+            )}
+            {(activeMailbox === 'trash' || activeMailbox === 'junk') && threads.length > 0 && (
+              <button
+                onClick={async () => {
+                  await window.glassmail.emptyFolder(
+                    activeMailbox,
+                    activeAccountIds.length ? activeAccountIds : undefined
+                  )
+                  await refreshAll()
+                  showToast(`Emptied ${mailboxTitle}`)
+                }}
+                className="rounded-md px-2 py-1 text-[11px] font-medium transition hover:opacity-80"
+                style={{ background: 'var(--bg-elevated)', color: 'var(--danger)' }}
+              >
+                Empty {mailboxTitle}
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Active Account Focus Strip */}
