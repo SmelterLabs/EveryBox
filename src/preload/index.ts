@@ -131,7 +131,7 @@ const api = {
     accountId: string
     threadId?: string
     instruction: string
-  }): Promise<{ draft: string; providerLabel: string }> => ipcRenderer.invoke('ai:draft', opts),
+  }): Promise<{ draft: string; providerLabel: string; error?: string }> => ipcRenderer.invoke('ai:draft', opts),
 
   // Utilities & MCP
   copyText: (text: string, notifyLabel?: string): Promise<{ ok: boolean }> =>

@@ -19,11 +19,13 @@ export async function summarizeThread(
     )
     .join('\n\n---\n\n')
 
+  let aiError: string | null = null
   try {
     const res = await completeAI(
       {
         jsonMode: true,
-        system: `You summarize email threads for Glassmail.
+        maxTokens: 2048,
+        system: `You summarize email threads for EveryBox.
 Return STRICT JSON:
 {
   "gist": "2 concise sentences explaining what this thread is about.",
@@ -45,23 +47,15 @@ Return STRICT JSON:
         providerLabel: res.providerLabel
       }
     }
-  } catch {
-    // Fallback extractive summary
+    aiError = 'AI returned a non-JSON response.'
+  } catch (err) {
+    aiError = err instanceof Error ? err.message : String(err)
   }
 
-  const latest = detail.messages[detail.messages.length - 1]
-  const sentences = (latest?.bodyText || detail.snippet)
-    .replace(/\s+/g, ' ')
-    .split(/(?<=[.!?])\s+/)
-    .filter((s) => s.length > 15)
-  const dates = (latest?.bodyText || '').match(
-    /\b(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}:\d{2}\s*(?:am|pm)?|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2})\b/gi
-  )
-
   return {
-    gist: sentences.slice(0, 2).join(' ') || detail.snippet,
-    actionItems: sentences.filter((s) => /\?|please|can you|let me know|review|confirm|send/i.test(s)).slice(0, 3),
-    keyDates: Array.from(new Set((dates || []).map((d) => d.trim()))).slice(0, 4),
-    providerLabel: 'Local Instant Summary (Configure Ollama / CLI in Settings › AI)'
+    gist: `AI provider (${settings.ai.provider}) could not summarize: ${aiError || 'Unknown error'}. Check Settings › AI Providers.`,
+    actionItems: [],
+    keyDates: [],
+    providerLabel: `AI Error (${settings.ai.provider})`
   }
 }
