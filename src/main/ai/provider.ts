@@ -1,6 +1,8 @@
 import { execFile } from 'child_process'
+import { existsSync } from 'fs'
+import { join } from 'path'
 import { promisify } from 'util'
-import type { AISettings } from '../../shared/types'
+import type { AISettings, DiscoveredModel, LocalAIStatus } from '../../shared/types'
 import type { SecretStore } from '../security/secrets'
 
 const execFileAsync = promisify(execFile)
@@ -17,70 +19,162 @@ export interface AICompletionResult {
   providerLabel: string
 }
 
-export interface LocalAIStatus {
-  ollamaRunning: boolean
-  ollamaModels: string[]
-  lmStudioRunning: boolean
-  lmStudioModels: string[]
-  claudeCliAvailable: boolean
-  codexCliAvailable: boolean
+let cachedGpuName: string | null | undefined
+
+async function detectGpuName(): Promise<string | null> {
+  if (cachedGpuName !== undefined) return cachedGpuName
+  try {
+    if (process.platform === 'win32') {
+      const { stdout } = await execFileAsync(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-Command',
+          'Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name'
+        ],
+        { timeout: 3000, windowsHide: true }
+      )
+      const names = stdout
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .filter((n) => !/Microsoft Basic|Virtual|Indirect|Parsec|Remote|Meta|Citrix/i.test(n))
+
+      const preferred =
+        names.find((n) => /NVIDIA|GeForce|RTX|GTX|Radeon RX|Intel\(R\) Arc/i.test(n)) || names[0] || null
+      cachedGpuName = preferred ? preferred.replace(/^NVIDIA\s+GeForce\s+/i, '').trim() : null
+      return cachedGpuName
+    }
+  } catch {
+    // ignore
+  }
+  cachedGpuName = null
+  return null
 }
 
-export async function detectLocalAI(settings: AISettings): Promise<LocalAIStatus> {
-  const status: LocalAIStatus = {
-    ollamaRunning: false,
-    ollamaModels: [],
-    lmStudioRunning: false,
-    lmStudioModels: [],
-    claudeCliAvailable: false,
-    codexCliAvailable: false
-  }
-
-  // Check Ollama
+async function hasExecutableOnPath(cmd: string): Promise<boolean> {
   try {
-    const res = await fetch(`${settings.ollamaUrl.replace(/\/$/, '')}/api/tags`, {
-      signal: AbortSignal.timeout(1500)
-    })
-    if (res.ok) {
-      const data = (await res.json()) as { models?: { name: string }[] }
-      status.ollamaRunning = true
-      status.ollamaModels = (data.models || []).map((m) => m.name)
+    const checker = process.platform === 'win32' ? 'where' : 'which'
+    await execFileAsync(checker, [cmd], { timeout: 1500, windowsHide: true })
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function isOllamaInstalledLocally(): Promise<boolean> {
+  if (await hasExecutableOnPath('ollama')) return true
+  if (process.platform === 'win32') {
+    const localAppData = process.env.LOCALAPPDATA || ''
+    const candidates = [
+      join(localAppData, 'Programs', 'Ollama', 'ollama.exe'),
+      'C:\\Program Files\\Ollama\\ollama.exe'
+    ]
+    if (candidates.some((p) => p && existsSync(p))) return true
+  }
+  return false
+}
+
+async function isLmStudioInstalledLocally(): Promise<boolean> {
+  if (await hasExecutableOnPath('lms')) return true
+  if (process.platform === 'win32') {
+    const localAppData = process.env.LOCALAPPDATA || ''
+    const candidates = [
+      join(localAppData, 'Programs', 'LM Studio', 'LM Studio.exe'),
+      join(localAppData, 'LM-Studio', 'LM Studio.exe'),
+      'C:\\Program Files\\LM Studio\\LM Studio.exe'
+    ]
+    if (candidates.some((p) => p && existsSync(p))) return true
+  }
+  return false
+}
+
+function normalizeOllamaUrl(url?: string): string {
+  const raw = (url || process.env.OLLAMA_HOST || 'http://localhost:11434').trim()
+  const withScheme = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`
+  return withScheme.replace(/\/$/, '')
+}
+
+function normalizeLmStudioUrl(url?: string): string {
+  const raw = (url || 'http://localhost:1234').trim()
+  const withScheme = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`
+  return withScheme.replace(/\/$/, '')
+}
+
+export async function detectLocalAI(
+  settings: AISettings,
+  secrets?: SecretStore,
+  overrides?: { ollamaUrl?: string; lmStudioUrl?: string }
+): Promise<LocalAIStatus> {
+  const ollamaUrlUsed = normalizeOllamaUrl(overrides?.ollamaUrl ?? settings.ollamaUrl)
+  const lmStudioUrlUsed = normalizeLmStudioUrl(overrides?.lmStudioUrl ?? settings.lmStudioUrl)
+
+  const [
+    gpuName,
+    ollamaCheck,
+    lmStudioCheck,
+    ollamaInstalledLocal,
+    lmStudioInstalledLocal,
+    claudeCliAvailable,
+    codexCliAvailable
+  ] = await Promise.all([
+    detectGpuName(),
+    (async (): Promise<{ running: boolean; models: DiscoveredModel[] }> => {
+      try {
+        const res = await fetch(`${ollamaUrlUsed}/api/tags`, {
+          signal: AbortSignal.timeout(1500)
+        })
+        if (!res.ok) return { running: false, models: [] }
+        const data = (await res.json()) as {
+          models?: { name: string; size?: number; details?: { parameter_size?: string } }[]
+        }
+        const models: DiscoveredModel[] = (data.models || []).map((m) => ({
+          id: m.name,
+          sizeBytes: m.size,
+          parameterSize: m.details?.parameter_size
+        }))
+        return { running: true, models }
+      } catch {
+        return { running: false, models: [] }
+      }
+    })(),
+    (async (): Promise<{ running: boolean; models: DiscoveredModel[] }> => {
+      try {
+        const res = await fetch(`${lmStudioUrlUsed}/v1/models`, {
+          signal: AbortSignal.timeout(1500)
+        })
+        if (!res.ok) return { running: false, models: [] }
+        const data = (await res.json()) as { data?: { id: string }[] }
+        const models: DiscoveredModel[] = (data.data || []).map((m) => ({ id: m.id }))
+        return { running: true, models }
+      } catch {
+        return { running: false, models: [] }
+      }
+    })(),
+    isOllamaInstalledLocally(),
+    isLmStudioInstalledLocally(),
+    hasExecutableOnPath('claude'),
+    hasExecutableOnPath('codex')
+  ])
+
+  return {
+    gpuName,
+    ollamaInstalled: ollamaCheck.running || ollamaInstalledLocal,
+    ollamaRunning: ollamaCheck.running,
+    ollamaUrlUsed,
+    ollamaModels: ollamaCheck.models,
+    lmStudioInstalled: lmStudioCheck.running || lmStudioInstalledLocal,
+    lmStudioRunning: lmStudioCheck.running,
+    lmStudioUrlUsed,
+    lmStudioModels: lmStudioCheck.models,
+    claudeCliAvailable,
+    codexCliAvailable,
+    apiKeysConfigured: {
+      anthropic: secrets ? secrets.has('ai_key:anthropic') : false,
+      gemini: secrets ? secrets.has('ai_key:gemini') : false,
+      openai: secrets ? secrets.has('ai_key:openai') : false
     }
-  } catch {
-    // not running
   }
-
-  // Check LM Studio
-  try {
-    const res = await fetch(`${settings.lmStudioUrl.replace(/\/$/, '')}/v1/models`, {
-      signal: AbortSignal.timeout(1500)
-    })
-    if (res.ok) {
-      const data = (await res.json()) as { data?: { id: string }[] }
-      status.lmStudioRunning = true
-      status.lmStudioModels = (data.data || []).map((m) => m.id)
-    }
-  } catch {
-    // not running
-  }
-
-  // Check Claude CLI
-  try {
-    await execFileAsync('where', ['claude'], { timeout: 1500 })
-    status.claudeCliAvailable = true
-  } catch {
-    // not installed
-  }
-
-  // Check Codex CLI
-  try {
-    await execFileAsync('where', ['codex'], { timeout: 1500 })
-    status.codexCliAvailable = true
-  } catch {
-    // not installed
-  }
-
-  return status
 }
 
 export async function completeAI(
@@ -95,12 +189,23 @@ export async function completeAI(
   const system = `${req.system}${langNote}`
 
   if (settings.provider === 'ollama') {
-    const base = settings.ollamaUrl.replace(/\/$/, '')
+    const base = normalizeOllamaUrl(settings.ollamaUrl)
+    let model = settings.ollamaModel?.trim()
+    if (!model) {
+      const tagsRes = await fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(2000) })
+      if (tagsRes.ok) {
+        const tags = (await tagsRes.json()) as { models?: { name: string }[] }
+        model = tags.models?.[0]?.name || ''
+      }
+    }
+    if (!model) {
+      throw new Error('No Ollama model selected. Open Settings › AI and choose a discovered model.')
+    }
     const res = await fetch(`${base}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: settings.ollamaModel || 'qwen2.5:14b',
+        model,
         stream: false,
         format: req.jsonMode ? 'json' : undefined,
         messages: [
@@ -112,19 +217,31 @@ export async function completeAI(
     })
     if (!res.ok) throw new Error(`Ollama error (${res.status}): ${await res.text()}`)
     const data = (await res.json()) as { message?: { content?: string } }
+    const gpu = await detectGpuName()
     return {
       text: data.message?.content || '',
-      providerLabel: `Ollama (${settings.ollamaModel}) · Local`
+      providerLabel: `Ollama (${model}) · Local${gpu ? ` (${gpu})` : ''}`
     }
   }
 
   if (settings.provider === 'lmstudio') {
-    const base = settings.lmStudioUrl.replace(/\/$/, '')
+    const base = normalizeLmStudioUrl(settings.lmStudioUrl)
+    let model = settings.lmStudioModel?.trim()
+    if (!model) {
+      const modelsRes = await fetch(`${base}/v1/models`, { signal: AbortSignal.timeout(2000) })
+      if (modelsRes.ok) {
+        const modelsData = (await modelsRes.json()) as { data?: { id: string }[] }
+        model = modelsData.data?.[0]?.id || ''
+      }
+    }
+    if (!model) {
+      throw new Error('No LM Studio model loaded. Load a model in LM Studio and select it in Settings › AI.')
+    }
     const res = await fetch(`${base}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: settings.lmStudioModel || 'local-model',
+        model,
         temperature: 0.3,
         max_tokens: req.maxTokens || 1200,
         messages: [
@@ -136,9 +253,10 @@ export async function completeAI(
     })
     if (!res.ok) throw new Error(`LM Studio error (${res.status}): ${await res.text()}`)
     const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }
+    const gpu = await detectGpuName()
     return {
       text: data.choices?.[0]?.message?.content || '',
-      providerLabel: `LM Studio (${settings.lmStudioModel}) · Local`
+      providerLabel: `LM Studio (${model}) · Local${gpu ? ` (${gpu})` : ''}`
     }
   }
 
