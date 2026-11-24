@@ -9,88 +9,79 @@ export async function syncGoogleCalendar(
   db: GlassmailDB
 ): Promise<{ synced: number }> {
   const calendar = google.calendar({ version: 'v3', auth })
-  const listRes = await calendar.calendarList.list()
-  // Sync only the account's own primary calendar by default so subscribed coworker,
-  // conference-room, or duplicate holiday calendars don't flood the combined view.
-  const allItems = listRes.data.items || []
-  const primaryOnly = allItems.filter((c) => c.primary === true)
-  const calendars = primaryOnly.length > 0 ? primaryOnly : allItems.slice(0, 1)
 
   const timeMin = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString()
   const timeMax = new Date(Date.now() + 90 * 24 * 3600 * 1000).toISOString()
 
   const freshEvents: Omit<import('../../shared/types').CalendarEvent, 'accountColor' | 'accountEmail'>[] = []
 
-  for (const cal of calendars) {
-    if (!cal.id) continue
-    try {
-      const evRes = await calendar.events.list({
-        calendarId: cal.id,
-        timeMin,
-        timeMax,
-        singleEvents: true,
-        orderBy: 'startTime',
-        maxResults: 250
-      })
+  // Sync strictly the account's own 'primary' calendar by default so subscribed coworker,
+  // conference-room, or duplicate holiday calendars never pollute the user's schedule.
+  const evRes = await calendar.events.list({
+    calendarId: 'primary',
+    timeMin,
+    timeMax,
+    singleEvents: true,
+    orderBy: 'startTime',
+    maxResults: 250
+  })
 
-      for (const item of evRes.data.items || []) {
-        if (!item.id) continue
-        if (item.status === 'cancelled') continue
-        // Skip Google Calendar "Working Location" (Home/Office) blocks that clutter multi-account views
-        if (item.eventType === 'workingLocation') continue
+  const calSummary = evRes.data.summary || account.name || account.email
 
-        const allDay = Boolean(item.start?.date && !item.start?.dateTime)
-        const startAt = item.start?.dateTime
-          ? new Date(item.start.dateTime).getTime()
-          : item.start?.date
-            ? new Date(`${item.start.date}T00:00:00`).getTime()
-            : Date.now()
-        // Google Calendar's all-day end.date is EXCLUSIVE (e.g. Nov 26 event has end.date = Nov 27).
-        // Using T00:00:00 ensures 1-day all-day events stay strictly on their own day.
-        const endAt = item.end?.dateTime
-          ? new Date(item.end.dateTime).getTime()
-          : item.end?.date
-            ? Math.max(new Date(`${item.end.date}T00:00:00`).getTime(), startAt + 3600_000)
-            : startAt + 3600_000
+  for (const item of evRes.data.items || []) {
+    if (!item.id) continue
+    if (item.status === 'cancelled') continue
+    // Skip Google Calendar "Working Location" (Home/Office) blocks that clutter multi-account views
+    if (item.eventType === 'workingLocation') continue
 
-        const meetingUrl =
-          item.hangoutLink ||
-          item.conferenceData?.entryPoints?.find((e) => e.entryPointType === 'video')?.uri ||
-          undefined
+    const allDay = Boolean(item.start?.date && !item.start?.dateTime)
+    const startAt = item.start?.dateTime
+      ? new Date(item.start.dateTime).getTime()
+      : item.start?.date
+        ? new Date(`${item.start.date}T00:00:00`).getTime()
+        : Date.now()
+    // Google Calendar's all-day end.date is EXCLUSIVE (e.g. Nov 26 event has end.date = Nov 27).
+    // Using T00:00:00 ensures 1-day all-day events stay strictly on their own day.
+    const endAt = item.end?.dateTime
+      ? new Date(item.end.dateTime).getTime()
+      : item.end?.date
+        ? Math.max(new Date(`${item.end.date}T00:00:00`).getTime(), startAt + 3600_000)
+        : startAt + 3600_000
 
-        freshEvents.push({
-          id: `${account.id}|gcal|${cal.id}|${item.id}`,
-          accountId: account.id,
-          calendarId: cal.id,
-          calendarName: cal.summary || 'Calendar',
-          remoteId: item.id,
-          title: item.summary || '(No title)',
-          description: item.description || '',
-          location: item.location || '',
-          meetingUrl,
-          startAt,
-          endAt,
-          allDay,
-          attendees: (item.attendees || []).map((a) => ({
-            name: a.displayName || undefined,
-            email: a.email || '',
-            status: a.responseStatus || undefined
-          })),
-          attachments: (item.attachments || [])
-            .filter((att) => Boolean(att.fileUrl))
-            .map((att) => ({
-              title: att.title || 'Attachment',
-              fileUrl: att.fileUrl!,
-              mimeType: att.mimeType || undefined
-            })),
-          status: (item.status as 'confirmed' | 'tentative' | 'cancelled') || 'confirmed',
-          source: 'google',
-          readOnly: cal.accessRole === 'reader' || cal.accessRole === 'freeBusyReader'
-        })
-      }
-    } catch {
-      // Skip individual inaccessible sub-calendars cleanly
-    }
+    const meetingUrl =
+      item.hangoutLink ||
+      item.conferenceData?.entryPoints?.find((e) => e.entryPointType === 'video')?.uri ||
+      undefined
+
+    freshEvents.push({
+      id: `${account.id}|gcal|primary|${item.id}`,
+      accountId: account.id,
+      calendarId: 'primary',
+      calendarName: calSummary,
+      remoteId: item.id,
+      title: item.summary || '(No title)',
+      description: item.description || '',
+      location: item.location || '',
+      meetingUrl,
+      startAt,
+      endAt,
+      allDay,
+      attendees: (item.attendees || []).map((a) => ({
+        name: a.displayName || undefined,
+        email: a.email || '',
+        status: a.responseStatus || undefined
+      })),
+      attachments: (item.attachments || [])
+        .filter((att) => Boolean(att.fileUrl))
+        .map((att) => ({
+          title: att.title || 'Attachment',
+          fileUrl: att.fileUrl!,
+          mimeType: att.mimeType || undefined
+        })),
+      status: (item.status as 'confirmed' | 'tentative' | 'cancelled') || 'confirmed',
+      source: 'google',
+      readOnly: false
+    })
   }
 
   db.deleteCalendarEventsBySource(account.id, 'google')
