@@ -56,6 +56,7 @@ interface AppState {
   threads: ThreadSummary[]
   selectedThreadId: string | null
   selectedThread: ThreadDetail | null
+  lastSelectedThreadByAccount: Record<string, string>
   checkedThreadIds: string[]
   searchQuery: string
   parsedSearch: ParsedSearchQuery | null
@@ -138,6 +139,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   threads: [],
   selectedThreadId: null,
   selectedThread: null,
+  lastSelectedThreadByAccount: {},
   checkedThreadIds: [],
   searchQuery: '',
   parsedSearch: null,
@@ -242,7 +244,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     set({ selectedThreadId: threadId })
     const detail = await window.glassmail.getThread(threadId)
-    set({ selectedThread: detail })
+    set((s) => ({
+      selectedThread: detail,
+      lastSelectedThreadByAccount: detail
+        ? { ...s.lastSelectedThreadByAccount, [detail.accountId]: threadId }
+        : s.lastSelectedThreadByAccount
+    }))
     if (detail && !detail.isRead) {
       await window.glassmail.setRead([threadId], true)
       await get().refreshAll()
@@ -288,19 +295,48 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   // ---- Multi-Account Focus Toggles ----
   selectAllAccounts: async () => {
-    set({ activeAccountIds: [], activeWorkspaceId: 'ws-all', activeFolderName: null })
+    set({
+      activeAccountIds: [],
+      activeWorkspaceId: 'ws-all',
+      activeFolderName: null,
+      selectedThreadId: null,
+      selectedThread: null
+    })
     await get().refreshAll()
   },
 
   soloAccount: async (accountId) => {
     const current = get().activeAccountIds
-    // If already soloed on this account, clicking again returns to All Accounts
+    const wasOnHome = !get().selectedThreadId
+    // If already soloed on this account, clicking again returns to All Accounts (Inbox Home)
     if (current.length === 1 && current[0] === accountId) {
       await get().selectAllAccounts()
       return
     }
-    set({ activeAccountIds: [accountId], activeWorkspaceId: null, activeFolderName: null })
+    set({
+      activeAccountIds: [accountId],
+      activeWorkspaceId: null,
+      activeFolderName: null,
+      selectedThreadId: null,
+      selectedThread: null
+    })
     await get().refreshAll()
+
+    // If Inbox Home was already open, keep Inbox Home open for the new account
+    if (wasOnHome) return
+
+    const behavior = get().settings?.accountSwitchBehavior || 'home'
+    if (behavior === 'last-email') {
+      const lastId = get().lastSelectedThreadByAccount[accountId]
+      if (lastId && get().threads.some((t) => t.id === lastId)) {
+        await get().selectThread(lastId)
+      }
+    } else if (behavior === 'first-email') {
+      const first = get().threads[0]
+      if (first) {
+        await get().selectThread(first.id)
+      }
+    }
   },
 
   toggleAccountFilter: async (accountId) => {

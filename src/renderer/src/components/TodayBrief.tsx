@@ -8,6 +8,7 @@ export const TodayBrief: React.FC = () => {
   const {
     settings,
     accounts,
+    activeAccountIds,
     counts,
     threads,
     todayEvents,
@@ -34,6 +35,9 @@ export const TodayBrief: React.FC = () => {
   const firstAccountName = accounts.find((a) => !a.isDemo)?.name?.trim().split(/\s+/)[0]
   const headingGreeting = firstAccountName ? `${greeting}, ${firstAccountName}` : greeting
 
+  const focusedAccounts =
+    activeAccountIds.length > 0 ? accounts.filter((a) => activeAccountIds.includes(a.id)) : []
+
   return (
     <div
       ref={zoomRef}
@@ -41,8 +45,20 @@ export const TodayBrief: React.FC = () => {
     >
       {zoomBadge}
       <div className="mx-auto w-full" style={{ maxWidth: briefMaxWidth, zoom }}>
-        <div className="text-[11px] font-semibold tracking-wider" style={{ color: 'var(--text-muted)' }}>
-          {dateLabel}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="text-[11px] font-semibold tracking-wider" style={{ color: 'var(--text-muted)' }}>
+            {dateLabel}
+          </div>
+          {focusedAccounts.map((acc) => (
+            <span
+              key={acc.id}
+              className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium"
+              style={{ background: 'var(--bg-elevated)', color: 'var(--text-secondary)' }}
+            >
+              <span className="h-2 w-2 rounded-full" style={{ background: acc.color }} />
+              {acc.name}
+            </span>
+          ))}
         </div>
         <h1 className="mt-1.5 text-[28px] font-semibold tracking-tight">{headingGreeting}</h1>
         <p className="mt-1.5 text-[14px]" style={{ color: 'var(--text-secondary)' }}>

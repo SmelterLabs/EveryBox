@@ -24,6 +24,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   lightTheme: 'light',
   darkTheme: 'dark',
   readerWidth: 'comfortable',
+  accountSwitchBehavior: 'home',
   accountOrder: [],
   defaultReplyAll: false,
   undoSendSeconds: 5,
