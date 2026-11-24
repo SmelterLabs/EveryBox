@@ -911,9 +911,9 @@ export const SettingsModal: React.FC = () => {
                   <div className="grid grid-cols-3 gap-2">
                     {(
                       [
-                        { id: 'narrow', label: 'Narrow', desc: 'Focused column (680px)' },
-                        { id: 'comfortable', label: 'Comfortable', desc: 'Balanced width (860px)' },
-                        { id: 'wide', label: 'Wide', desc: 'Fill available screen' }
+                        { id: 'narrow', label: 'Narrow', desc: 'Focused column (640px)' },
+                        { id: 'comfortable', label: 'Comfortable', desc: 'Balanced & slightly larger' },
+                        { id: 'wide', label: 'Wide', desc: 'Full width & larger centered view' }
                       ] as { id: ReaderWidth; label: string; desc: string }[]
                     ).map((opt) => {
                       const active = (draft.readerWidth || 'comfortable') === opt.id
