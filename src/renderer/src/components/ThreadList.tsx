@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { Archive, ArrowDown, ArrowUp, Check, Copy, Paperclip, Star, Trash2, X } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
+import { usePaneZoom } from '../hooks/usePaneZoom'
 import type { InboxCategory, ThreadSummary } from '../../../shared/types'
 
 type SortField = 'date' | 'sender' | 'subject' | 'unread' | 'starred' | 'account'
@@ -57,6 +58,7 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
   } = useAppStore()
 
   const mailboxTitle = activeFolderName || activeMailbox.charAt(0).toUpperCase() + activeMailbox.slice(1)
+  const { ref: zoomRef, zoom, zoomBadge } = usePaneZoom<HTMLElement>('list')
 
   const [sortField, setSortField] = useState<SortField>(() => {
     const saved = localStorage.getItem('everybox:sortField') as SortField | null
@@ -151,9 +153,12 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
 
   return (
     <section
-      className="flex h-full shrink-0 flex-col border-r"
+      ref={zoomRef}
+      className="relative flex h-full shrink-0 flex-col border-r"
       style={{ width, background: 'var(--bg-list)', borderColor: 'var(--border-subtle)' }}
     >
+      {zoomBadge}
+      <div className="flex min-h-0 flex-1 flex-col" style={{ zoom }}>
       {/* Header */}
       <div className="border-b px-3.5 pb-2.5 pt-3" style={{ borderColor: 'var(--border-subtle)' }}>
         <div className="flex items-center justify-between gap-2">
@@ -534,6 +539,7 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
           )}
         </div>
       )}
+      </div>
     </section>
   )
 }

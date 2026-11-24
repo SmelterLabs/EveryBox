@@ -1,12 +1,19 @@
 import React from 'react'
 import { Archive, ExternalLink, Newspaper } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
+import { usePaneZoom } from '../hooks/usePaneZoom'
 
 export const SubscriptionsView: React.FC = () => {
   const { subscriptions, archiveThreads, showToast } = useAppStore()
+  const { ref: zoomRef, zoom, zoomBadge } = usePaneZoom<HTMLDivElement>('subscriptions')
 
   return (
-    <div className="flex h-full flex-1 flex-col overflow-hidden" style={{ background: 'var(--bg-main)' }}>
+    <div
+      ref={zoomRef}
+      className="relative flex h-full flex-1 flex-col overflow-hidden"
+      style={{ background: 'var(--bg-main)' }}
+    >
+      {zoomBadge}
       <div className="border-b px-8 py-4" style={{ borderColor: 'var(--border-subtle)' }}>
         <h2 className="text-[16px] font-semibold">Subscriptions</h2>
         <p className="text-[12.5px]" style={{ color: 'var(--text-muted)' }}>
@@ -15,7 +22,7 @@ export const SubscriptionsView: React.FC = () => {
       </div>
 
       <div className="flex-1 overflow-y-auto px-8 py-6">
-        <div className="mx-auto max-w-[740px] space-y-2.5">
+        <div className="mx-auto max-w-[740px] space-y-2.5" style={{ zoom }}>
           {subscriptions.length === 0 ? (
             <div className="mt-16 text-center">
               <Newspaper size={32} className="mx-auto" style={{ color: 'var(--text-muted)' }} />

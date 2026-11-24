@@ -1,6 +1,8 @@
 import React from 'react'
 import { Calendar, Copy, Inbox, Sparkles, Video } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
+import { usePaneZoom } from '../hooks/usePaneZoom'
+import { modKeyPrefix } from '../utils/platform'
 
 export const TodayBrief: React.FC = () => {
   const {
@@ -18,6 +20,7 @@ export const TodayBrief: React.FC = () => {
   const readerWidthMode = settings?.readerWidth || 'comfortable'
   const briefMaxWidth =
     readerWidthMode === 'narrow' ? '600px' : readerWidthMode === 'wide' ? 'none' : '820px'
+  const { ref: zoomRef, zoom, zoomBadge } = usePaneZoom<HTMLDivElement>('reader')
 
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
@@ -32,8 +35,12 @@ export const TodayBrief: React.FC = () => {
   const headingGreeting = firstAccountName ? `${greeting}, ${firstAccountName}` : greeting
 
   return (
-    <div className={`flex h-full flex-1 flex-col overflow-y-auto py-10 ${readerWidthMode === 'wide' ? 'px-8' : 'px-12'}`}>
-      <div className="mx-auto w-full" style={{ maxWidth: briefMaxWidth }}>
+    <div
+      ref={zoomRef}
+      className={`relative flex h-full flex-1 flex-col overflow-y-auto py-10 ${readerWidthMode === 'wide' ? 'px-8' : 'px-12'}`}
+    >
+      {zoomBadge}
+      <div className="mx-auto w-full" style={{ maxWidth: briefMaxWidth, zoom }}>
         <div className="text-[11px] font-semibold tracking-wider" style={{ color: 'var(--text-muted)' }}>
           {dateLabel}
         </div>
@@ -240,7 +247,7 @@ export const TodayBrief: React.FC = () => {
           </span>
           <span>
             <kbd className="rounded border px-1.5 py-0.5 text-[10.5px]" style={{ borderColor: 'var(--border-strong)' }}>
-              Ctrl+K
+              {modKeyPrefix}K
             </kbd>{' '}
             Commands
           </span>
