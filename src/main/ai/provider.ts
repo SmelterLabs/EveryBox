@@ -218,6 +218,84 @@ async function probeOpenAiCompatibleServer(
   }
 }
 
+function readClaudeCliTierVersions(): { sonnet: string | null; haiku: string | null; opus: string | null } {
+  const result: { sonnet: string | null; haiku: string | null; opus: string | null } = {
+    sonnet: null,
+    haiku: null,
+    opus: null
+  }
+  try {
+    const claudeJsonPath = join(homedir(), '.claude.json')
+    if (!existsSync(claudeJsonPath)) return result
+    const raw = readFileSync(claudeJsonPath, 'utf8')
+    const best: Record<'sonnet' | 'haiku' | 'opus', [number, number] | null> = {
+      sonnet: null,
+      haiku: null,
+      opus: null
+    }
+    const regex = /claude-(sonnet|haiku|opus)-(\d+)-(\d+)/gi
+    let m: RegExpExecArray | null
+    while ((m = regex.exec(raw)) !== null) {
+      const tier = m[1].toLowerCase() as 'sonnet' | 'haiku' | 'opus'
+      const maj = Number(m[2])
+      const min = Number(m[3])
+      const prev = best[tier]
+      if (!prev || maj > prev[0] || (maj === prev[0] && min > prev[1])) {
+        best[tier] = [maj, min]
+      }
+    }
+    for (const tier of ['sonnet', 'haiku', 'opus'] as const) {
+      if (best[tier]) result[tier] = `${best[tier]![0]}.${best[tier]![1]}`
+    }
+  } catch {
+    // ignore
+  }
+  return result
+}
+
+async function fetchAntigravityCliModels(): Promise<DiscoveredModel[]> {
+  try {
+    const { stdout } = await execFileAsync('agy', ['models'], {
+      timeout: 4500,
+      windowsHide: true,
+      shell: process.platform === 'win32'
+    })
+    const out: DiscoveredModel[] = []
+    const seen = new Set<string>()
+    for (const line of stdout.split(/\r?\n/)) {
+      const trimmed = line.trim()
+      if (!trimmed || !trimmed.includes('\t')) continue
+      const [idRaw, labelRaw] = trimmed.split('\t')
+      const id = idRaw?.trim()
+      if (!id || seen.has(id)) continue
+      seen.add(id)
+      out.push({ id, label: labelRaw?.trim() || id })
+    }
+    return out
+  } catch {
+    return []
+  }
+}
+
+async function fetchGrokModels(apiKey: string | null): Promise<DiscoveredModel[]> {
+  if (!apiKey) return []
+  try {
+    const res = await fetch('https://api.x.ai/v1/models', {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(2500)
+    })
+    if (!res.ok) return []
+    const data = (await res.json()) as { data?: { id: string; created?: number }[] }
+    return (data.data || [])
+      .filter((m) => !/image|imagine|embed|tts|audio/i.test(m.id))
+      .sort((a, b) => (b.created || 0) - (a.created || 0))
+      .slice(0, 30)
+      .map((m) => ({ id: m.id }))
+  } catch {
+    return []
+  }
+}
+
 function readCodexCliModels(): DiscoveredModel[] {
   try {
     const cachePath = join(homedir(), '.codex', 'models_cache.json')
@@ -308,6 +386,7 @@ export async function detectLocalAI(
   const anthropicKey = secrets?.get('ai_key:anthropic') ?? null
   const geminiKey = secrets?.get('ai_key:gemini') ?? null
   const openaiKey = secrets?.get('ai_key:openai') ?? null
+  const grokKey = secrets?.get('ai_key:grok') ?? null
 
   const [
     gpuName,
@@ -318,9 +397,11 @@ export async function detectLocalAI(
     lmStudioInstalledLocal,
     claudeCliAvailable,
     codexCliAvailable,
+    antigravityCliAvailable,
     anthropicModels,
     geminiModels,
-    openaiModels
+    openaiModels,
+    grokModels
   ] = await Promise.all([
     detectGpuName(),
     probeOpenAiCompatibleServer(localServerOverride),
@@ -360,12 +441,18 @@ export async function detectLocalAI(
     isLmStudioInstalledLocally(),
     hasExecutableOnPath('claude'),
     hasExecutableOnPath('codex'),
+    hasExecutableOnPath('agy'),
     fetchAnthropicModels(anthropicKey),
     fetchGeminiModels(geminiKey),
-    fetchOpenAiModels(openaiKey)
+    fetchOpenAiModels(openaiKey),
+    fetchGrokModels(grokKey)
   ])
 
+  const claudeCliTierVersions = claudeCliAvailable
+    ? readClaudeCliTierVersions()
+    : { sonnet: null, haiku: null, opus: null }
   const codexCliModels = codexCliAvailable ? readCodexCliModels() : []
+  const antigravityCliModels = antigravityCliAvailable ? await fetchAntigravityCliModels() : []
 
   return {
     gpuName,
@@ -382,17 +469,22 @@ export async function detectLocalAI(
     lmStudioUrlUsed,
     lmStudioModels: lmStudioCheck.models,
     claudeCliAvailable,
+    claudeCliTierVersions,
     codexCliAvailable,
     codexCliModels,
+    antigravityCliAvailable,
+    antigravityCliModels,
     apiKeysConfigured: {
       anthropic: Boolean(anthropicKey),
       gemini: Boolean(geminiKey),
-      openai: Boolean(openaiKey)
+      openai: Boolean(openaiKey),
+      grok: Boolean(grokKey)
     },
     cloudModels: {
       anthropic: anthropicModels,
       gemini: geminiModels,
-      openai: openaiModels
+      openai: openaiModels,
+      grok: grokModels
     }
   }
 }
@@ -532,6 +624,48 @@ export async function completeAI(
     return {
       text: stripThinkingTags(stdout),
       providerLabel: `Codex CLI${model !== 'default' ? ` (${model})` : ''} · Subscription`
+    }
+  }
+
+  if (settings.provider === 'antigravity-cli') {
+    const fullPrompt = `${system}\n\n---\n\n${req.prompt}`
+    const model = settings.antigravityCliModel?.trim() || 'default'
+    const args =
+      model && model !== 'default'
+        ? ['-p', '--disable-slash-commands', '--model', model]
+        : ['-p', '--disable-slash-commands']
+    const stdout = await spawnWithStdin('agy', args, fullPrompt, 90_000)
+    return {
+      text: stripThinkingTags(stdout),
+      providerLabel: `Antigravity CLI${model !== 'default' ? ` (${model})` : ''} · Subscription`
+    }
+  }
+
+  if (settings.provider === 'grok') {
+    const key = secrets.get('ai_key:grok')
+    if (!key) throw new Error('Grok (xAI) API key not set in Settings › AI Providers.')
+    const model = settings.grokModel || 'grok-3-mini'
+    const res = await fetch('https://api.x.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${key}`
+      },
+      body: JSON.stringify({
+        model,
+        response_format: req.jsonMode ? { type: 'json_object' } : undefined,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: req.prompt }
+        ]
+      }),
+      signal: AbortSignal.timeout(60_000)
+    })
+    if (!res.ok) throw new Error(`Grok (xAI) API error (${res.status}): ${await res.text()}`)
+    const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }
+    return {
+      text: data.choices?.[0]?.message?.content || '',
+      providerLabel: `Grok (${model})`
     }
   }
 
