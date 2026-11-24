@@ -47,9 +47,11 @@ export type AIProviderType =
   | 'lmstudio'
   | 'claude-cli'
   | 'codex-cli'
+  | 'antigravity-cli'
   | 'anthropic'
   | 'gemini'
   | 'openai'
+  | 'grok'
 
 export interface Account {
   id: string
@@ -246,9 +248,11 @@ export interface AISettings {
   lmStudioModel: string
   claudeCliModel?: string
   codexCliModel?: string
+  antigravityCliModel?: string
   anthropicModel: string
   geminiModel: string
   openaiModel: string
+  grokModel?: string
   responseLanguage: 'auto' | string
 }
 
@@ -274,17 +278,26 @@ export interface LocalAIStatus {
   lmStudioUrlUsed: string
   lmStudioModels: DiscoveredModel[]
   claudeCliAvailable: boolean
+  claudeCliTierVersions: {
+    sonnet: string | null
+    haiku: string | null
+    opus: string | null
+  }
   codexCliAvailable: boolean
   codexCliModels: DiscoveredModel[]
+  antigravityCliAvailable: boolean
+  antigravityCliModels: DiscoveredModel[]
   apiKeysConfigured: {
     anthropic: boolean
     gemini: boolean
     openai: boolean
+    grok: boolean
   }
   cloudModels: {
     anthropic: DiscoveredModel[]
     gemini: DiscoveredModel[]
     openai: DiscoveredModel[]
+    grok: DiscoveredModel[]
   }
 }
 
