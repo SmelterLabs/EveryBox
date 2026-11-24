@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react'
-import { Archive, ArrowDown, ArrowUp, Check, Copy, Paperclip, Star, Trash2, X } from 'lucide-react'
+import { Archive, ArrowDown, ArrowUp, Check, Copy, Paperclip, Search, Star, Trash2, X } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { usePaneZoom } from '../hooks/usePaneZoom'
 import type { InboxCategory, ThreadSummary } from '../../../shared/types'
@@ -59,6 +59,7 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
 
   const mailboxTitle = activeFolderName || activeMailbox.charAt(0).toUpperCase() + activeMailbox.slice(1)
   const { ref: zoomRef, zoom, zoomBadge } = usePaneZoom<HTMLElement>('list')
+  const [inboxFilter, setInboxFilter] = useState('')
 
   const [sortField, setSortField] = useState<SortField>(() => {
     const saved = localStorage.getItem('everybox:sortField') as SortField | null
@@ -84,7 +85,13 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
   }
 
   const sortedThreads = useMemo(() => {
-    const copy = [...threads]
+    const q = inboxFilter.trim().toLowerCase()
+    const copy = q
+      ? threads.filter((t) => {
+          const hay = `${t.latestFrom.name} ${t.latestFrom.email} ${t.subject} ${t.snippet} ${t.accountEmail}`.toLowerCase()
+          return hay.includes(q)
+        })
+      : [...threads]
     const mult = sortDir === 'asc' ? 1 : -1
     copy.sort((a, b) => {
       let cmp = 0
@@ -109,7 +116,7 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
       return b.lastMessageAt - a.lastMessageAt
     })
     return copy
-  }, [threads, sortField, sortDir])
+  }, [threads, inboxFilter, sortField, sortDir])
 
   const grouped = useMemo(() => {
     if (sortField !== 'date') {
@@ -185,6 +192,37 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
             </button>
           )}
         </div>
+
+        {/* Scoped Inbox Search Bar */}
+        {activeMailbox !== 'scheduled' && (
+          <div
+            className="mt-2.5 flex items-center gap-2 rounded-lg border px-2.5 py-1.5"
+            style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
+          >
+            <Search size={13} style={{ color: 'var(--text-muted)' }} className="shrink-0" />
+            <input
+              value={inboxFilter}
+              onChange={(e) => setInboxFilter(e.target.value)}
+              placeholder={
+                activeAccountIds.length === 1
+                  ? `Search ${accounts.find((a) => a.id === activeAccountIds[0])?.name || 'this'} ${mailboxTitle.toLowerCase()}…`
+                  : `Search this ${mailboxTitle.toLowerCase()}…`
+              }
+              className="min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-[var(--text-muted)]"
+            />
+            {inboxFilter && (
+              <button
+                type="button"
+                onClick={() => setInboxFilter('')}
+                className="rounded p-0.5 hover:bg-[var(--bg-hover)]"
+                style={{ color: 'var(--text-muted)' }}
+                title="Clear inbox search"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Active Account Focus Strip */}
         {activeAccountIds.length > 0 && (
@@ -368,7 +406,7 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
       ) : (
         /* Normal Thread List */
         <div className="flex-1 overflow-y-auto px-2 py-2">
-          {threads.length === 0 ? (
+          {sortedThreads.length === 0 ? (
             <div className="mt-16 px-6 text-center">
               <p className="text-[13px] font-medium" style={{ color: 'var(--text-secondary)' }}>
                 All clear here
