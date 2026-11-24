@@ -4,6 +4,8 @@ export type ThemeId = 'light' | 'paper' | 'dark' | 'black' | 'graphite'
 
 export type ReaderWidth = 'narrow' | 'comfortable' | 'wide'
 
+export type AccountSwitchBehavior = 'home' | 'last-email' | 'first-email'
+
 export type MailboxId =
   | 'inbox'
   | 'starred'
@@ -265,6 +267,7 @@ export interface AppSettings {
   lightTheme: ThemeId
   darkTheme: ThemeId
   readerWidth?: ReaderWidth
+  accountSwitchBehavior?: AccountSwitchBehavior
   accountOrder?: string[]
   defaultReplyAll: boolean
   undoSendSeconds: number

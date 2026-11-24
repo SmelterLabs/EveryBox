@@ -5,6 +5,7 @@ import {
   Calendar,
   Clock,
   Forward,
+  Home,
   Paperclip,
   Reply,
   ReplyAll,
@@ -21,6 +22,7 @@ export const ThreadReader: React.FC = () => {
   const {
     settings,
     selectedThread,
+    selectThread,
     archiveThreads,
     trashThreads,
     snoozeThreads,
@@ -107,6 +109,14 @@ export const ThreadReader: React.FC = () => {
         style={{ borderColor: 'var(--border-subtle)' }}
       >
         <div className="flex items-center gap-1">
+          <button
+            onClick={() => void selectThread(null)}
+            className="rounded-lg p-1.5 transition hover:bg-[var(--bg-hover)]"
+            title="Back to Inbox Home (Today Brief)"
+          >
+            <Home size={15} />
+          </button>
+          <div className="mx-1 h-4 w-px" style={{ background: 'var(--border-subtle)' }} />
           <button
             onClick={() => handleReply('reply')}
             className="rounded-lg p-1.5 transition hover:bg-[var(--bg-hover)]"
