@@ -915,16 +915,18 @@ export const SettingsModal: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Codex CLI Model Picker */}
+                  {/* Codex CLI Model Picker (live from Codex CLI's local model catalog) */}
                   {draft.ai.provider === 'codex-cli' && localAI?.codexCliAvailable && (
                     <div
                       className="space-y-2 rounded-xl border p-4"
                       style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
                     >
                       <div className="flex items-center justify-between">
-                        <label className="text-[12.5px] font-semibold">Codex CLI Model</label>
+                        <label className="text-[12.5px] font-semibold">Codex CLI Model (Discovered)</label>
                         <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                          Choose which model Codex CLI uses
+                          {localAI.codexCliModels.length > 0
+                            ? `${localAI.codexCliModels.length} live models from Codex CLI`
+                            : 'Auto-tracks Codex CLI default'}
                         </span>
                       </div>
                       <select
@@ -938,10 +940,12 @@ export const SettingsModal: React.FC = () => {
                         className="w-full rounded-lg border px-3 py-2 text-[13px] outline-none"
                         style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
                       >
-                        <option value="default">CLI Default (Recommended)</option>
-                        <option value="gpt-5.4-mini">GPT-5.4 Mini — Fast &amp; lightweight</option>
-                        <option value="gpt-5.4">GPT-5.4 — Balanced</option>
-                        <option value="o4-mini">o4-mini — Reasoning</option>
+                        <option value="default">CLI Default (auto-updates with Codex CLI)</option>
+                        {localAI.codexCliModels.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.label && m.label !== m.id ? `${m.label} (${m.id})` : m.id}
+                          </option>
+                        ))}
                       </select>
                     </div>
                   )}
@@ -1041,39 +1045,93 @@ export const SettingsModal: React.FC = () => {
                     </div>
                   </div>
 
-                  {['anthropic', 'gemini', 'openai'].includes(draft.ai.provider) && (
-                    <div className="space-y-2">
-                      <label className="block text-[12px]" style={{ color: 'var(--text-muted)' }}>
-                        API Key (stored encrypted in Windows DPAPI)
-                      </label>
-                      <div className="flex gap-2">
-                        <input
-                          type="password"
-                          placeholder={`Paste ${draft.ai.provider} API key…`}
-                          value={apiKeyInput}
-                          onChange={(e) => setApiKeyInput(e.target.value)}
-                          className="flex-1 rounded-lg border bg-transparent px-3 py-2 text-[13px] outline-none"
-                          style={{ borderColor: 'var(--border-strong)' }}
-                        />
-                        <button
-                          onClick={async () => {
-                            if (!apiKeyInput.trim()) return
-                            await window.glassmail.setSecret(`ai_key:${draft.ai.provider}`, apiKeyInput.trim())
-                            setApiKeyInput('')
-                            showToast(`Saved ${draft.ai.provider} key securely`)
-                            void runLocalAIDetection({
-                              ollamaUrl: draft.ai.ollamaUrl,
-                              lmStudioUrl: draft.ai.lmStudioUrl
-                            })
-                          }}
-                          className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-[12.5px] font-semibold text-white"
-                          style={{ background: 'var(--accent)' }}
-                        >
-                          <Key size={13} /> Save Key
-                        </button>
+                  {['anthropic', 'gemini', 'openai'].includes(draft.ai.provider) && (() => {
+                    const cloudKey = draft.ai.provider as 'anthropic' | 'gemini' | 'openai'
+                    const discoveredCloud = localAI?.cloudModels?.[cloudKey] || []
+                    const currentCloudModel =
+                      cloudKey === 'anthropic'
+                        ? draft.ai.anthropicModel
+                        : cloudKey === 'gemini'
+                          ? draft.ai.geminiModel
+                          : draft.ai.openaiModel
+                    return (
+                      <div className="space-y-3">
+                        <div className="space-y-2">
+                          <label className="block text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                            API Key (stored encrypted in Windows DPAPI)
+                          </label>
+                          <div className="flex gap-2">
+                            <input
+                              type="password"
+                              placeholder={`Paste ${draft.ai.provider} API key…`}
+                              value={apiKeyInput}
+                              onChange={(e) => setApiKeyInput(e.target.value)}
+                              className="flex-1 rounded-lg border bg-transparent px-3 py-2 text-[13px] outline-none"
+                              style={{ borderColor: 'var(--border-strong)' }}
+                            />
+                            <button
+                              onClick={async () => {
+                                if (!apiKeyInput.trim()) return
+                                await window.glassmail.setSecret(`ai_key:${draft.ai.provider}`, apiKeyInput.trim())
+                                setApiKeyInput('')
+                                showToast(`Saved ${draft.ai.provider} key securely`)
+                                void runLocalAIDetection({
+                                  localOpenAiUrl: draft.ai.localOpenAiUrl,
+                                  ollamaUrl: draft.ai.ollamaUrl,
+                                  lmStudioUrl: draft.ai.lmStudioUrl
+                                })
+                              }}
+                              className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-[12.5px] font-semibold text-white"
+                              style={{ background: 'var(--accent)' }}
+                            >
+                              <Key size={13} /> Save Key
+                            </button>
+                          </div>
+                        </div>
+
+                        {discoveredCloud.length > 0 && (
+                          <div
+                            className="space-y-2 rounded-xl border p-4"
+                            style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
+                          >
+                            <div className="flex items-center justify-between">
+                              <label className="text-[12.5px] font-semibold capitalize">
+                                {cloudKey} Model (Live from API)
+                              </label>
+                              <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                                {discoveredCloud.length} models available
+                              </span>
+                            </div>
+                            <select
+                              value={
+                                discoveredCloud.some((m) => m.id === currentCloudModel)
+                                  ? currentCloudModel
+                                  : discoveredCloud[0].id
+                              }
+                              onChange={(e) => {
+                                const val = e.target.value
+                                const patch =
+                                  cloudKey === 'anthropic'
+                                    ? { anthropicModel: val }
+                                    : cloudKey === 'gemini'
+                                      ? { geminiModel: val }
+                                      : { openaiModel: val }
+                                void updateAndSave({ ...draft, ai: { ...draft.ai, ...patch } })
+                              }}
+                              className="w-full rounded-lg border px-3 py-2 text-[13px] outline-none"
+                              style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
+                            >
+                              {discoveredCloud.map((m) => (
+                                <option key={m.id} value={m.id}>
+                                  {m.label && m.label !== m.id ? `${m.label} (${m.id})` : m.id}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  )}
+                    )
+                  })()}
                 </div>
               )
             })()}
