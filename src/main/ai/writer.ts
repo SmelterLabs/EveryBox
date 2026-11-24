@@ -8,7 +8,7 @@ export async function draftVoiceMatchedReply(opts: {
   instruction: string
   db: GlassmailDB
   secrets: SecretStore
-}): Promise<{ draft: string; providerLabel: string }> {
+}): Promise<{ draft: string; providerLabel: string; error?: string }> {
   const account = opts.db.getAccount(opts.accountId)
   const settings = opts.db.getSettings()
   const sentSamples = opts.db.getRecentSentBodies(opts.accountId, 8)
@@ -40,7 +40,8 @@ export async function draftVoiceMatchedReply(opts: {
   try {
     const res = await completeAI(
       {
-        system: `You are Glassmail's voice-matched email writer.
+        maxTokens: 2048,
+        system: `You are EveryBox's voice-matched email writer.
 ${styleBlock}
 Return ONLY the email body text (no subject line, no markdown fences, no commentary).`,
         prompt: `User's shorthand instruction: "${opts.instruction}"
@@ -55,12 +56,12 @@ ${calendarLines || '(No conflicts listed)'}`
       opts.secrets
     )
     return { draft: res.text.trim(), providerLabel: res.providerLabel }
-  } catch {
-    const recipient = detail?.latestFrom.name?.split(' ')[0] || 'there'
-    const sender = account?.name || ''
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
     return {
-      draft: `Hi ${recipient},\n\n${opts.instruction.charAt(0).toUpperCase() + opts.instruction.slice(1)}.\n\nBest,\n${sender}`,
-      providerLabel: 'Quick Draft Template (Configure Ollama / CLI in Settings › AI)'
+      draft: '',
+      providerLabel: `AI Error (${settings.ai.provider})`,
+      error: msg
     }
   }
 }

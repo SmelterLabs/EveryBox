@@ -179,9 +179,14 @@ export const Composer: React.FC = () => {
         threadId: composer.replyToThreadId,
         instruction: aiPrompt.trim()
       })
-      setBody(res.draft)
-      setAiProviderLabel(res.providerLabel)
-      setAiPrompt('')
+      if (res.error || !res.draft) {
+        setAiProviderLabel(`${res.providerLabel}: ${res.error || 'No draft returned'}`)
+        showToast(res.error || 'AI draft failed — check Settings › AI Providers', undefined, 7000)
+      } else {
+        setBody(res.draft)
+        setAiProviderLabel(res.providerLabel)
+        setAiPrompt('')
+      }
     } finally {
       setAiLoading(false)
     }
