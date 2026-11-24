@@ -27,6 +27,8 @@ import {
   X
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
+import { usePaneZoom } from '../hooks/usePaneZoom'
+import { modKeyPrefix } from '../utils/platform'
 import type { Account, MailboxId } from '../../../shared/types'
 
 const COLOR_SWATCHES = [
@@ -69,6 +71,7 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
   } = useAppStore()
 
   const [showMore, setShowMore] = useState(false)
+  const { ref: zoomRef, zoom, zoomBadge } = usePaneZoom<HTMLElement>('sidebar')
   const [showFolders, setShowFolders] = useState(true)
   const [showWorkspacesMenu, setShowWorkspacesMenu] = useState(false)
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)
@@ -154,9 +157,11 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
 
   return (
     <aside
-      className="flex h-full shrink-0 flex-col border-r"
+      ref={zoomRef}
+      className="relative flex h-full shrink-0 flex-col border-r"
       style={{ width, background: 'var(--bg-sidebar)', borderColor: 'var(--border-subtle)' }}
     >
+      {zoomBadge}
       {/* Top Drag + Compose Row */}
       <div className="app-drag flex h-10 items-center justify-between px-3 pt-1">
         <div className="app-no-drag relative">
@@ -198,7 +203,7 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
                   </span>
                   {ws.shortcutIndex && (
                     <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                      Ctrl+{ws.shortcutIndex}
+                      {modKeyPrefix}{ws.shortcutIndex}
                     </span>
                   )}
                 </button>
@@ -218,7 +223,7 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
       </div>
 
       {/* Scrollable Nav */}
-      <div className="flex-1 overflow-y-auto px-2 pb-3 pt-2">
+      <div className="flex-1 overflow-y-auto px-2 pb-3 pt-2" style={{ zoom }}>
         {/* Assistant & Combined Calendar */}
         <div className="space-y-0.5">
           <button
@@ -529,7 +534,7 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
           onClick={() => openSettings('accounts')}
           className="rounded-lg p-1.5 transition hover:bg-[var(--bg-hover)]"
           style={{ color: 'var(--text-secondary)' }}
-          title="Settings (Ctrl+,)"
+          title={`Settings (${modKeyPrefix},)`}
         >
           <Settings size={15} />
         </button>
