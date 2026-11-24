@@ -41,6 +41,8 @@ const api = {
   clearDemoAccounts: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('accounts:clear-demo'),
   deleteAccount: (id: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('accounts:delete', id),
   updateAccount: (account: Account): Promise<{ ok: boolean }> => ipcRenderer.invoke('accounts:update', account),
+  reorderAccounts: (accountIds: string[]): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke('accounts:reorder', accountIds),
   connectGmail: (): Promise<{ ok: boolean; accountId?: string; email?: string; error?: string }> =>
     ipcRenderer.invoke('accounts:connect-gmail'),
   addImapAccount: (input: Record<string, unknown>): Promise<{ ok: boolean; accountId?: string; error?: string }> =>
