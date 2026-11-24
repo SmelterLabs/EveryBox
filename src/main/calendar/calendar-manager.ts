@@ -1,9 +1,10 @@
 import type { GlassmailDB } from '../db/database'
 import type { SecretStore } from '../security/secrets'
-import type { CalendarEvent, CreateCalendarEventPayload } from '../../shared/types'
+import type { CalendarEvent, CreateCalendarEventPayload, OutlookCalendarInfo } from '../../shared/types'
 import { getAuthorizedGoogleClient } from '../mail/gmail-oauth'
 import { createGoogleCalendarEvent, deleteGoogleCalendarEvent, syncGoogleCalendar } from './google-calendar'
-import { createCalDavEvent, syncImapAccountCalendars } from './caldav-sync'
+import { createCalDavEvent, exportEventsToIcs, ingestIcsText, syncImapAccountCalendars } from './caldav-sync'
+import { importOutlookCalendar, listOutlookCalendars } from './outlook-import'
 
 export class CalendarManager {
   constructor(
@@ -111,5 +112,40 @@ export class CalendarManager {
       }
     }
     return { ok: true }
+  }
+
+  importIcsText(accountId: string, icsText: string, label?: string): { ok: boolean; imported: number; error?: string } {
+    const account = this.db.getAccount(accountId)
+    if (!account) return { ok: false, imported: 0, error: 'Account not found.' }
+    const imported = ingestIcsText(
+      icsText,
+      account,
+      `ics-import:${label || 'file'}`,
+      label ? `${account.name} · ${label}` : `${account.name} (Imported)`,
+      'local',
+      false,
+      this.db
+    )
+    return { ok: true, imported }
+  }
+
+  exportIcs(accountIds?: string[]): { ics: string; count: number } {
+    const start = Date.now() - 5 * 365 * 24 * 3600 * 1000
+    const end = Date.now() + 5 * 365 * 24 * 3600 * 1000
+    const events = this.db.listCalendarEvents(start, end, accountIds)
+    return { ics: exportEventsToIcs(events), count: events.length }
+  }
+
+  async listOutlookCalendars(): Promise<{ available: boolean; calendars: OutlookCalendarInfo[]; error?: string }> {
+    return listOutlookCalendars()
+  }
+
+  async importOutlookCalendar(
+    accountId: string,
+    folderPath: string
+  ): Promise<{ ok: boolean; imported: number; calendarName?: string; error?: string }> {
+    const account = this.db.getAccount(accountId)
+    if (!account) return { ok: false, imported: 0, error: 'Account not found.' }
+    return importOutlookCalendar(folderPath, account, this.db)
   }
 }

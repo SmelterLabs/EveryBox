@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
-import { ChevronLeft, ChevronRight, MapPin, Plus, RefreshCw, Trash2, Video, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Download, MapPin, Plus, RefreshCw, Trash2, Upload, Video, X } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
-import type { CalendarEvent } from '../../../shared/types'
+import type { CalendarEvent, OutlookCalendarInfo } from '../../../shared/types'
 
 type CalMode = 'day' | 'week' | 'month'
 
@@ -25,6 +25,14 @@ export const CalendarView: React.FC = () => {
   const [syncing, setSyncing] = useState(false)
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
+  const [importAccountId, setImportAccountId] = useState('')
+  const [scanningOutlook, setScanningOutlook] = useState(false)
+  const [outlookCalendars, setOutlookCalendars] = useState<OutlookCalendarInfo[] | null>(null)
+  const [outlookError, setOutlookError] = useState<string | null>(null)
+  const [importingFolder, setImportingFolder] = useState<string | null>(null)
+  const [importingIcs, setImportingIcs] = useState(false)
+  const [exportingIcs, setExportingIcs] = useState(false)
 
   // Create form state
   const [title, setTitle] = useState('')
@@ -39,7 +47,11 @@ export const CalendarView: React.FC = () => {
     if (!accountId && accounts.length > 0) {
       setAccountId(activeAccountIds[0] || accounts[0].id)
     }
-  }, [accounts, activeAccountIds, accountId])
+    if (!importAccountId && accounts.length > 0) {
+      const imapAcc = accounts.find((a) => a.provider === 'imap' && !a.isDemo)
+      setImportAccountId(imapAcc?.id || activeAccountIds[0] || accounts[0].id)
+    }
+  }, [accounts, activeAccountIds, accountId, importAccountId])
 
   const getRange = (): { start: Date; end: Date; days: Date[] } => {
     if (mode === 'day') {
@@ -106,6 +118,76 @@ export const CalendarView: React.FC = () => {
       showToast('Event added to calendar')
     } else {
       showToast(res.error || 'Could not create event')
+    }
+  }
+
+  const handleScanOutlook = async () => {
+    setScanningOutlook(true)
+    setOutlookError(null)
+    try {
+      const res = await window.glassmail.listOutlookCalendars()
+      if (res.available) {
+        setOutlookCalendars(res.calendars)
+        if (res.calendars.length === 0) {
+          setOutlookError('Connected to Classic Outlook, but no calendar folders were found.')
+        }
+      } else {
+        setOutlookCalendars([])
+        setOutlookError(res.error || 'Classic Outlook was not detected.')
+      }
+    } finally {
+      setScanningOutlook(false)
+    }
+  }
+
+  const handleImportOutlook = async (folderPath: string) => {
+    if (!importAccountId) return
+    setImportingFolder(folderPath)
+    try {
+      const res = await window.glassmail.importOutlookCalendar(importAccountId, folderPath)
+      if (res.ok) {
+        await loadEvents()
+        await refreshTodayEvents()
+        showToast(`Imported ${res.imported} event${res.imported === 1 ? '' : 's'} from ${res.calendarName || 'Outlook'}`)
+      } else {
+        showToast(res.error || 'Outlook calendar import failed')
+      }
+    } finally {
+      setImportingFolder(null)
+    }
+  }
+
+  const handleImportIcs = async () => {
+    if (!importAccountId) return
+    setImportingIcs(true)
+    try {
+      const res = await window.glassmail.importIcsCalendar(importAccountId)
+      if (res.cancelled) return
+      if (res.ok) {
+        await loadEvents()
+        await refreshTodayEvents()
+        showToast(`Imported ${res.imported} event${res.imported === 1 ? '' : 's'} from .ics file`)
+      } else {
+        showToast(res.error || 'Could not import .ics file')
+      }
+    } finally {
+      setImportingIcs(false)
+    }
+  }
+
+  const handleExportIcs = async () => {
+    setExportingIcs(true)
+    try {
+      const filterIds = activeAccountIds.length > 0 ? activeAccountIds : undefined
+      const res = await window.glassmail.exportIcsCalendar(filterIds)
+      if (res.cancelled) return
+      if (res.ok) {
+        showToast(`Exported ${res.count} event${res.count === 1 ? '' : 's'} to .ics`)
+      } else {
+        showToast(res.error || 'Could not export calendar')
+      }
+    } finally {
+      setExportingIcs(false)
     }
   }
 
@@ -204,6 +286,15 @@ export const CalendarView: React.FC = () => {
             title="Sync calendars"
           >
             <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />
+          </button>
+
+          <button
+            onClick={() => setImportOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[12px] font-medium transition hover:bg-[var(--bg-hover)]"
+            style={{ borderColor: 'var(--border-strong)' }}
+            title="Import from Outlook or .ics, or export calendar"
+          >
+            <Upload size={13} /> Import / Export
           </button>
 
           <button
@@ -349,6 +440,136 @@ export const CalendarView: React.FC = () => {
                   <Trash2 size={13} /> Delete
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Import / Export Modal */}
+      {importOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4"
+          onClick={() => setImportOpen(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-lg space-y-4 rounded-2xl border p-5 shadow-2xl"
+            style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-strong)' }}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-[15px] font-semibold">Import &amp; Export Calendars</h3>
+                <p className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                  Bring in local Outlook calendars or standard .ics files, or export a backup.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setImportOpen(false)}
+                className="rounded p-1 hover:bg-[var(--bg-hover)]"
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            {/* Target Account Picker */}
+            <div>
+              <label className="mb-1 block text-[11.5px] font-medium" style={{ color: 'var(--text-muted)' }}>
+                Import events into account
+              </label>
+              <select
+                value={importAccountId}
+                onChange={(e) => setImportAccountId(e.target.value)}
+                className="w-full rounded-lg border px-3 py-2 text-[12.5px] outline-none"
+                style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
+              >
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} ({a.email})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* 1. Classic Outlook Desktop (Windows) */}
+            <div
+              className="space-y-2.5 rounded-xl border p-3.5"
+              style={{ background: 'var(--bg-main)', borderColor: 'var(--border-subtle)' }}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <div className="text-[13px] font-semibold">Import from Classic Outlook (Windows)</div>
+                  <div className="text-[11.5px]" style={{ color: 'var(--text-muted)' }}>
+                    Reads local &ldquo;This computer only&rdquo; and Outlook Desktop calendars directly. Safe to re-run
+                    without duplicates.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleScanOutlook()}
+                  disabled={scanningOutlook}
+                  className="shrink-0 rounded-lg px-3 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+                  style={{ background: 'var(--accent)' }}
+                >
+                  {scanningOutlook ? 'Scanning…' : outlookCalendars ? 'Rescan' : 'Scan Outlook'}
+                </button>
+              </div>
+
+              {outlookError && (
+                <div className="rounded-lg border px-3 py-2 text-[11.5px]" style={{ borderColor: 'var(--border-strong)', color: 'var(--text-secondary)' }}>
+                  {outlookError}
+                </div>
+              )}
+
+              {outlookCalendars && outlookCalendars.length > 0 && (
+                <div className="max-h-44 space-y-1.5 overflow-y-auto pt-1">
+                  {outlookCalendars.map((cal) => (
+                    <div
+                      key={cal.folderPath}
+                      className="flex items-center justify-between gap-2 rounded-lg border px-3 py-2"
+                      style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate text-[12.5px] font-medium">{cal.folderName}</div>
+                        <div className="truncate text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                          {cal.storeName} · {cal.itemCount} item{cal.itemCount === 1 ? '' : 's'}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void handleImportOutlook(cal.folderPath)}
+                        disabled={importingFolder !== null}
+                        className="shrink-0 rounded-lg border px-2.5 py-1 text-[11.5px] font-semibold transition hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                        style={{ borderColor: 'var(--border-strong)' }}
+                      >
+                        {importingFolder === cal.folderPath ? 'Importing…' : 'Import'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* 2. Universal .ics File Import & Export */}
+            <div className="grid grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={() => void handleImportIcs()}
+                disabled={importingIcs || !importAccountId}
+                className="flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-[12.5px] font-semibold transition hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
+              >
+                <Upload size={14} /> {importingIcs ? 'Importing…' : 'Import .ics File'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleExportIcs()}
+                disabled={exportingIcs}
+                className="flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-[12.5px] font-semibold transition hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
+              >
+                <Download size={14} /> {exportingIcs ? 'Exporting…' : 'Export .ics Backup'}
+              </button>
             </div>
           </div>
         </div>

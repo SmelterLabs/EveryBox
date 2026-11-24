@@ -217,6 +217,31 @@ export interface AISettings {
   responseLanguage: 'auto' | string
 }
 
+export interface DiscoveredModel {
+  id: string
+  sizeBytes?: number
+  parameterSize?: string
+}
+
+export interface LocalAIStatus {
+  gpuName: string | null
+  ollamaInstalled: boolean
+  ollamaRunning: boolean
+  ollamaUrlUsed: string
+  ollamaModels: DiscoveredModel[]
+  lmStudioInstalled: boolean
+  lmStudioRunning: boolean
+  lmStudioUrlUsed: string
+  lmStudioModels: DiscoveredModel[]
+  claudeCliAvailable: boolean
+  codexCliAvailable: boolean
+  apiKeysConfigured: {
+    anthropic: boolean
+    gemini: boolean
+    openai: boolean
+  }
+}
+
 export interface PrivacySettings {
   blockRemoteImages: boolean
   stripTrackingPixels: boolean
@@ -321,4 +346,11 @@ export interface CreateCalendarEventPayload {
   endAt: number
   allDay: boolean
   attendees?: string[]
+}
+
+export interface OutlookCalendarInfo {
+  storeName: string
+  folderName: string
+  folderPath: string
+  itemCount: number
 }

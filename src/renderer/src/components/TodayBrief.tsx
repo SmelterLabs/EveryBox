@@ -23,6 +23,8 @@ export const TodayBrief: React.FC = () => {
   const peopleUnread = threads.filter((t) => t.category === 'people' && !t.isRead).slice(0, 5)
   const signInThreads = threads.filter((t) => t.signInCode).slice(0, 2)
   const hasDemo = accounts.some((a) => a.isDemo)
+  const firstAccountName = accounts.find((a) => !a.isDemo)?.name?.trim().split(/\s+/)[0]
+  const headingGreeting = firstAccountName ? `${greeting}, ${firstAccountName}` : greeting
 
   return (
     <div className="flex h-full flex-1 flex-col overflow-y-auto px-12 py-12">
@@ -30,7 +32,7 @@ export const TodayBrief: React.FC = () => {
         <div className="text-[11px] font-semibold tracking-wider" style={{ color: 'var(--text-muted)' }}>
           {dateLabel}
         </div>
-        <h1 className="mt-1.5 text-[28px] font-semibold tracking-tight">{greeting}, Casey</h1>
+        <h1 className="mt-1.5 text-[28px] font-semibold tracking-tight">{headingGreeting}</h1>
         <p className="mt-1.5 text-[14px]" style={{ color: 'var(--text-secondary)' }}>
           {counts.people || 0} conversation{counts.people === 1 ? '' : 's'} from people need you, and{' '}
           {counts.updates || 0} update{counts.updates === 1 ? '' : 's'} are unread.

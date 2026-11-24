@@ -6,7 +6,9 @@ import type {
   CalendarEvent,
   CreateCalendarEventPayload,
   Folder,
+  LocalAIStatus,
   MailboxId,
+  OutlookCalendarInfo,
   ParsedSearchQuery,
   ScheduledEmail,
   SendEmailPayload,
@@ -98,16 +100,25 @@ const api = {
     ipcRenderer.invoke('calendar:create', payload),
   deleteCalendarEvent: (eventId: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('calendar:delete', eventId),
+  importIcsCalendar: (
+    accountId: string
+  ): Promise<{ ok: boolean; imported: number; cancelled?: boolean; error?: string }> =>
+    ipcRenderer.invoke('calendar:import-ics', accountId),
+  exportIcsCalendar: (
+    accountIds?: string[]
+  ): Promise<{ ok: boolean; count: number; filePath?: string; cancelled?: boolean; error?: string }> =>
+    ipcRenderer.invoke('calendar:export-ics', accountIds),
+  listOutlookCalendars: (): Promise<{ available: boolean; calendars: OutlookCalendarInfo[]; error?: string }> =>
+    ipcRenderer.invoke('calendar:outlook-list'),
+  importOutlookCalendar: (
+    accountId: string,
+    folderPath: string
+  ): Promise<{ ok: boolean; imported: number; calendarName?: string; error?: string }> =>
+    ipcRenderer.invoke('calendar:outlook-import', accountId, folderPath),
 
   // AI Suite
-  detectLocalAI: (): Promise<{
-    ollamaRunning: boolean
-    ollamaModels: string[]
-    lmStudioRunning: boolean
-    lmStudioModels: string[]
-    claudeCliAvailable: boolean
-    codexCliAvailable: boolean
-  }> => ipcRenderer.invoke('ai:detect-local'),
+  detectLocalAI: (overrides?: { ollamaUrl?: string; lmStudioUrl?: string }): Promise<LocalAIStatus> =>
+    ipcRenderer.invoke('ai:detect-local', overrides),
   askAssistant: (question: string, accountIds?: string[]): Promise<AssistantResponse> =>
     ipcRenderer.invoke('ai:ask', question, accountIds),
   summarizeThread: (threadId: string): Promise<ThreadAISummary> => ipcRenderer.invoke('ai:summarize', threadId),

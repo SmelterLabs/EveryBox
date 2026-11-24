@@ -114,7 +114,7 @@ export async function completeAI(
     const data = (await res.json()) as { message?: { content?: string } }
     return {
       text: data.message?.content || '',
-      providerLabel: `Ollama (${settings.ollamaModel}) · Local RTX 5090`
+      providerLabel: `Ollama (${settings.ollamaModel}) · Local`
     }
   }
 

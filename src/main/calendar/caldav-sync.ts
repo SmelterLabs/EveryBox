@@ -2,14 +2,22 @@ import ICAL from 'ical.js'
 import { createDAVClient } from 'tsdav'
 import type { GlassmailDB } from '../db/database'
 import type { SecretStore } from '../security/secrets'
-import type { Account, CreateCalendarEventPayload } from '../../shared/types'
+import type { Account, CalendarEvent, CreateCalendarEventPayload } from '../../shared/types'
 
-function ingestIcsText(
+const MEETING_URL_REGEX =
+  /https?:\/\/(?:[\w.-]*zoom\.us\/j\/[^\s<>"]+|meet\.google\.com\/[a-z-]+|teams\.microsoft\.com\/l\/meetup-join\/[^\s<>"]+|[\w.-]*webex\.com\/[^\s<>"]+)/i
+
+export function extractMeetingUrl(text: string): string | undefined {
+  const match = text.match(MEETING_URL_REGEX)
+  return match ? match[0] : undefined
+}
+
+export function ingestIcsText(
   icsText: string,
   account: Account,
   calendarId: string,
   calendarName: string,
-  source: 'caldav' | 'ics',
+  source: 'caldav' | 'ics' | 'local',
   readOnly: boolean,
   db: GlassmailDB
 ): number {
@@ -18,35 +26,113 @@ function ingestIcsText(
     const jcal = ICAL.parse(icsText)
     const comp = new ICAL.Component(jcal)
     const vevents = comp.getAllSubcomponents('vevent')
+    const windowStart = Date.now() - 180 * 24 * 3600 * 1000
+    const windowEnd = Date.now() + 365 * 24 * 3600 * 1000
+
     for (const vevent of vevents) {
       const ev = new ICAL.Event(vevent)
       if (!ev.startDate) continue
-      const startAt = ev.startDate.toJSDate().getTime()
-      const endAt = ev.endDate ? ev.endDate.toJSDate().getTime() : startAt + 3600_000
-      const uid = ev.uid || `${startAt}-${ev.summary || 'event'}`
-      db.upsertCalendarEvent({
-        id: `${account.id}|${source}|${calendarId}|${uid}`,
-        accountId: account.id,
-        calendarId,
-        calendarName,
-        remoteId: uid,
-        title: ev.summary || '(No title)',
-        description: ev.description || '',
-        location: ev.location || '',
-        startAt,
-        endAt,
-        allDay: ev.startDate.isDate,
-        attendees: [],
-        status: 'confirmed',
-        source,
-        readOnly
-      })
-      count += 1
+      const uid = ev.uid || `${ev.startDate.toJSDate().getTime()}-${ev.summary || 'event'}`
+      const meetingUrl = extractMeetingUrl(`${ev.location || ''}\n${ev.description || ''}`)
+
+      if (ev.isRecurring()) {
+        const durationMs =
+          ev.endDate && ev.startDate
+            ? Math.max(ev.endDate.toJSDate().getTime() - ev.startDate.toJSDate().getTime(), 15 * 60_000)
+            : 3600_000
+        const iter = ev.iterator()
+        let next = iter.next()
+        let guard = 0
+        while (next && guard < 250) {
+          guard += 1
+          const occStart = next.toJSDate().getTime()
+          if (occStart > windowEnd) break
+          if (occStart >= windowStart) {
+            db.upsertCalendarEvent({
+              id: `${account.id}|${source}|${calendarId}|${uid}|${occStart}`,
+              accountId: account.id,
+              calendarId,
+              calendarName,
+              remoteId: uid,
+              title: ev.summary || '(No title)',
+              description: ev.description || '',
+              location: ev.location || '',
+              meetingUrl,
+              startAt: occStart,
+              endAt: occStart + durationMs,
+              allDay: ev.startDate.isDate,
+              attendees: [],
+              status: 'confirmed',
+              source,
+              readOnly
+            })
+            count += 1
+          }
+          next = iter.next()
+        }
+      } else {
+        const startAt = ev.startDate.toJSDate().getTime()
+        const endAt = ev.endDate ? ev.endDate.toJSDate().getTime() : startAt + 3600_000
+        db.upsertCalendarEvent({
+          id: `${account.id}|${source}|${calendarId}|${uid}`,
+          accountId: account.id,
+          calendarId,
+          calendarName,
+          remoteId: uid,
+          title: ev.summary || '(No title)',
+          description: ev.description || '',
+          location: ev.location || '',
+          meetingUrl,
+          startAt,
+          endAt,
+          allDay: ev.startDate.isDate,
+          attendees: [],
+          status: 'confirmed',
+          source,
+          readOnly
+        })
+        count += 1
+      }
     }
   } catch {
     // Ignore malformed ICS entries
   }
   return count
+}
+
+function escapeIcsText(val: string): string {
+  return val.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n')
+}
+
+export function exportEventsToIcs(events: CalendarEvent[]): string {
+  const fmtUtc = (ms: number) => new Date(ms).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z'
+  const fmtDate = (ms: number) => new Date(ms).toISOString().slice(0, 10).replace(/-/g, '')
+  const lines: string[] = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//EveryBox//Calendar Export//EN',
+    'CALSCALE:GREGORIAN'
+  ]
+
+  for (const ev of events) {
+    lines.push('BEGIN:VEVENT')
+    lines.push(`UID:${escapeIcsText(ev.remoteId || ev.id)}`)
+    lines.push(`DTSTAMP:${fmtUtc(Date.now())}`)
+    if (ev.allDay) {
+      lines.push(`DTSTART;VALUE=DATE:${fmtDate(ev.startAt)}`)
+      lines.push(`DTEND;VALUE=DATE:${fmtDate(Math.max(ev.endAt, ev.startAt + 86400_000))}`)
+    } else {
+      lines.push(`DTSTART:${fmtUtc(ev.startAt)}`)
+      lines.push(`DTEND:${fmtUtc(ev.endAt)}`)
+    }
+    lines.push(`SUMMARY:${escapeIcsText(ev.title || '(No title)')}`)
+    if (ev.location) lines.push(`LOCATION:${escapeIcsText(ev.location)}`)
+    if (ev.description) lines.push(`DESCRIPTION:${escapeIcsText(ev.description)}`)
+    lines.push('END:VEVENT')
+  }
+
+  lines.push('END:VCALENDAR')
+  return lines.join('\r\n') + '\r\n'
 }
 
 export async function syncImapAccountCalendars(
