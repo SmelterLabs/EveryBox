@@ -26,6 +26,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   readerWidth: 'comfortable',
   accountSwitchBehavior: 'home',
   accountOrder: [],
+  shortcuts: {},
   defaultReplyAll: false,
   undoSendSeconds: 5,
   ai: {

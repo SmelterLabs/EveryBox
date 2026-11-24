@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Command, PanelLeft, Search } from 'lucide-react'
 import { isMac, modKeyPrefix } from './utils/platform'
+import { getEffectiveShortcut, matchesCombo } from './utils/shortcuts'
 import { useAppStore } from './store/useAppStore'
 import { Sidebar } from './components/Sidebar'
 import { ThreadList } from './components/ThreadList'
@@ -18,8 +19,12 @@ export const App: React.FC = () => {
   const {
     bootstrap,
     refreshAll,
+    settings,
+    settingsOpen,
     activeView,
     selectedThreadId,
+    selectedThread,
+    checkedThreadIds,
     threads,
     workspaces,
     sidebarVisible,
@@ -34,7 +39,10 @@ export const App: React.FC = () => {
     selectWorkspace,
     runSearch,
     archiveThreads,
+    trashThreads,
     snoozeThreads,
+    toggleStarThread,
+    toggleReadThread,
     toggleCheckThread,
     clearCheckedThreads,
     clearToast
@@ -124,27 +132,46 @@ export const App: React.FC = () => {
     return unsub
   }, [])
 
-  // Global Glassmail keyboard shortcuts
+  // Global OS-aware & customizable keyboard shortcuts
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      // Do not intercept keys while Settings modal is open (especially when recording shortcuts)
+      if (settingsOpen) return
+
       const target = e.target as HTMLElement | null
       const inInput =
-        target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+        Boolean(target) &&
+        (target!.tagName === 'INPUT' || target!.tagName === 'TEXTAREA' || target!.isContentEditable)
 
-      // Ctrl+K: Command Palette
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      const overrides = settings?.shortcuts
+      const match = (id: Parameters<typeof getEffectiveShortcut>[0]) =>
+        matchesCombo(e, getEffectiveShortcut(id, overrides))
+
+      // Always-available modifier shortcuts (even when focused in an input)
+      if (match('commandPalette')) {
         e.preventDefault()
         setCommandPaletteOpen(true)
         return
       }
-      // Ctrl+, : Settings
-      if ((e.ctrlKey || e.metaKey) && e.key === ',') {
+      if (match('settings')) {
         e.preventDefault()
         openSettings('accounts')
         return
       }
-      // Ctrl+1..9: Switch workspaces
-      if ((e.ctrlKey || e.metaKey) && e.key >= '1' && e.key <= '9') {
+      if (match('search')) {
+        e.preventDefault()
+        searchInputRef.current?.focus()
+        searchInputRef.current?.select()
+        return
+      }
+      if (match('compose')) {
+        e.preventDefault()
+        openComposer({ mode: 'new' })
+        return
+      }
+
+      // Ctrl/Cmd+1..9: Switch workspaces
+      if ((isMac ? e.metaKey : e.ctrlKey) && !e.altKey && !e.shiftKey && e.key >= '1' && e.key <= '9') {
         const idx = Number(e.key)
         const ws = workspaces.find((w) => w.shortcutIndex === idx)
         if (ws) {
@@ -156,26 +183,113 @@ export const App: React.FC = () => {
 
       if (inInput || activeView === 'triage') return
 
-      const k = e.key.toLowerCase()
-      if (k === '/') {
+      const actionTargets = checkedThreadIds.length > 0 ? checkedThreadIds : selectedThreadId ? [selectedThreadId] : []
+
+      if (match('undo') && toast?.undo) {
         e.preventDefault()
-        searchInputRef.current?.focus()
-      } else if (k === 'c') {
+        const fn = toast.undo
+        clearToast()
+        void fn()
+        return
+      }
+
+      if (match('delete') && actionTargets.length > 0) {
         e.preventDefault()
-        openComposer({ mode: 'new' })
-      } else if (k === 'j') {
+        void trashThreads(actionTargets)
+        return
+      }
+
+      if (match('archive') && actionTargets.length > 0) {
+        e.preventDefault()
+        void archiveThreads(actionTargets)
+        return
+      }
+
+      if (match('snooze') && actionTargets.length > 0) {
+        e.preventDefault()
+        void snoozeThreads(actionTargets, Date.now() + 24 * 3600_000, 'Tomorrow')
+        return
+      }
+
+      if (match('star') && selectedThread) {
+        e.preventDefault()
+        void toggleStarThread(selectedThread.id, selectedThread.isStarred)
+        return
+      }
+
+      if (match('toggleRead') && selectedThread) {
+        e.preventDefault()
+        void toggleReadThread(selectedThread.id, selectedThread.isRead)
+        return
+      }
+
+      if ((match('reply') || match('replyAll') || match('forward')) && selectedThread) {
+        e.preventDefault()
+        const latestMsg = selectedThread.messages[selectedThread.messages.length - 1]
+        if (!latestMsg) return
+        const mode: 'reply' | 'replyAll' | 'forward' = match('replyAll')
+          ? 'replyAll'
+          : match('forward')
+            ? 'forward'
+            : 'reply'
+        const subj = selectedThread.subject.startsWith('Re:')
+          ? selectedThread.subject
+          : mode === 'forward'
+            ? `Fwd: ${selectedThread.subject}`
+            : `Re: ${selectedThread.subject}`
+        openComposer({
+          mode,
+          accountId: selectedThread.accountId,
+          to: mode === 'forward' ? '' : latestMsg.from.email,
+          cc:
+            mode === 'replyAll'
+              ? [...latestMsg.to, ...latestMsg.cc]
+                  .map((p) => p.email)
+                  .filter((email) => email && email !== selectedThread.accountEmail)
+                  .join(', ')
+              : '',
+          subject: subj,
+          body:
+            mode === 'forward'
+              ? `\n\n---------- Forwarded message ----------\nFrom: ${latestMsg.from.name} <${latestMsg.from.email}>\n\n${latestMsg.bodyText}`
+              : '',
+          replyToThreadId: selectedThread.id,
+          replyToMessageId: latestMsg.messageIdHeader
+        })
+        return
+      }
+
+      if (match('inboxHome')) {
+        e.preventDefault()
+        void selectThread(null)
+        return
+      }
+
+      if (match('nextThread') || (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'j')) {
+        e.preventDefault()
         const curIdx = threads.findIndex((t) => t.id === selectedThreadId)
         const next = threads[curIdx + 1] || threads[0]
         if (next) void selectThread(next.id)
-      } else if (k === 'k') {
+        return
+      }
+
+      if (match('prevThread') || (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'k')) {
+        e.preventDefault()
         const curIdx = threads.findIndex((t) => t.id === selectedThreadId)
         const prev = threads[Math.max(0, curIdx - 1)]
         if (prev) void selectThread(prev.id)
-      } else if (k === 'e' && selectedThreadId) {
-        void archiveThreads([selectedThreadId])
-      } else if ((k === 'h' || k === 'b') && selectedThreadId) {
-        void snoozeThreads([selectedThreadId], Date.now() + 24 * 3600_000, 'Tomorrow')
-      } else if (k === 'x' && selectedThreadId) {
+        return
+      }
+
+      // Secondary convenience single-key shortcuts
+      const k = e.key.toLowerCase()
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && k === '/') {
+        e.preventDefault()
+        searchInputRef.current?.focus()
+      } else if (!e.ctrlKey && !e.metaKey && !e.altKey && k === 'c') {
+        e.preventDefault()
+        openComposer({ mode: 'new' })
+      } else if (!e.ctrlKey && !e.metaKey && !e.altKey && k === 'x' && selectedThreadId) {
         toggleCheckThread(selectedThreadId)
       } else if (e.key === 'Escape') {
         clearCheckedThreads()
@@ -184,7 +298,17 @@ export const App: React.FC = () => {
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [activeView, selectedThreadId, threads, workspaces])
+  }, [
+    settingsOpen,
+    settings?.shortcuts,
+    activeView,
+    selectedThreadId,
+    selectedThread,
+    checkedThreadIds,
+    threads,
+    workspaces,
+    toast
+  ])
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden" style={{ background: 'var(--bg-main)' }}>
