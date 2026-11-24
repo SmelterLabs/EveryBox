@@ -308,7 +308,7 @@ export const App: React.FC = () => {
       {/* Bottom-Left Translucent Undo / Notification Toast */}
       {toast && (
         <div
-          className="fixed bottom-5 left-5 z-50 flex items-center gap-3 rounded-xl border px-4 py-2.5 text-[13px] shadow-2xl backdrop-blur-md"
+          className="fixed bottom-6 left-6 z-50 flex items-center gap-5 rounded-2xl border px-6 py-4 text-[16px] font-medium shadow-2xl backdrop-blur-md"
           style={{
             background: 'color-mix(in srgb, var(--bg-elevated) 84%, transparent)',
             borderColor: 'var(--border-strong)'
@@ -322,7 +322,7 @@ export const App: React.FC = () => {
                 clearToast()
                 if (fn) await fn()
               }}
-              className="rounded-md px-2 py-0.5 font-semibold transition hover:opacity-90"
+              className="rounded-xl px-5 py-2.5 text-[18px] font-bold transition hover:opacity-90"
               style={{ background: 'var(--accent-soft)', color: 'var(--accent-text)' }}
             >
               Undo
