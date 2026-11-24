@@ -10,7 +10,11 @@ export async function syncGoogleCalendar(
 ): Promise<{ synced: number }> {
   const calendar = google.calendar({ version: 'v3', auth })
   const listRes = await calendar.calendarList.list()
-  const calendars = (listRes.data.items || []).filter((c) => c.selected !== false)
+  // Sync only the account's own primary calendar by default so subscribed coworker,
+  // conference-room, or duplicate holiday calendars don't flood the combined view.
+  const allItems = listRes.data.items || []
+  const primaryOnly = allItems.filter((c) => c.primary === true)
+  const calendars = primaryOnly.length > 0 ? primaryOnly : allItems.slice(0, 1)
 
   const timeMin = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString()
   const timeMax = new Date(Date.now() + 90 * 24 * 3600 * 1000).toISOString()
