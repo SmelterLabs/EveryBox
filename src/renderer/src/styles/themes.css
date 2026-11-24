@@ -160,12 +160,3 @@ body,
   height: auto;
   border-radius: 6px;
 }
-
-.email-prose-wide,
-.email-prose-wide > div,
-.email-prose-wide > table,
-.email-prose-wide > center > table,
-.email-prose-wide table[width] {
-  max-width: none !important;
-  width: 100% !important;
-}

@@ -14,6 +14,7 @@ import {
   Trash2
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
+import { usePaneZoom } from '../hooks/usePaneZoom'
 import type { ThreadAISummary } from '../../../shared/types'
 
 export const ThreadReader: React.FC = () => {
@@ -32,6 +33,7 @@ export const ThreadReader: React.FC = () => {
   const readerWidthMode = settings?.readerWidth || 'comfortable'
   const readerMaxWidth =
     readerWidthMode === 'narrow' ? '680px' : readerWidthMode === 'wide' ? 'none' : '860px'
+  const { ref: zoomRef, zoom, zoomBadge } = usePaneZoom<HTMLDivElement>('reader')
 
   const [summary, setSummary] = useState<ThreadAISummary | null>(null)
   const [loadingSummary, setLoadingSummary] = useState(false)
@@ -91,7 +93,12 @@ export const ThreadReader: React.FC = () => {
   }
 
   return (
-    <div className="flex h-full flex-1 flex-col overflow-hidden" style={{ background: 'var(--bg-main)' }}>
+    <div
+      ref={zoomRef}
+      className="relative flex h-full flex-1 flex-col overflow-hidden"
+      style={{ background: 'var(--bg-main)' }}
+    >
+      {zoomBadge}
       {/* Action Bar */}
       <div
         className="flex items-center justify-between border-b px-6 py-2"
@@ -204,7 +211,7 @@ export const ThreadReader: React.FC = () => {
 
       {/* Scrollable Thread Content */}
       <div className={`flex-1 overflow-y-auto py-6 ${readerWidthMode === 'wide' ? 'px-6' : 'px-8'}`}>
-        <div className="mx-auto w-full" style={{ maxWidth: readerMaxWidth }}>
+        <div className="mx-auto w-full" style={{ maxWidth: readerMaxWidth, zoom }}>
           {/* Subject + Summarize Pill */}
           <h1 className="text-[21px] font-semibold leading-snug tracking-tight">{selectedThread.subject}</h1>
           <div className="mt-2 flex flex-wrap items-center gap-2.5 text-[12.5px]" style={{ color: 'var(--text-secondary)' }}>
@@ -371,7 +378,7 @@ export const ThreadReader: React.FC = () => {
 
                 {/* Body */}
                 <div
-                  className={`email-prose mt-4 select-text ${readerWidthMode === 'wide' ? 'email-prose-wide' : ''}`}
+                  className="email-prose mt-4 select-text"
                   dangerouslySetInnerHTML={{
                     __html: m.bodyHtml || `<p>${m.bodyText.replace(/\n/g, '<br/>')}</p>`
                   }}

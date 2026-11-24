@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Command, PanelLeft, Search } from 'lucide-react'
+import { isMac, modKeyPrefix } from './utils/platform'
 import { useAppStore } from './store/useAppStore'
 import { Sidebar } from './components/Sidebar'
 import { ThreadList } from './components/ThreadList'
@@ -190,11 +191,17 @@ export const App: React.FC = () => {
           <button
             type="button"
             onClick={() => setCommandPaletteOpen(true)}
-            className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10.5px]"
+            className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10.5px] font-medium"
             style={{ background: 'var(--bg-hover)', color: 'var(--text-muted)' }}
-            title="Command Palette (Ctrl+K)"
+            title={`Command Palette (${modKeyPrefix}K)`}
           >
-            <Command size={10} />K
+            {isMac ? (
+              <>
+                <Command size={10} />K
+              </>
+            ) : (
+              'Ctrl+K'
+            )}
           </button>
         </form>
 
