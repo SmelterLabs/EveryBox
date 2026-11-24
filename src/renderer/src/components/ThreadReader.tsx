@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
   AlertTriangle,
   Archive,
@@ -17,6 +17,58 @@ import {
 import { useAppStore } from '../store/useAppStore'
 import { usePaneZoom } from '../hooks/usePaneZoom'
 import type { ThreadAISummary } from '../../../shared/types'
+
+const EmailHtmlBody: React.FC<{ html: string; scale: number }> = ({ html, scale }) => {
+  const hostRef = useRef<HTMLDivElement | null>(null)
+  const shadowRef = useRef<ShadowRoot | null>(null)
+
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host) return
+    const shadow = shadowRef.current || host.shadowRoot || host.attachShadow({ mode: 'open' })
+    shadowRef.current = shadow
+
+    shadow.innerHTML = `
+      <style>
+        :host {
+          display: block;
+          color: var(--text-primary);
+          font-family: "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+          font-size: 14px;
+          line-height: 1.6;
+          word-break: break-word;
+          user-select: text;
+        }
+        a {
+          color: var(--accent-text);
+          text-decoration: underline;
+        }
+        p {
+          margin: 0 0 0.75em;
+        }
+        img {
+          max-width: 100%;
+          height: auto;
+          border-radius: 6px;
+        }
+      </style>
+      <div class="email-root">${html}</div>
+    `
+
+    const onClick = (e: Event) => {
+      const target = e.target as HTMLElement | null
+      const link = target?.closest?.('a[href]') as HTMLAnchorElement | null
+      if (link && /^https?:\/\//i.test(link.href)) {
+        e.preventDefault()
+        void window.glassmail.openExternal(link.href)
+      }
+    }
+    shadow.addEventListener('click', onClick)
+    return () => shadow.removeEventListener('click', onClick)
+  }, [html])
+
+  return <div ref={hostRef} className="mt-4" style={{ zoom: scale }} />
+}
 
 export const ThreadReader: React.FC = () => {
   const {
@@ -388,13 +440,10 @@ export const ThreadReader: React.FC = () => {
                   </div>
                 )}
 
-                {/* Body */}
-                <div
-                  className="email-prose mt-4 select-text"
-                  style={{ zoom: readerBodyScale }}
-                  dangerouslySetInnerHTML={{
-                    __html: m.bodyHtml || `<p>${m.bodyText.replace(/\n/g, '<br/>')}</p>`
-                  }}
+                {/* Body (isolated in Shadow DOM so email <style> tags never leak into the app UI) */}
+                <EmailHtmlBody
+                  html={m.bodyHtml || `<p>${m.bodyText.replace(/\n/g, '<br/>')}</p>`}
+                  scale={readerBodyScale}
                 />
 
                 {/* Attachments */}

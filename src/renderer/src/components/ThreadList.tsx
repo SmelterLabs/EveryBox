@@ -167,11 +167,11 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
       {zoomBadge}
       <div className="flex min-h-0 flex-1 flex-col" style={{ zoom }}>
       {/* Header */}
-      <div className="border-b px-3.5 pb-2.5 pt-3" style={{ borderColor: 'var(--border-subtle)' }}>
+      <div className="border-b px-4 pb-3 pt-4" style={{ borderColor: 'var(--border-subtle)' }}>
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <h2 className="truncate text-[14px] font-semibold leading-tight">{mailboxTitle}</h2>
-            <p className="text-[11.5px]" style={{ color: 'var(--text-muted)' }}>
+            <h2 className="truncate text-[20px] font-semibold leading-tight tracking-tight">{mailboxTitle}</h2>
+            <p className="mt-1 text-[12.5px]" style={{ color: 'var(--text-muted)' }}>
               {activeMailbox === 'inbox' ? `${counts.inbox || 0} unread` : `${threads.length} conversations`}
             </p>
           </div>
