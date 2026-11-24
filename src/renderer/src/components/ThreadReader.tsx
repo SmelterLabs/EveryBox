@@ -18,6 +18,7 @@ import type { ThreadAISummary } from '../../../shared/types'
 
 export const ThreadReader: React.FC = () => {
   const {
+    settings,
     selectedThread,
     archiveThreads,
     trashThreads,
@@ -27,6 +28,13 @@ export const ThreadReader: React.FC = () => {
     showToast,
     refreshTodayEvents
   } = useAppStore()
+
+  const readerWidthClass =
+    settings?.readerWidth === 'narrow'
+      ? 'max-w-[680px]'
+      : settings?.readerWidth === 'wide'
+        ? 'max-w-none'
+        : 'max-w-[860px]'
 
   const [summary, setSummary] = useState<ThreadAISummary | null>(null)
   const [loadingSummary, setLoadingSummary] = useState(false)
@@ -199,7 +207,7 @@ export const ThreadReader: React.FC = () => {
 
       {/* Scrollable Thread Content */}
       <div className="flex-1 overflow-y-auto px-8 py-6">
-        <div className="mx-auto max-w-[760px]">
+        <div className={`mx-auto ${readerWidthClass}`}>
           {/* Subject + Summarize Pill */}
           <h1 className="text-[21px] font-semibold leading-snug tracking-tight">{selectedThread.subject}</h1>
           <div className="mt-2 flex flex-wrap items-center gap-2.5 text-[12.5px]" style={{ color: 'var(--text-secondary)' }}>
@@ -402,7 +410,7 @@ export const ThreadReader: React.FC = () => {
 
       {/* Bottom Glassmail Quick Reply Bar */}
       <div className="border-t px-8 py-3" style={{ borderColor: 'var(--border-subtle)' }}>
-        <div className="mx-auto max-w-[760px]">
+        <div className={`mx-auto ${readerWidthClass}`}>
           <button
             onClick={() => handleReply('reply')}
             className="flex w-full items-center justify-between rounded-xl border px-4 py-2.5 text-[13px] transition hover:bg-[var(--bg-hover)]"

@@ -114,6 +114,11 @@ function registerIpc(): void {
     broadcastDataUpdated()
     return { ok: true }
   })
+  ipcMain.handle('accounts:reorder', (_, accountIds: string[]) => {
+    db.reorderAccounts(accountIds)
+    broadcastDataUpdated()
+    return { ok: true }
+  })
 
   ipcMain.handle('accounts:connect-gmail', async () => {
     const settings = db.getSettings()
@@ -274,9 +279,18 @@ function registerIpc(): void {
   })
 
   ipcMain.handle('mail:move', async (_, threadIds: string[], folderRole: Folder['role'], folderName?: string) => {
+    const snapshots = threadIds
+      .map((tid) => db.getThreadDetail(tid))
+      .filter((d): d is NonNullable<typeof d> => Boolean(d))
+      .map((d) => ({
+        threadId: d.id,
+        accountId: d.accountId,
+        folderRole: d.folderRole,
+        messageRemoteIds: d.messages.map((m) => m.remoteId)
+      }))
     db.moveThreads(threadIds, folderRole, folderName)
     broadcastDataUpdated()
-    void syncManager.syncThreadMutationToRemote(threadIds, 'move', folderRole)
+    void syncManager.syncThreadMutationToRemote(threadIds, 'move', folderRole, snapshots)
     return { ok: true }
   })
 
@@ -287,14 +301,42 @@ function registerIpc(): void {
   })
 
   ipcMain.handle('mail:delete-permanently', (_, threadIds: string[]) => {
+    const snapshots = threadIds
+      .map((tid) => db.getThreadDetail(tid))
+      .filter((d): d is NonNullable<typeof d> => Boolean(d))
+      .map((d) => ({
+        threadId: d.id,
+        accountId: d.accountId,
+        folderRole: d.folderRole,
+        messageRemoteIds: d.messages.map((m) => m.remoteId)
+      }))
     db.deleteThreadsPermanently(threadIds)
     broadcastDataUpdated()
+    void syncManager.syncThreadMutationToRemote(threadIds, 'delete', undefined, snapshots)
     return { ok: true }
   })
 
   ipcMain.handle('mail:empty-folder', (_, role: 'trash' | 'junk', accountIds?: string[]) => {
+    const threads = db.listThreads({ accountIds, mailbox: role, limit: 500 })
+    const snapshots = threads
+      .map((t) => db.getThreadDetail(t.id))
+      .filter((d): d is NonNullable<typeof d> => Boolean(d))
+      .map((d) => ({
+        threadId: d.id,
+        accountId: d.accountId,
+        folderRole: d.folderRole,
+        messageRemoteIds: d.messages.map((m) => m.remoteId)
+      }))
     db.emptyFolder(role, accountIds)
     broadcastDataUpdated()
+    if (snapshots.length > 0) {
+      void syncManager.syncThreadMutationToRemote(
+        snapshots.map((s) => s.threadId),
+        'delete',
+        undefined,
+        snapshots
+      )
+    }
     return { ok: true }
   })
 

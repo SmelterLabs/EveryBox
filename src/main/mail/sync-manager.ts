@@ -4,7 +4,14 @@ import type { SecretStore } from '../security/secrets'
 import type { Account, Folder, SendEmailPayload } from '../../shared/types'
 import { getAuthorizedGoogleClient } from './gmail-oauth'
 import { modifyGmailThread, sendGmailMessage, syncGmailAccount, trashGmailThread } from './gmail-sync'
-import { sendImapSmtpMessage, syncImapAccount } from './imap-sync'
+import { mutateImapMessages, sendImapSmtpMessage, syncImapAccount } from './imap-sync'
+
+export interface ThreadMutationSnapshot {
+  threadId: string
+  accountId: string
+  folderRole: Folder['role']
+  messageRemoteIds: string[]
+}
 
 export class SyncManager {
   private timer: NodeJS.Timeout | null = null
@@ -166,14 +173,22 @@ export class SyncManager {
 
   async syncThreadMutationToRemote(
     threadIds: string[],
-    action: 'archive' | 'trash' | 'read' | 'unread' | 'star' | 'unstar' | 'move',
-    targetRole?: Folder['role']
+    action: 'archive' | 'trash' | 'read' | 'unread' | 'star' | 'unstar' | 'move' | 'delete',
+    targetRole?: Folder['role'],
+    snapshots?: ThreadMutationSnapshot[]
   ): Promise<void> {
     const settings = this.db.getSettings()
+    const snapshotById = new Map((snapshots || []).map((s) => [s.threadId, s]))
+
     for (const tid of threadIds) {
-      const detail = this.db.getThreadDetail(tid)
-      if (!detail) continue
-      const account = this.db.getAccount(detail.accountId)
+      const snap = snapshotById.get(tid)
+      const detail = snap ? null : this.db.getThreadDetail(tid)
+      const accountId = snap?.accountId || detail?.accountId
+      const sourceRole = snap?.folderRole || detail?.folderRole || 'inbox'
+      const messageRemoteIds = snap?.messageRemoteIds || detail?.messages.map((m) => m.remoteId) || []
+
+      if (!accountId) continue
+      const account = this.db.getAccount(accountId)
       if (!account || account.isDemo) continue
 
       if (account.provider === 'gmail') {
@@ -189,7 +204,7 @@ export class SyncManager {
         try {
           if (action === 'archive' || (action === 'move' && targetRole === 'archive')) {
             await modifyGmailThread(auth, remoteThreadId, [], ['INBOX'])
-          } else if (action === 'trash' || (action === 'move' && targetRole === 'trash')) {
+          } else if (action === 'trash' || action === 'delete' || (action === 'move' && targetRole === 'trash')) {
             await trashGmailThread(auth, remoteThreadId)
           } else if (action === 'read') {
             await modifyGmailThread(auth, remoteThreadId, [], ['UNREAD'])
@@ -200,6 +215,19 @@ export class SyncManager {
           } else if (action === 'unstar') {
             await modifyGmailThread(auth, remoteThreadId, [], ['STARRED'])
           }
+        } catch {
+          // Keep local state optimistic; next sync reconciles
+        }
+      } else if (account.provider === 'imap') {
+        const uids = messageRemoteIds.map((id) => Number(id)).filter((n) => Number.isFinite(n) && n > 0)
+        if (uids.length === 0) continue
+        try {
+          await mutateImapMessages(account, this.secrets, {
+            uids,
+            sourceRole,
+            action,
+            targetRole
+          })
         } catch {
           // Keep local state optimistic; next sync reconciles
         }

@@ -23,6 +23,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   matchSystemTheme: false,
   lightTheme: 'light',
   darkTheme: 'dark',
+  readerWidth: 'comfortable',
+  accountOrder: [],
   defaultReplyAll: false,
   undoSendSeconds: 5,
   ai: {
@@ -292,7 +294,21 @@ export class GlassmailDB {
         ORDER BY a.is_demo ASC, a.name ASC
       `)
       .all() as Record<string, unknown>[]
-    return rows.map((r) => this.mapAccount(r))
+    const accounts = rows.map((r) => this.mapAccount(r))
+    const order = this.getSettings().accountOrder || []
+    if (order.length === 0) return accounts
+    const rank = new Map(order.map((id, idx) => [id, idx]))
+    return [...accounts].sort((a, b) => {
+      const ra = rank.has(a.id) ? rank.get(a.id)! : Number.MAX_SAFE_INTEGER
+      const rb = rank.has(b.id) ? rank.get(b.id)! : Number.MAX_SAFE_INTEGER
+      if (ra !== rb) return ra - rb
+      return a.name.localeCompare(b.name)
+    })
+  }
+
+  reorderAccounts(accountIds: string[]): void {
+    const settings = this.getSettings()
+    this.saveSettings({ ...settings, accountOrder: accountIds })
   }
 
   getAccount(id: string): Account | null {

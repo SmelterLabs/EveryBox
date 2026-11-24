@@ -236,3 +236,77 @@ export async function sendImapSmtpMessage(
     references: payload.replyToMessageId
   })
 }
+
+export async function mutateImapMessages(
+  account: Account,
+  secrets: SecretStore,
+  opts: {
+    uids: number[]
+    sourceRole: Folder['role']
+    action: 'archive' | 'trash' | 'read' | 'unread' | 'star' | 'unstar' | 'move' | 'delete'
+    targetRole?: Folder['role']
+  }
+): Promise<void> {
+  if (opts.uids.length === 0) return
+  const password = secrets.get(`imap_pass:${account.id}`)
+  if (!password || !account.imapHost) return
+
+  const client = new ImapFlow({
+    host: account.imapHost,
+    port: account.imapPort || 993,
+    secure: account.imapSecure !== false,
+    auth: { user: account.email, pass: password },
+    logger: false
+  })
+
+  await client.connect()
+  try {
+    const mailboxes = await client.list()
+    const findMailboxPath = (role: Folder['role']): string | null => {
+      if (role === 'inbox') return 'INBOX'
+      const bySpecial = mailboxes.find((mb) => mapImapRole(mb.specialUse, mb.name) === role && Boolean(mb.specialUse))
+      if (bySpecial) return bySpecial.path
+      const byName = mailboxes.find((mb) => mapImapRole(mb.specialUse, mb.name) === role)
+      return byName ? byName.path : null
+    }
+
+    const sourcePath = findMailboxPath(opts.sourceRole) || 'INBOX'
+    const uidRange = opts.uids.join(',')
+
+    const lock = await client.getMailboxLock(sourcePath)
+    try {
+      if (opts.action === 'delete') {
+        await client.messageDelete(uidRange, { uid: true })
+      } else if (opts.action === 'trash' || (opts.action === 'move' && opts.targetRole === 'trash')) {
+        const trashPath = findMailboxPath('trash')
+        if (trashPath && trashPath.toLowerCase() !== sourcePath.toLowerCase()) {
+          await client.messageMove(uidRange, trashPath, { uid: true })
+        } else {
+          await client.messageDelete(uidRange, { uid: true })
+        }
+      } else if (opts.action === 'archive' || (opts.action === 'move' && opts.targetRole === 'archive')) {
+        const archivePath = findMailboxPath('archive')
+        if (archivePath && archivePath.toLowerCase() !== sourcePath.toLowerCase()) {
+          await client.messageMove(uidRange, archivePath, { uid: true })
+        }
+      } else if (opts.action === 'move' && opts.targetRole) {
+        const targetPath = findMailboxPath(opts.targetRole)
+        if (targetPath && targetPath.toLowerCase() !== sourcePath.toLowerCase()) {
+          await client.messageMove(uidRange, targetPath, { uid: true })
+        }
+      } else if (opts.action === 'read') {
+        await client.messageFlagsAdd(uidRange, ['\\Seen'], { uid: true })
+      } else if (opts.action === 'unread') {
+        await client.messageFlagsRemove(uidRange, ['\\Seen'], { uid: true })
+      } else if (opts.action === 'star') {
+        await client.messageFlagsAdd(uidRange, ['\\Flagged'], { uid: true })
+      } else if (opts.action === 'unstar') {
+        await client.messageFlagsRemove(uidRange, ['\\Flagged'], { uid: true })
+      }
+    } finally {
+      lock.release()
+    }
+  } finally {
+    await client.logout().catch(() => {})
+  }
+}
