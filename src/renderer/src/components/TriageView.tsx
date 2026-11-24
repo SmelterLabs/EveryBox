@@ -4,7 +4,7 @@ import { useAppStore } from '../store/useAppStore'
 import type { ThreadDetail } from '../../../shared/types'
 
 export const TriageView: React.FC = () => {
-  const { threads, archiveThreads, snoozeThreads, openComposer, setActiveView } = useAppStore()
+  const { threads, archiveThreads, trashThreads, snoozeThreads, openComposer, setActiveView } = useAppStore()
   const [index, setIndex] = useState(0)
   const [detail, setDetail] = useState<ThreadDetail | null>(null)
   const [totalInitial] = useState(() => Math.max(1, threads.length))
@@ -28,7 +28,10 @@ export const TriageView: React.FC = () => {
       }
       if (!currentSummary) return
       const k = e.key.toLowerCase()
-      if (k === 'e') {
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault()
+        void trashThreads([currentSummary.id])
+      } else if (k === 'e') {
         void archiveThreads([currentSummary.id])
       } else if (k === 'h' || k === 'b') {
         void snoozeThreads([currentSummary.id], Date.now() + 24 * 3600_000, 'Tomorrow')
@@ -150,6 +153,15 @@ export const TriageView: React.FC = () => {
                 E
               </kbd>
               Archive
+            </button>
+            <button
+              onClick={() => currentSummary && void trashThreads([currentSummary.id])}
+              className="flex items-center gap-1.5 hover:opacity-80"
+            >
+              <kbd className="rounded border px-1.5 py-0.5 text-[10.5px]" style={{ borderColor: 'var(--border-strong)' }}>
+                Del
+              </kbd>
+              Delete
             </button>
             <button
               onClick={() =>

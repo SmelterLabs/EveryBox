@@ -433,14 +433,42 @@ export class GlassmailDB {
 
   // ---- Workspaces ----
   listWorkspaces(): Workspace[] {
+    const validAccountIds = new Set(
+      (this.db.prepare('SELECT id FROM accounts').all() as { id: string }[]).map((r) => r.id)
+    )
     const rows = this.db.prepare('SELECT * FROM workspaces ORDER BY shortcut_index ASC, name ASC').all() as Record<string, unknown>[]
-    return rows.map((r) => ({
-      id: String(r.id),
-      name: String(r.name),
-      accountIds: JSON.parse(String(r.account_ids || '[]')),
-      color: String(r.color),
-      shortcutIndex: r.shortcut_index ? Number(r.shortcut_index) : undefined
-    }))
+    const result: Workspace[] = []
+    for (const r of rows) {
+      const id = String(r.id)
+      const rawIds: string[] = JSON.parse(String(r.account_ids || '[]'))
+      if (id !== 'ws-all') {
+        const filtered = rawIds.filter((aid) => validAccountIds.has(aid))
+        // Prune dead/stale workspaces (e.g. demo workspaces whose accounts were cleared)
+        if (filtered.length === 0) {
+          this.deleteWorkspace(id)
+          continue
+        }
+        if (filtered.length !== rawIds.length) {
+          this.db.prepare('UPDATE workspaces SET account_ids = ? WHERE id = ?').run(JSON.stringify(filtered), id)
+        }
+        result.push({
+          id,
+          name: String(r.name),
+          accountIds: filtered,
+          color: String(r.color),
+          shortcutIndex: r.shortcut_index ? Number(r.shortcut_index) : undefined
+        })
+      } else {
+        result.push({
+          id,
+          name: String(r.name),
+          accountIds: [],
+          color: String(r.color),
+          shortcutIndex: r.shortcut_index ? Number(r.shortcut_index) : undefined
+        })
+      }
+    }
+    return result
   }
 
   upsertWorkspace(w: Workspace): void {
