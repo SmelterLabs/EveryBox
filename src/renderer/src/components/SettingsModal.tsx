@@ -1,7 +1,17 @@
-import React, { useEffect, useState } from 'react'
-import { Check, Copy, Cpu, Key, Mail, Plus, Shield, Sparkles, Terminal, Trash2, X } from 'lucide-react'
+import React, { useCallback, useEffect, useState } from 'react'
+import { AlertCircle, Check, Copy, Cpu, Key, Mail, Plus, RefreshCw, Shield, Sparkles, Terminal, Trash2, X } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
-import type { AIProviderType, AppSettings, ThemeId } from '../../../shared/types'
+import type { AIProviderType, AppSettings, DiscoveredModel, LocalAIStatus, ThemeId } from '../../../shared/types'
+
+function formatModelLabel(m: DiscoveredModel): string {
+  const parts = [m.id]
+  if (m.parameterSize) parts.push(m.parameterSize)
+  if (m.sizeBytes && m.sizeBytes > 0) {
+    const gb = m.sizeBytes / (1024 * 1024 * 1024)
+    parts.push(`${gb >= 10 ? gb.toFixed(1) : gb.toFixed(2)} GB`)
+  }
+  return parts.join(' · ')
+}
 
 export const SettingsModal: React.FC = () => {
   const {
@@ -36,14 +46,9 @@ export const SettingsModal: React.FC = () => {
   const [addingImap, setAddingImap] = useState(false)
 
   // Local AI detection
-  const [localAI, setLocalAI] = useState<{
-    ollamaRunning: boolean
-    ollamaModels: string[]
-    lmStudioRunning: boolean
-    lmStudioModels: string[]
-    claudeCliAvailable: boolean
-    codexCliAvailable: boolean
-  } | null>(null)
+  const [localAI, setLocalAI] = useState<LocalAIStatus | null>(null)
+  const [scanningAI, setScanningAI] = useState(false)
+  const [showCustomUrls, setShowCustomUrls] = useState(false)
   const [apiKeyInput, setApiKeyInput] = useState('')
 
   // Snippets
@@ -53,16 +58,57 @@ export const SettingsModal: React.FC = () => {
   // MCP config
   const [mcpConfigJson, setMcpConfigJson] = useState('')
 
+  const runLocalAIDetection = useCallback(
+    async (overrides?: { ollamaUrl?: string; lmStudioUrl?: string }) => {
+      setScanningAI(true)
+      try {
+        const res = await window.glassmail.detectLocalAI(overrides)
+        setLocalAI(res)
+        // Auto-select first discovered model if saved model is empty or no longer present
+        setDraft((prev) => {
+          if (!prev) return prev
+          let changed = false
+          const nextAi = { ...prev.ai }
+          if (res.ollamaRunning && res.ollamaModels.length > 0) {
+            const ids = res.ollamaModels.map((m) => m.id)
+            if (!nextAi.ollamaModel || !ids.includes(nextAi.ollamaModel)) {
+              nextAi.ollamaModel = ids[0]
+              changed = true
+            }
+          }
+          if (res.lmStudioRunning && res.lmStudioModels.length > 0) {
+            const ids = res.lmStudioModels.map((m) => m.id)
+            if (!nextAi.lmStudioModel || !ids.includes(nextAi.lmStudioModel)) {
+              nextAi.lmStudioModel = ids[0]
+              changed = true
+            }
+          }
+          if (changed) {
+            const next = { ...prev, ai: nextAi }
+            void saveSettings(next)
+            return next
+          }
+          return prev
+        })
+      } finally {
+        setScanningAI(false)
+      }
+    },
+    [saveSettings]
+  )
+
   useEffect(() => {
     if (settingsOpen) {
       setTab(settingsInitialTab)
       setDraft(settings ? JSON.parse(JSON.stringify(settings)) : null)
-      void window.glassmail.detectLocalAI().then(setLocalAI)
+      void runLocalAIDetection(
+        settings ? { ollamaUrl: settings.ai.ollamaUrl, lmStudioUrl: settings.ai.lmStudioUrl } : undefined
+      )
       void window.glassmail.getMcpConfig().then((cfg) =>
         setMcpConfigJson(JSON.stringify({ mcpServers: { everybox: cfg } }, null, 2))
       )
     }
-  }, [settingsOpen, settingsInitialTab, settings])
+  }, [settingsOpen, settingsInitialTab, settings, runLocalAIDetection])
 
   if (!settingsOpen || !draft) return null
 
@@ -398,104 +444,431 @@ export const SettingsModal: React.FC = () => {
             )}
 
             {/* AI TAB */}
-            {tab === 'ai' && (
-              <div className="space-y-5">
-                <div
-                  className="rounded-xl border p-4 text-[12.5px]"
-                  style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
-                >
-                  <div className="font-semibold">Detected Local &amp; Subscription Engines ($0 extra API cost)</div>
-                  <div className="mt-2 grid grid-cols-2 gap-2 text-[12px]">
-                    <div>Ollama (Local): {localAI?.ollamaRunning ? `Running (${localAI.ollamaModels.length} models)` : 'Not running'}</div>
-                    <div>LM Studio: {localAI?.lmStudioRunning ? `Running (${localAI.lmStudioModels.length} models)` : 'Not running'}</div>
-                    <div>Claude CLI (Subscription): {localAI?.claudeCliAvailable ? 'Available' : 'Not found'}</div>
-                    <div>Codex CLI (Subscription): {localAI?.codexCliAvailable ? 'Available' : 'Not found'}</div>
-                  </div>
-                </div>
+            {tab === 'ai' && (() => {
+              const gpuLabel = localAI?.gpuName ? ` · ${localAI.gpuName}` : ''
+              const localProviders: {
+                id: AIProviderType
+                name: string
+                available: boolean
+                statusBadge: string
+                statusTone: 'ok' | 'warn' | 'off'
+                subtitle: string
+              }[] = [
+                {
+                  id: 'ollama',
+                  name: `Ollama${gpuLabel}`,
+                  available: Boolean(localAI?.ollamaRunning),
+                  statusBadge: !localAI
+                    ? 'Scanning…'
+                    : localAI.ollamaRunning
+                      ? `Running · ${localAI.ollamaModels.length} model${localAI.ollamaModels.length === 1 ? '' : 's'}`
+                      : localAI.ollamaInstalled
+                        ? 'Installed · Not running'
+                        : 'Not installed',
+                  statusTone: localAI?.ollamaRunning ? 'ok' : localAI?.ollamaInstalled ? 'warn' : 'off',
+                  subtitle: !localAI
+                    ? 'Checking local Ollama server…'
+                    : localAI.ollamaRunning
+                      ? `Local ($0, 100% private) · Detected at ${localAI.ollamaUrlUsed}`
+                      : localAI.ollamaInstalled
+                        ? `Ollama is installed, but not running at ${localAI.ollamaUrlUsed}. Start Ollama and click Refresh.`
+                        : 'You can run local models privately ($0) with Ollama, but it is not installed on this PC.'
+                },
+                {
+                  id: 'lmstudio',
+                  name: `LM Studio${gpuLabel}`,
+                  available: Boolean(localAI?.lmStudioRunning),
+                  statusBadge: !localAI
+                    ? 'Scanning…'
+                    : localAI.lmStudioRunning
+                      ? `Running · ${localAI.lmStudioModels.length} model${localAI.lmStudioModels.length === 1 ? '' : 's'}`
+                      : localAI.lmStudioInstalled
+                        ? 'Installed · Server off'
+                        : 'Not installed',
+                  statusTone: localAI?.lmStudioRunning ? 'ok' : localAI?.lmStudioInstalled ? 'warn' : 'off',
+                  subtitle: !localAI
+                    ? 'Checking local LM Studio server…'
+                    : localAI.lmStudioRunning
+                      ? `Local ($0, 100% private) · Detected at ${localAI.lmStudioUrlUsed}`
+                      : localAI.lmStudioInstalled
+                        ? `LM Studio is installed, but its Local Server is not running at ${localAI.lmStudioUrlUsed}.`
+                        : 'You can run local models privately ($0) with LM Studio, but it is not installed on this PC.'
+                },
+                {
+                  id: 'claude-cli',
+                  name: 'Claude CLI',
+                  available: Boolean(localAI?.claudeCliAvailable),
+                  statusBadge: !localAI ? 'Scanning…' : localAI.claudeCliAvailable ? 'Available' : 'Not installed',
+                  statusTone: localAI?.claudeCliAvailable ? 'ok' : 'off',
+                  subtitle: localAI?.claudeCliAvailable
+                    ? 'Detected on this PC · Uses your existing Claude subscription ($0 extra API)'
+                    : 'Not installed on this PC. Uses your existing Claude subscription when installed.'
+                },
+                {
+                  id: 'codex-cli',
+                  name: 'Codex CLI',
+                  available: Boolean(localAI?.codexCliAvailable),
+                  statusBadge: !localAI ? 'Scanning…' : localAI.codexCliAvailable ? 'Available' : 'Not installed',
+                  statusTone: localAI?.codexCliAvailable ? 'ok' : 'off',
+                  subtitle: localAI?.codexCliAvailable
+                    ? 'Detected on this PC · Uses your existing Codex subscription ($0 extra API)'
+                    : 'Not installed on this PC. Uses your existing Codex subscription when installed.'
+                }
+              ]
 
-                <div>
-                  <label className="mb-1.5 block text-[12.5px] font-medium">Active AI Provider</label>
-                  <select
-                    value={draft.ai.provider}
-                    onChange={(e) =>
-                      void updateAndSave({
-                        ...draft,
-                        ai: { ...draft.ai, provider: e.target.value as AIProviderType }
-                      })
-                    }
-                    className="w-full rounded-lg border px-3 py-2 text-[13px] outline-none"
-                    style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-strong)' }}
-                  >
-                    <option value="ollama">Ollama — Local AI ($0, 100% private)</option>
-                    <option value="lmstudio">LM Studio — Local ($0, 100% private)</option>
-                    <option value="claude-cli">Claude CLI — Existing Subscription ($0 extra API)</option>
-                    <option value="codex-cli">Codex CLI — Existing Subscription ($0 extra API)</option>
-                    <option value="anthropic">Anthropic API Key (Optional)</option>
-                    <option value="gemini">Google Gemini API Key (Optional)</option>
-                    <option value="openai">OpenAI API Key (Optional)</option>
-                  </select>
-                </div>
+              const cloudProviders: {
+                id: 'anthropic' | 'gemini' | 'openai'
+                name: string
+                keySaved: boolean
+              }[] = [
+                { id: 'anthropic', name: 'Anthropic API (Claude)', keySaved: Boolean(localAI?.apiKeysConfigured.anthropic) },
+                { id: 'gemini', name: 'Google Gemini API', keySaved: Boolean(localAI?.apiKeysConfigured.gemini) },
+                { id: 'openai', name: 'OpenAI API', keySaved: Boolean(localAI?.apiKeysConfigured.openai) }
+              ]
 
-                {draft.ai.provider === 'ollama' && (
-                  <div className="grid grid-cols-2 gap-3">
+              const activeLocalEntry = localProviders.find((p) => p.id === draft.ai.provider)
+              const activeProviderUnavailable = Boolean(localAI && activeLocalEntry && !activeLocalEntry.available)
+
+              return (
+                <div className="space-y-5">
+                  {/* Discovery header */}
+                  <div className="flex items-center justify-between">
                     <div>
-                      <label className="mb-1 block text-[12px]" style={{ color: 'var(--text-muted)' }}>
-                        Ollama URL
-                      </label>
-                      <input
-                        value={draft.ai.ollamaUrl}
-                        onChange={(e) => setDraft({ ...draft, ai: { ...draft.ai, ollamaUrl: e.target.value } })}
-                        onBlur={() => void saveSettings(draft)}
-                        className="w-full rounded-lg border bg-transparent px-3 py-2 text-[13px] outline-none"
-                        style={{ borderColor: 'var(--border-strong)' }}
-                      />
+                      <div className="text-[13px] font-semibold">AI Providers on This PC</div>
+                      <div className="text-[11.5px]" style={{ color: 'var(--text-muted)' }}>
+                        {localAI?.gpuName
+                          ? `Detected GPU: ${localAI.gpuName} · Only available local engines can be selected.`
+                          : 'Only engines detected on this PC can be selected.'}
+                      </div>
                     </div>
-                    <div>
-                      <label className="mb-1 block text-[12px]" style={{ color: 'var(--text-muted)' }}>
-                        Model (e.g. qwen2.5:14b, gemma3:27b)
-                      </label>
-                      <input
-                        value={draft.ai.ollamaModel}
-                        onChange={(e) => setDraft({ ...draft, ai: { ...draft.ai, ollamaModel: e.target.value } })}
-                        onBlur={() => void saveSettings(draft)}
-                        className="w-full rounded-lg border bg-transparent px-3 py-2 text-[13px] outline-none"
-                        style={{ borderColor: 'var(--border-strong)' }}
-                      />
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void runLocalAIDetection({
+                          ollamaUrl: draft.ai.ollamaUrl,
+                          lmStudioUrl: draft.ai.lmStudioUrl
+                        })
+                      }
+                      disabled={scanningAI}
+                      className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12px] font-medium transition hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                      style={{ borderColor: 'var(--border-strong)' }}
+                    >
+                      <RefreshCw size={13} className={scanningAI ? 'animate-spin' : ''} />
+                      {scanningAI ? 'Scanning…' : 'Refresh'}
+                    </button>
                   </div>
-                )}
 
-                {['anthropic', 'gemini', 'openai'].includes(draft.ai.provider) && (
+                  {/* Warning if previously saved provider is currently unavailable */}
+                  {activeProviderUnavailable && activeLocalEntry && (
+                    <div
+                      className="flex items-start gap-2.5 rounded-xl border px-3.5 py-2.5 text-[12px]"
+                      style={{
+                        background: 'var(--bg-elevated)',
+                        borderColor: 'var(--warning, #d97706)',
+                        color: 'var(--text-secondary)'
+                      }}
+                    >
+                      <AlertCircle size={15} className="mt-0.5 shrink-0" style={{ color: 'var(--warning, #f59e0b)' }} />
+                      <div>
+                        <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>
+                          {activeLocalEntry.name} isn&apos;t currently available.
+                        </span>{' '}
+                        {activeLocalEntry.subtitle} Or pick an available provider below.
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Local & Subscription Providers ($0) */}
                   <div className="space-y-2">
-                    <label className="block text-[12px]" style={{ color: 'var(--text-muted)' }}>
-                      API Key (stored encrypted in Windows DPAPI)
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="password"
-                        placeholder={`Paste ${draft.ai.provider} API key…`}
-                        value={apiKeyInput}
-                        onChange={(e) => setApiKeyInput(e.target.value)}
-                        className="flex-1 rounded-lg border bg-transparent px-3 py-2 text-[13px] outline-none"
-                        style={{ borderColor: 'var(--border-strong)' }}
-                      />
-                      <button
-                        onClick={async () => {
-                          if (!apiKeyInput.trim()) return
-                          await window.glassmail.setSecret(`ai_key:${draft.ai.provider}`, apiKeyInput.trim())
-                          setApiKeyInput('')
-                          showToast(`Saved ${draft.ai.provider} key securely`)
-                        }}
-                        className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-[12.5px] font-semibold text-white"
-                        style={{ background: 'var(--accent)' }}
-                      >
-                        <Key size={13} /> Save Key
-                      </button>
+                    <div className="text-[11.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+                      Local &amp; Subscription ($0 extra API cost)
+                    </div>
+                    <div className="space-y-1.5">
+                      {localProviders.map((p) => {
+                        const selected = draft.ai.provider === p.id
+                        const disabled = !p.available
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            disabled={disabled}
+                            onClick={() => {
+                              if (disabled) return
+                              const nextAi = { ...draft.ai, provider: p.id }
+                              if (p.id === 'ollama' && localAI && localAI.ollamaModels.length > 0) {
+                                const ids = localAI.ollamaModels.map((m) => m.id)
+                                if (!nextAi.ollamaModel || !ids.includes(nextAi.ollamaModel)) {
+                                  nextAi.ollamaModel = ids[0]
+                                }
+                              }
+                              if (p.id === 'lmstudio' && localAI && localAI.lmStudioModels.length > 0) {
+                                const ids = localAI.lmStudioModels.map((m) => m.id)
+                                if (!nextAi.lmStudioModel || !ids.includes(nextAi.lmStudioModel)) {
+                                  nextAi.lmStudioModel = ids[0]
+                                }
+                              }
+                              void updateAndSave({ ...draft, ai: nextAi })
+                            }}
+                            className="flex w-full items-start justify-between gap-3 rounded-xl border px-3.5 py-2.5 text-left transition disabled:cursor-not-allowed disabled:opacity-55"
+                            style={{
+                              borderColor:
+                                selected && !disabled
+                                  ? 'var(--accent)'
+                                  : selected && disabled
+                                    ? 'var(--warning, #d97706)'
+                                    : 'var(--border-subtle)',
+                              background: selected && !disabled ? 'var(--accent-soft)' : 'var(--bg-elevated)'
+                            }}
+                          >
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 text-[13px] font-semibold">
+                                <span>{p.name}</span>
+                                {selected && !disabled && <Check size={13} style={{ color: 'var(--accent-text)' }} />}
+                              </div>
+                              <div className="mt-0.5 text-[11.5px]" style={{ color: 'var(--text-muted)' }}>
+                                {p.subtitle}
+                              </div>
+                            </div>
+                            <span
+                              className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium"
+                              style={{
+                                background:
+                                  p.statusTone === 'ok'
+                                    ? 'rgba(52, 199, 123, 0.14)'
+                                    : p.statusTone === 'warn'
+                                      ? 'rgba(245, 184, 65, 0.16)'
+                                      : 'rgba(150, 150, 150, 0.14)',
+                                color:
+                                  p.statusTone === 'ok'
+                                    ? 'var(--success)'
+                                    : p.statusTone === 'warn'
+                                      ? '#f5b841'
+                                      : 'var(--text-muted)'
+                              }}
+                            >
+                              {p.statusBadge}
+                            </span>
+                          </button>
+                        )
+                      })}
                     </div>
                   </div>
-                )}
-              </div>
-            )}
+
+                  {/* Discovered Ollama Model Picker (zero hand-typing) */}
+                  {draft.ai.provider === 'ollama' && localAI?.ollamaRunning && (
+                    <div
+                      className="space-y-2.5 rounded-xl border p-4"
+                      style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <label className="text-[12.5px] font-semibold">Ollama Model (Discovered)</label>
+                        <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                          {localAI.ollamaModels.length} installed at {localAI.ollamaUrlUsed}
+                        </span>
+                      </div>
+                      {localAI.ollamaModels.length > 0 ? (
+                        <select
+                          value={
+                            localAI.ollamaModels.some((m) => m.id === draft.ai.ollamaModel)
+                              ? draft.ai.ollamaModel
+                              : localAI.ollamaModels[0].id
+                          }
+                          onChange={(e) =>
+                            void updateAndSave({
+                              ...draft,
+                              ai: { ...draft.ai, ollamaModel: e.target.value }
+                            })
+                          }
+                          className="w-full rounded-lg border px-3 py-2 text-[13px] outline-none"
+                          style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
+                        >
+                          {localAI.ollamaModels.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {formatModelLabel(m)}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <div className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                          Ollama is running, but no models were found. Pull a model in Ollama, then click Refresh.
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Discovered LM Studio Model Picker (zero hand-typing) */}
+                  {draft.ai.provider === 'lmstudio' && localAI?.lmStudioRunning && (
+                    <div
+                      className="space-y-2.5 rounded-xl border p-4"
+                      style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <label className="text-[12.5px] font-semibold">LM Studio Model (Discovered)</label>
+                        <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                          {localAI.lmStudioModels.length} loaded at {localAI.lmStudioUrlUsed}
+                        </span>
+                      </div>
+                      {localAI.lmStudioModels.length > 0 ? (
+                        <select
+                          value={
+                            localAI.lmStudioModels.some((m) => m.id === draft.ai.lmStudioModel)
+                              ? draft.ai.lmStudioModel
+                              : localAI.lmStudioModels[0].id
+                          }
+                          onChange={(e) =>
+                            void updateAndSave({
+                              ...draft,
+                              ai: { ...draft.ai, lmStudioModel: e.target.value }
+                            })
+                          }
+                          className="w-full rounded-lg border px-3 py-2 text-[13px] outline-none"
+                          style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
+                        >
+                          {localAI.lmStudioModels.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {formatModelLabel(m)}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <div className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                          LM Studio server is running, but no model is loaded. Load a model in LM Studio, then click Refresh.
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Optional custom server URLs (collapsed by default — only needed for custom port / LAN server) */}
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setShowCustomUrls((v) => !v)}
+                      className="text-[11.5px] font-medium hover:underline"
+                      style={{ color: 'var(--text-muted)' }}
+                    >
+                      {showCustomUrls ? 'Hide custom local server URLs' : 'Using a custom port or remote Ollama / LM Studio server?'}
+                    </button>
+                    {showCustomUrls && (
+                      <div
+                        className="mt-2 grid grid-cols-2 gap-3 rounded-xl border p-3.5"
+                        style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
+                      >
+                        <div>
+                          <label className="mb-1 block text-[11.5px]" style={{ color: 'var(--text-muted)' }}>
+                            Ollama URL (default: http://localhost:11434)
+                          </label>
+                          <input
+                            value={draft.ai.ollamaUrl}
+                            onChange={(e) => setDraft({ ...draft, ai: { ...draft.ai, ollamaUrl: e.target.value } })}
+                            onBlur={() => {
+                              void saveSettings(draft)
+                              void runLocalAIDetection({
+                                ollamaUrl: draft.ai.ollamaUrl,
+                                lmStudioUrl: draft.ai.lmStudioUrl
+                              })
+                            }}
+                            className="w-full rounded-lg border bg-transparent px-3 py-1.5 text-[12.5px] outline-none"
+                            style={{ borderColor: 'var(--border-strong)' }}
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11.5px]" style={{ color: 'var(--text-muted)' }}>
+                            LM Studio URL (default: http://localhost:1234)
+                          </label>
+                          <input
+                            value={draft.ai.lmStudioUrl}
+                            onChange={(e) => setDraft({ ...draft, ai: { ...draft.ai, lmStudioUrl: e.target.value } })}
+                            onBlur={() => {
+                              void saveSettings(draft)
+                              void runLocalAIDetection({
+                                ollamaUrl: draft.ai.ollamaUrl,
+                                lmStudioUrl: draft.ai.lmStudioUrl
+                              })
+                            }}
+                            className="w-full rounded-lg border bg-transparent px-3 py-1.5 text-[12.5px] outline-none"
+                            style={{ borderColor: 'var(--border-strong)' }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Cloud API Providers (Optional) */}
+                  <div className="space-y-2">
+                    <div className="text-[11.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+                      Cloud API Keys (Optional)
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {cloudProviders.map((c) => {
+                        const selected = draft.ai.provider === c.id
+                        return (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() =>
+                              void updateAndSave({
+                                ...draft,
+                                ai: { ...draft.ai, provider: c.id }
+                              })
+                            }
+                            className="flex flex-col items-start gap-1 rounded-xl border px-3 py-2.5 text-left transition hover:bg-[var(--bg-hover)]"
+                            style={{
+                              borderColor: selected ? 'var(--accent)' : 'var(--border-subtle)',
+                              background: selected ? 'var(--accent-soft)' : 'var(--bg-elevated)'
+                            }}
+                          >
+                            <div className="flex w-full items-center justify-between text-[12.5px] font-semibold">
+                              <span>{c.name}</span>
+                              {selected && <Check size={13} style={{ color: 'var(--accent-text)' }} />}
+                            </div>
+                            <span
+                              className="text-[11px]"
+                              style={{ color: c.keySaved ? 'var(--success)' : 'var(--text-muted)' }}
+                            >
+                              {c.keySaved ? 'API key saved' : 'Requires API key'}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  {['anthropic', 'gemini', 'openai'].includes(draft.ai.provider) && (
+                    <div className="space-y-2">
+                      <label className="block text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                        API Key (stored encrypted in Windows DPAPI)
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          type="password"
+                          placeholder={`Paste ${draft.ai.provider} API key…`}
+                          value={apiKeyInput}
+                          onChange={(e) => setApiKeyInput(e.target.value)}
+                          className="flex-1 rounded-lg border bg-transparent px-3 py-2 text-[13px] outline-none"
+                          style={{ borderColor: 'var(--border-strong)' }}
+                        />
+                        <button
+                          onClick={async () => {
+                            if (!apiKeyInput.trim()) return
+                            await window.glassmail.setSecret(`ai_key:${draft.ai.provider}`, apiKeyInput.trim())
+                            setApiKeyInput('')
+                            showToast(`Saved ${draft.ai.provider} key securely`)
+                            void runLocalAIDetection({
+                              ollamaUrl: draft.ai.ollamaUrl,
+                              lmStudioUrl: draft.ai.lmStudioUrl
+                            })
+                          }}
+                          className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-[12.5px] font-semibold text-white"
+                          style={{ background: 'var(--accent)' }}
+                        >
+                          <Key size={13} /> Save Key
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
 
             {/* GENERAL / THEMES TAB */}
             {tab === 'general' && (
