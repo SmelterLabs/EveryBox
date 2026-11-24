@@ -15,7 +15,8 @@ export async function syncGoogleCalendar(
   const timeMin = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString()
   const timeMax = new Date(Date.now() + 90 * 24 * 3600 * 1000).toISOString()
 
-  let synced = 0
+  const freshEvents: Omit<import('../../shared/types').CalendarEvent, 'accountColor' | 'accountEmail'>[] = []
+
   for (const cal of calendars) {
     if (!cal.id) continue
     try {
@@ -30,16 +31,22 @@ export async function syncGoogleCalendar(
 
       for (const item of evRes.data.items || []) {
         if (!item.id) continue
+        if (item.status === 'cancelled') continue
+        // Skip Google Calendar "Working Location" (Home/Office) blocks that clutter multi-account views
+        if (item.eventType === 'workingLocation') continue
+
         const allDay = Boolean(item.start?.date && !item.start?.dateTime)
         const startAt = item.start?.dateTime
           ? new Date(item.start.dateTime).getTime()
           : item.start?.date
             ? new Date(`${item.start.date}T00:00:00`).getTime()
             : Date.now()
+        // Google Calendar's all-day end.date is EXCLUSIVE (e.g. Nov 26 event has end.date = Nov 27).
+        // Using T00:00:00 ensures 1-day all-day events stay strictly on their own day.
         const endAt = item.end?.dateTime
           ? new Date(item.end.dateTime).getTime()
           : item.end?.date
-            ? new Date(`${item.end.date}T23:59:59`).getTime()
+            ? Math.max(new Date(`${item.end.date}T00:00:00`).getTime(), startAt + 3600_000)
             : startAt + 3600_000
 
         const meetingUrl =
@@ -47,7 +54,7 @@ export async function syncGoogleCalendar(
           item.conferenceData?.entryPoints?.find((e) => e.entryPointType === 'video')?.uri ||
           undefined
 
-        db.upsertCalendarEvent({
+        freshEvents.push({
           id: `${account.id}|gcal|${cal.id}|${item.id}`,
           accountId: account.id,
           calendarId: cal.id,
@@ -69,13 +76,17 @@ export async function syncGoogleCalendar(
           source: 'google',
           readOnly: cal.accessRole === 'reader' || cal.accessRole === 'freeBusyReader'
         })
-        synced += 1
       }
     } catch {
       // Skip individual inaccessible sub-calendars cleanly
     }
   }
-  return { synced }
+
+  db.deleteCalendarEventsBySource(account.id, 'google')
+  for (const ev of freshEvents) {
+    db.upsertCalendarEvent(ev)
+  }
+  return { synced: freshEvents.length }
 }
 
 export async function createGoogleCalendarEvent(
