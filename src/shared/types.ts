@@ -244,6 +244,8 @@ export interface AISettings {
   ollamaModel: string
   lmStudioUrl: string
   lmStudioModel: string
+  claudeCliModel?: string
+  codexCliModel?: string
   anthropicModel: string
   geminiModel: string
   openaiModel: string

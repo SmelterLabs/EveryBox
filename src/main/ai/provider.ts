@@ -418,19 +418,23 @@ export async function completeAI(
 
   if (settings.provider === 'claude-cli') {
     const fullPrompt = `${system}\n\n---\n\n${req.prompt}`
-    const stdout = await spawnWithStdin('claude', ['-p', '-'], fullPrompt, 90_000)
+    const model = settings.claudeCliModel || 'sonnet'
+    const args = model && model !== 'default' ? ['-p', '-', '--model', model] : ['-p', '-']
+    const stdout = await spawnWithStdin('claude', args, fullPrompt, 90_000)
     return {
       text: stripThinkingTags(stdout),
-      providerLabel: 'Claude CLI · Local CLI Subscription'
+      providerLabel: `Claude CLI (${model}) · Subscription`
     }
   }
 
   if (settings.provider === 'codex-cli') {
     const fullPrompt = `${system}\n\n---\n\n${req.prompt}`
-    const stdout = await spawnWithStdin('codex', ['exec', '-'], fullPrompt, 90_000)
+    const model = settings.codexCliModel?.trim() || 'default'
+    const args = model && model !== 'default' ? ['exec', '-', '--model', model] : ['exec', '-']
+    const stdout = await spawnWithStdin('codex', args, fullPrompt, 90_000)
     return {
       text: stripThinkingTags(stdout),
-      providerLabel: 'Codex CLI · Local CLI Subscription'
+      providerLabel: `Codex CLI${model !== 'default' ? ` (${model})` : ''} · Subscription`
     }
   }
 

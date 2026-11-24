@@ -884,6 +884,68 @@ export const SettingsModal: React.FC = () => {
                     </div>
                   )}
 
+                  {/* Claude CLI Model Picker */}
+                  {draft.ai.provider === 'claude-cli' && localAI?.claudeCliAvailable && (
+                    <div
+                      className="space-y-2 rounded-xl border p-4"
+                      style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <label className="text-[12.5px] font-semibold">Claude CLI Model</label>
+                        <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                          Defaults to Sonnet for fast, high-quota email work
+                        </span>
+                      </div>
+                      <select
+                        value={draft.ai.claudeCliModel || 'sonnet'}
+                        onChange={(e) =>
+                          void updateAndSave({
+                            ...draft,
+                            ai: { ...draft.ai, claudeCliModel: e.target.value }
+                          })
+                        }
+                        className="w-full rounded-lg border px-3 py-2 text-[13px] outline-none"
+                        style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
+                      >
+                        <option value="sonnet">Sonnet — Recommended (fast &amp; high quota)</option>
+                        <option value="haiku">Haiku — Fastest &amp; lightest</option>
+                        <option value="opus">Opus — Deepest reasoning</option>
+                        <option value="default">CLI Default (uses your local Claude CLI setting)</option>
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Codex CLI Model Picker */}
+                  {draft.ai.provider === 'codex-cli' && localAI?.codexCliAvailable && (
+                    <div
+                      className="space-y-2 rounded-xl border p-4"
+                      style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <label className="text-[12.5px] font-semibold">Codex CLI Model</label>
+                        <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                          Choose which model Codex CLI uses
+                        </span>
+                      </div>
+                      <select
+                        value={draft.ai.codexCliModel || 'default'}
+                        onChange={(e) =>
+                          void updateAndSave({
+                            ...draft,
+                            ai: { ...draft.ai, codexCliModel: e.target.value }
+                          })
+                        }
+                        className="w-full rounded-lg border px-3 py-2 text-[13px] outline-none"
+                        style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
+                      >
+                        <option value="default">CLI Default (Recommended)</option>
+                        <option value="gpt-5.4-mini">GPT-5.4 Mini — Fast &amp; lightweight</option>
+                        <option value="gpt-5.4">GPT-5.4 — Balanced</option>
+                        <option value="o4-mini">o4-mini — Reasoning</option>
+                      </select>
+                    </div>
+                  )}
+
                   {/* Optional custom server URLs (collapsed by default — only needed for custom port / LAN server) */}
                   <div>
                     <button
