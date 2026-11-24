@@ -29,7 +29,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultReplyAll: false,
   undoSendSeconds: 5,
   ai: {
-    provider: 'ollama',
+    provider: 'local-openai',
+    localOpenAiUrl: '',
+    localOpenAiModel: '',
     ollamaUrl: 'http://localhost:11434',
     ollamaModel: '',
     lmStudioUrl: 'http://localhost:1234',

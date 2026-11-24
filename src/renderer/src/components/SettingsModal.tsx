@@ -67,7 +67,7 @@ export const SettingsModal: React.FC = () => {
   const [mcpConfigJson, setMcpConfigJson] = useState('')
 
   const runLocalAIDetection = useCallback(
-    async (overrides?: { ollamaUrl?: string; lmStudioUrl?: string }) => {
+    async (overrides?: { localOpenAiUrl?: string; ollamaUrl?: string; lmStudioUrl?: string }) => {
       setScanningAI(true)
       try {
         const res = await window.glassmail.detectLocalAI(overrides)
@@ -77,6 +77,17 @@ export const SettingsModal: React.FC = () => {
           if (!prev) return prev
           let changed = false
           const nextAi = { ...prev.ai }
+          if (res.localServerRunning && res.localServerModels.length > 0) {
+            const ids = res.localServerModels.map((m) => m.id)
+            if (!nextAi.localOpenAiModel || !ids.includes(nextAi.localOpenAiModel)) {
+              nextAi.localOpenAiModel = ids[0]
+              changed = true
+            }
+            if (!nextAi.localOpenAiUrl) {
+              nextAi.localOpenAiUrl = res.localServerUrlUsed
+              changed = true
+            }
+          }
           if (res.ollamaRunning && res.ollamaModels.length > 0) {
             const ids = res.ollamaModels.map((m) => m.id)
             if (!nextAi.ollamaModel || !ids.includes(nextAi.ollamaModel)) {
@@ -112,7 +123,13 @@ export const SettingsModal: React.FC = () => {
       setTab(settingsInitialTab)
       setDraft(settings ? JSON.parse(JSON.stringify(settings)) : null)
       void runLocalAIDetection(
-        settings ? { ollamaUrl: settings.ai.ollamaUrl, lmStudioUrl: settings.ai.lmStudioUrl } : undefined
+        settings
+          ? {
+              localOpenAiUrl: settings.ai.localOpenAiUrl,
+              ollamaUrl: settings.ai.ollamaUrl,
+              lmStudioUrl: settings.ai.lmStudioUrl
+            }
+          : undefined
       )
       void window.glassmail.getMcpConfig().then((cfg) =>
         setMcpConfigJson(JSON.stringify({ mcpServers: { everybox: cfg } }, null, 2))
@@ -187,7 +204,7 @@ export const SettingsModal: React.FC = () => {
 
   const tabs: { id: typeof tab; label: string; icon: React.ReactNode }[] = [
     { id: 'accounts', label: 'Accounts', icon: <Mail size={14} className="shrink-0" /> },
-    { id: 'ai', label: 'AI ($0 Local / CLI)', icon: <Sparkles size={14} className="shrink-0" /> },
+    { id: 'ai', label: 'AI Providers', icon: <Sparkles size={14} className="shrink-0" /> },
     { id: 'general', label: 'Appearance', icon: <Palette size={14} className="shrink-0" /> },
     { id: 'privacy', label: 'Privacy', icon: <Shield size={14} className="shrink-0" /> },
     { id: 'snippets', label: 'Snippets', icon: <Plus size={14} className="shrink-0" /> },
@@ -473,6 +490,22 @@ export const SettingsModal: React.FC = () => {
                 subtitle: string
               }[] = [
                 {
+                  id: 'local-openai',
+                  name: `${localAI?.localServerName || 'Local Server (llama.cpp)'}${gpuLabel}`,
+                  available: Boolean(localAI?.localServerRunning),
+                  statusBadge: !localAI
+                    ? 'Scanning…'
+                    : localAI.localServerRunning
+                      ? `Running · ${localAI.localServerModels.length} model${localAI.localServerModels.length === 1 ? '' : 's'}`
+                      : 'Not running',
+                  statusTone: localAI?.localServerRunning ? 'ok' : 'off',
+                  subtitle: !localAI
+                    ? 'Scanning local OpenAI-compatible ports (llama.cpp / vLLM)…'
+                    : localAI.localServerRunning
+                      ? `Local ($0, 100% private) · Detected at ${localAI.localServerUrlUsed}`
+                      : 'No local OpenAI-compatible server (llama.cpp / vLLM) detected on this PC.'
+                },
+                {
                   id: 'ollama',
                   name: `Ollama${gpuLabel}`,
                   available: Boolean(localAI?.ollamaRunning),
@@ -563,6 +596,7 @@ export const SettingsModal: React.FC = () => {
                       type="button"
                       onClick={() =>
                         void runLocalAIDetection({
+                          localOpenAiUrl: draft.ai.localOpenAiUrl,
                           ollamaUrl: draft.ai.ollamaUrl,
                           lmStudioUrl: draft.ai.lmStudioUrl
                         })
@@ -613,6 +647,15 @@ export const SettingsModal: React.FC = () => {
                             onClick={() => {
                               if (disabled) return
                               const nextAi = { ...draft.ai, provider: p.id }
+                              if (p.id === 'local-openai' && localAI && localAI.localServerModels.length > 0) {
+                                const ids = localAI.localServerModels.map((m) => m.id)
+                                if (!nextAi.localOpenAiModel || !ids.includes(nextAi.localOpenAiModel)) {
+                                  nextAi.localOpenAiModel = ids[0]
+                                }
+                                if (!nextAi.localOpenAiUrl) {
+                                  nextAi.localOpenAiUrl = localAI.localServerUrlUsed
+                                }
+                              }
                               if (p.id === 'ollama' && localAI && localAI.ollamaModels.length > 0) {
                                 const ids = localAI.ollamaModels.map((m) => m.id)
                                 if (!nextAi.ollamaModel || !ids.includes(nextAi.ollamaModel)) {
@@ -671,6 +714,54 @@ export const SettingsModal: React.FC = () => {
                       })}
                     </div>
                   </div>
+
+                  {/* Discovered Local Server (llama.cpp / OpenAI-compatible) Model Picker */}
+                  {draft.ai.provider === 'local-openai' && localAI?.localServerRunning && (
+                    <div
+                      className="space-y-2.5 rounded-xl border p-4"
+                      style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <label className="text-[12.5px] font-semibold">
+                          {localAI.localServerName || 'Local Server'} Model (Discovered)
+                        </label>
+                        <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                          {localAI.localServerModels.length} available at {localAI.localServerUrlUsed}
+                        </span>
+                      </div>
+                      {localAI.localServerModels.length > 0 ? (
+                        <select
+                          value={
+                            localAI.localServerModels.some((m) => m.id === draft.ai.localOpenAiModel)
+                              ? draft.ai.localOpenAiModel
+                              : localAI.localServerModels[0].id
+                          }
+                          onChange={(e) =>
+                            void updateAndSave({
+                              ...draft,
+                              ai: {
+                                ...draft.ai,
+                                localOpenAiModel: e.target.value,
+                                localOpenAiUrl: draft.ai.localOpenAiUrl || localAI.localServerUrlUsed
+                              }
+                            })
+                          }
+                          className="w-full rounded-lg border px-3 py-2 text-[13px] outline-none"
+                          style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
+                        >
+                          {localAI.localServerModels.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {formatModelLabel(m)}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <div className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                          Server is running, but no models were reported. Click Refresh after loading a model.
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Discovered Ollama Model Picker (zero hand-typing) */}
                   {draft.ai.provider === 'ollama' && localAI?.ollamaRunning && (

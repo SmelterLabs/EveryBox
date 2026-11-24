@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Archive, ArrowUp, Clock, Sparkles } from 'lucide-react'
+import { Archive, ArrowUp, Clock, Sparkles, X } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { usePaneZoom } from '../hooks/usePaneZoom'
 import type { AssistantResponse } from '../../../shared/types'
@@ -9,8 +9,8 @@ interface Turn {
   response: AssistantResponse
 }
 
-export const AssistantView: React.FC = () => {
-  const { activeAccountIds, selectThread, setActiveView, archiveThreads, showToast } = useAppStore()
+export const AssistantView: React.FC<{ width?: number }> = ({ width = 390 }) => {
+  const { activeAccountIds, selectThread, setActiveView, setAssistantOpen, archiveThreads, showToast } = useAppStore()
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [turns, setTurns] = useState<Turn[]>([])
@@ -36,40 +36,54 @@ export const AssistantView: React.FC = () => {
   }
 
   return (
-    <div
+    <aside
       ref={zoomRef}
-      className="relative flex h-full flex-1 flex-col overflow-hidden"
-      style={{ background: 'var(--bg-main)' }}
+      className="relative flex h-full shrink-0 flex-col overflow-hidden border-l"
+      style={{ width, background: 'var(--bg-main)', borderColor: 'var(--border-subtle)' }}
     >
       {zoomBadge}
       <div className="flex min-h-0 flex-1 flex-col" style={{ zoom }}>
       {/* Header */}
       <div
-        className="flex items-center justify-between border-b px-6 py-3"
+        className="flex items-center justify-between gap-2 border-b px-4 py-3"
         style={{ borderColor: 'var(--border-subtle)' }}
       >
-        <div>
-          <h2 className="text-[14px] font-semibold">Assistant</h2>
-          <p className="text-[11.5px]" style={{ color: 'var(--text-muted)' }}>
-            {activeAccountIds.length > 0
-              ? `Focused on ${activeAccountIds.length} selected account${activeAccountIds.length === 1 ? '' : 's'}`
-              : 'Searching across all connected accounts & calendar'}
-          </p>
+        <div className="flex min-w-0 items-center gap-2">
+          <Sparkles size={15} className="shrink-0" style={{ color: 'var(--accent)' }} />
+          <div className="min-w-0">
+            <h2 className="truncate text-[14px] font-semibold leading-tight">AI Assistant</h2>
+            <p className="truncate text-[11px]" style={{ color: 'var(--text-muted)' }}>
+              {activeAccountIds.length > 0
+                ? `Focused on ${activeAccountIds.length} selected account${activeAccountIds.length === 1 ? '' : 's'}`
+                : 'Searching across all accounts & calendar'}
+            </p>
+          </div>
         </div>
-        {turns.length > 0 && (
+        <div className="flex shrink-0 items-center gap-1">
+          {turns.length > 0 && (
+            <button
+              onClick={() => setTurns([])}
+              className="rounded-lg px-2 py-1 text-[11.5px] transition hover:bg-[var(--bg-hover)]"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              New chat
+            </button>
+          )}
           <button
-            onClick={() => setTurns([])}
-            className="rounded-lg px-2.5 py-1 text-[12px] transition hover:bg-[var(--bg-hover)]"
+            type="button"
+            onClick={() => setAssistantOpen(false)}
+            className="rounded-lg p-1.5 transition hover:bg-[var(--bg-hover)]"
             style={{ color: 'var(--text-secondary)' }}
+            title="Close AI Assistant"
           >
-            New chat
+            <X size={16} />
           </button>
-        )}
+        </div>
       </div>
 
       {/* Conversation Area */}
-      <div className="flex-1 overflow-y-auto px-8 py-6">
-        <div className="mx-auto max-w-[700px] space-y-8">
+      <div className="flex-1 overflow-y-auto px-4 py-4">
+        <div className="space-y-6">
           {turns.length === 0 && !loading && (
             <div className="pt-12 text-center">
               <div
@@ -323,6 +337,6 @@ export const AssistantView: React.FC = () => {
         </form>
       </div>
       </div>
-    </div>
+    </aside>
   )
 }

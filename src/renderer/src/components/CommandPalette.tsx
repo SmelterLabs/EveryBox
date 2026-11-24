@@ -11,6 +11,7 @@ export const CommandPalette: React.FC = () => {
     accounts,
     settings,
     setActiveView,
+    setAssistantOpen,
     setActiveMailbox,
     selectAllAccounts,
     soloAccount,
@@ -31,7 +32,7 @@ export const CommandPalette: React.FC = () => {
   const commands: { id: string; label: string; hint?: string; icon: React.ReactNode; run: () => void }[] = [
     { id: 'compose', label: 'New Message', hint: 'C', icon: <PenSquare size={14} />, run: () => openComposer({ mode: 'new' }) },
     { id: 'triage', label: 'Start Triage Mode', icon: <Zap size={14} />, run: () => setActiveView('triage') },
-    { id: 'assistant', label: 'Open AI Assistant', icon: <Sparkles size={14} />, run: () => setActiveView('assistant') },
+    { id: 'assistant', label: 'Open AI Assistant', icon: <Sparkles size={14} />, run: () => setAssistantOpen(true) },
     { id: 'calendar', label: 'Open Combined Calendar', icon: <Calendar size={14} />, run: () => setActiveView('calendar') },
     { id: 'inbox', label: 'Go to Inbox', icon: <Inbox size={14} />, run: () => void setActiveMailbox('inbox') },
     { id: 'all-acc', label: 'Show All Accounts', icon: <Inbox size={14} />, run: () => void selectAllAccounts() },

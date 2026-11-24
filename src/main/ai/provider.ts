@@ -101,16 +101,85 @@ function normalizeLmStudioUrl(url?: string): string {
   return withScheme.replace(/\/$/, '')
 }
 
+function normalizeHttpUrl(url: string): string {
+  const raw = url.trim()
+  const withScheme = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`
+  return withScheme.replace(/\/$/, '')
+}
+
+function formatParamCount(n?: number): string | undefined {
+  if (!n || !Number.isFinite(n) || n <= 0) return undefined
+  if (n >= 1e9) return `${Math.round(n / 1e9)}B`
+  if (n >= 1e6) return `${Math.round(n / 1e6)}M`
+  return undefined
+}
+
+async function probeOpenAiCompatibleServer(
+  configuredUrl?: string
+): Promise<{ running: boolean; urlUsed: string; serverName: string | null; models: DiscoveredModel[] }> {
+  const defaults = [
+    'http://127.0.0.1:8080',
+    'http://127.0.0.1:8001',
+    'http://127.0.0.1:8000',
+    'http://127.0.0.1:8081'
+  ]
+  const candidates: string[] = []
+  if (configuredUrl?.trim()) {
+    candidates.push(normalizeHttpUrl(configuredUrl))
+  }
+  for (const d of defaults) {
+    if (!candidates.includes(d)) candidates.push(d)
+  }
+
+  for (const base of candidates) {
+    try {
+      const res = await fetch(`${base}/v1/models`, { signal: AbortSignal.timeout(1200) })
+      if (!res.ok) continue
+      const data = (await res.json()) as {
+        data?: {
+          id: string
+          owned_by?: string
+          meta?: { size?: number; n_params?: number }
+        }[]
+      }
+      if (!Array.isArray(data.data)) continue
+      const models: DiscoveredModel[] = data.data.map((m) => ({
+        id: m.id,
+        sizeBytes: m.meta?.size,
+        parameterSize: formatParamCount(m.meta?.n_params)
+      }))
+      const ownedBy = data.data[0]?.owned_by?.toLowerCase() || ''
+      const serverName = ownedBy.includes('llama')
+        ? 'llama.cpp'
+        : ownedBy.includes('vllm')
+          ? 'vLLM'
+          : 'Local OpenAI Server'
+      return { running: true, urlUsed: base, serverName, models }
+    } catch {
+      // try next candidate
+    }
+  }
+
+  return {
+    running: false,
+    urlUsed: configuredUrl?.trim() ? normalizeHttpUrl(configuredUrl) : 'http://127.0.0.1:8080',
+    serverName: null,
+    models: []
+  }
+}
+
 export async function detectLocalAI(
   settings: AISettings,
   secrets?: SecretStore,
-  overrides?: { ollamaUrl?: string; lmStudioUrl?: string }
+  overrides?: { localOpenAiUrl?: string; ollamaUrl?: string; lmStudioUrl?: string }
 ): Promise<LocalAIStatus> {
   const ollamaUrlUsed = normalizeOllamaUrl(overrides?.ollamaUrl ?? settings.ollamaUrl)
   const lmStudioUrlUsed = normalizeLmStudioUrl(overrides?.lmStudioUrl ?? settings.lmStudioUrl)
+  const localServerOverride = overrides?.localOpenAiUrl ?? settings.localOpenAiUrl
 
   const [
     gpuName,
+    localServerCheck,
     ollamaCheck,
     lmStudioCheck,
     ollamaInstalledLocal,
@@ -119,6 +188,7 @@ export async function detectLocalAI(
     codexCliAvailable
   ] = await Promise.all([
     detectGpuName(),
+    probeOpenAiCompatibleServer(localServerOverride),
     (async (): Promise<{ running: boolean; models: DiscoveredModel[] }> => {
       try {
         const res = await fetch(`${ollamaUrlUsed}/api/tags`, {
@@ -159,6 +229,10 @@ export async function detectLocalAI(
 
   return {
     gpuName,
+    localServerRunning: localServerCheck.running,
+    localServerName: localServerCheck.serverName,
+    localServerUrlUsed: localServerCheck.urlUsed,
+    localServerModels: localServerCheck.models,
     ollamaInstalled: ollamaCheck.running || ollamaInstalledLocal,
     ollamaRunning: ollamaCheck.running,
     ollamaUrlUsed,
@@ -187,6 +261,39 @@ export async function completeAI(
       ? `\nAlways respond in ${settings.responseLanguage}.`
       : ''
   const system = `${req.system}${langNote}`
+
+  if (settings.provider === 'local-openai') {
+    const probed = await probeOpenAiCompatibleServer(settings.localOpenAiUrl)
+    if (!probed.running) {
+      throw new Error('Local OpenAI-compatible server is not running. Start llama-server or check Settings › AI Providers.')
+    }
+    const model = settings.localOpenAiModel?.trim() || probed.models[0]?.id || ''
+    if (!model) {
+      throw new Error('No model reported by the local server. Open Settings › AI Providers and click Refresh.')
+    }
+    const res = await fetch(`${probed.urlUsed}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        temperature: 0.3,
+        max_tokens: req.maxTokens || 1200,
+        response_format: req.jsonMode ? { type: 'json_object' } : undefined,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: req.prompt }
+        ]
+      }),
+      signal: AbortSignal.timeout(90_000)
+    })
+    if (!res.ok) throw new Error(`Local server error (${res.status}): ${await res.text()}`)
+    const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }
+    const gpu = await detectGpuName()
+    return {
+      text: data.choices?.[0]?.message?.content || '',
+      providerLabel: `${probed.serverName || 'Local Server'} (${model}) · Local${gpu ? ` (${gpu})` : ''}`
+    }
+  }
 
   if (settings.provider === 'ollama') {
     const base = normalizeOllamaUrl(settings.ollamaUrl)
