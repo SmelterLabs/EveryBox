@@ -32,7 +32,9 @@ export const ThreadReader: React.FC = () => {
 
   const readerWidthMode = settings?.readerWidth || 'comfortable'
   const readerMaxWidth =
-    readerWidthMode === 'narrow' ? '680px' : readerWidthMode === 'wide' ? 'none' : '860px'
+    readerWidthMode === 'narrow' ? '640px' : readerWidthMode === 'wide' ? 'none' : '880px'
+  const readerBodyScale =
+    readerWidthMode === 'narrow' ? 1 : readerWidthMode === 'wide' ? 1.35 : 1.15
   const { ref: zoomRef, zoom, zoomBadge } = usePaneZoom<HTMLDivElement>('reader')
 
   const [summary, setSummary] = useState<ThreadAISummary | null>(null)
@@ -379,6 +381,7 @@ export const ThreadReader: React.FC = () => {
                 {/* Body */}
                 <div
                   className="email-prose mt-4 select-text"
+                  style={{ zoom: readerBodyScale }}
                   dangerouslySetInnerHTML={{
                     __html: m.bodyHtml || `<p>${m.bodyText.replace(/\n/g, '<br/>')}</p>`
                   }}
