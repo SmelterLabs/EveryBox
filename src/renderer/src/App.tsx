@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Command, PanelLeft, Search } from 'lucide-react'
 import { useAppStore } from './store/useAppStore'
 import { Sidebar } from './components/Sidebar'
@@ -39,6 +39,44 @@ export const App: React.FC = () => {
   } = useAppStore()
 
   const searchInputRef = useRef<HTMLInputElement | null>(null)
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    const saved = Number(localStorage.getItem('everybox:sidebarWidth'))
+    return Number.isFinite(saved) && saved >= 190 && saved <= 440 ? saved : 244
+  })
+  const [threadListWidth, setThreadListWidth] = useState<number>(() => {
+    const saved = Number(localStorage.getItem('everybox:threadListWidth'))
+    return Number.isFinite(saved) && saved >= 250 && saved <= 580 ? saved : 340
+  })
+
+  const startResize = (
+    e: React.MouseEvent,
+    startWidth: number,
+    min: number,
+    max: number,
+    storageKey: string,
+    setter: (w: number) => void
+  ) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const prevCursor = document.body.style.cursor
+    const prevSelect = document.body.style.userSelect
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+
+    const onMove = (ev: MouseEvent) => {
+      const next = Math.min(max, Math.max(min, startWidth + (ev.clientX - startX)))
+      setter(next)
+      localStorage.setItem(storageKey, String(next))
+    }
+    const onUp = () => {
+      document.body.style.cursor = prevCursor
+      document.body.style.userSelect = prevSelect
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
 
   useEffect(() => {
     void bootstrap()
@@ -164,7 +202,20 @@ export const App: React.FC = () => {
 
       {/* Main Content Area */}
       <main className="flex min-h-0 flex-1 overflow-hidden">
-        {sidebarVisible && activeView !== 'triage' && <Sidebar />}
+        {sidebarVisible && activeView !== 'triage' && (
+          <>
+            <Sidebar width={sidebarWidth} />
+            <div
+              onMouseDown={(e) => startResize(e, sidebarWidth, 190, 440, 'everybox:sidebarWidth', setSidebarWidth)}
+              onDoubleClick={() => {
+                setSidebarWidth(244)
+                localStorage.setItem('everybox:sidebarWidth', '244')
+              }}
+              className="group relative z-10 -ml-0.5 w-1.5 shrink-0 cursor-col-resize transition-colors hover:bg-[var(--accent)]/40"
+              title="Drag to resize sidebar (double-click to reset)"
+            />
+          </>
+        )}
 
         {activeView === 'assistant' && <AssistantView />}
         {activeView === 'calendar' && <CalendarView />}
@@ -172,7 +223,18 @@ export const App: React.FC = () => {
         {activeView === 'subscriptions' && <SubscriptionsView />}
         {activeView === 'mail' && (
           <>
-            <ThreadList />
+            <ThreadList width={threadListWidth} />
+            <div
+              onMouseDown={(e) =>
+                startResize(e, threadListWidth, 250, 580, 'everybox:threadListWidth', setThreadListWidth)
+              }
+              onDoubleClick={() => {
+                setThreadListWidth(340)
+                localStorage.setItem('everybox:threadListWidth', '340')
+              }}
+              className="group relative z-10 -ml-0.5 w-1.5 shrink-0 cursor-col-resize transition-colors hover:bg-[var(--accent)]/40"
+              title="Drag to resize message list (double-click to reset)"
+            />
             {selectedThreadId ? <ThreadReader /> : <TodayBrief />}
           </>
         )}

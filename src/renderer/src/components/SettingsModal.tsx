@@ -1066,6 +1066,19 @@ export const SettingsModal: React.FC = () => {
               </div>
             )}
           </div>
+          <div
+            className="flex shrink-0 items-center justify-end border-t px-6 py-3"
+            style={{ borderColor: 'var(--border-subtle)' }}
+          >
+            <button
+              type="button"
+              onClick={closeSettings}
+              className="rounded-lg px-4 py-1.5 text-[12.5px] font-semibold text-white transition hover:opacity-90"
+              style={{ background: 'var(--accent)' }}
+            >
+              Done
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -27,7 +27,7 @@ function initials(name: string): string {
   return ((parts[0]?.[0] || '') + (parts[1]?.[0] || parts[0]?.[1] || '')).toUpperCase() || '?'
 }
 
-export const ThreadList: React.FC = () => {
+export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
   const {
     accounts,
     activeAccountIds,
@@ -76,8 +76,8 @@ export const ThreadList: React.FC = () => {
 
   return (
     <section
-      className="flex h-full w-[330px] shrink-0 flex-col border-r"
-      style={{ background: 'var(--bg-list)', borderColor: 'var(--border-subtle)' }}
+      className="flex h-full shrink-0 flex-col border-r"
+      style={{ width, background: 'var(--bg-list)', borderColor: 'var(--border-subtle)' }}
     >
       {/* Header */}
       <div className="border-b px-3.5 pb-2.5 pt-3" style={{ borderColor: 'var(--border-subtle)' }}>

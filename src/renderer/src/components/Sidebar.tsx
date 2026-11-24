@@ -10,8 +10,10 @@ import {
   Folder as FolderIcon,
   Hourglass,
   Inbox,
+  Layers,
   Mail,
   Newspaper,
+  Pencil,
   PenSquare,
   Plus,
   RefreshCw,
@@ -20,12 +22,26 @@ import {
   ShieldAlert,
   Sparkles,
   Star,
-  Trash2
+  Trash2,
+  X
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
-import type { MailboxId } from '../../../shared/types'
+import type { Account, MailboxId } from '../../../shared/types'
 
-export const Sidebar: React.FC = () => {
+const COLOR_SWATCHES = [
+  '#E87A48',
+  '#4F9CF9',
+  '#34C77B',
+  '#B77CFF',
+  '#F5B841',
+  '#EC5C8A',
+  '#2DD4BF',
+  '#EF4444',
+  '#818CF8',
+  '#94A3B8'
+]
+
+export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
   const {
     accounts,
     workspaces,
@@ -46,12 +62,42 @@ export const Sidebar: React.FC = () => {
     selectWorkspace,
     openComposer,
     openSettings,
-    triggerSync
+    triggerSync,
+    refreshAll,
+    showToast
   } = useAppStore()
 
   const [showMore, setShowMore] = useState(false)
   const [showFolders, setShowFolders] = useState(true)
   const [showWorkspacesMenu, setShowWorkspacesMenu] = useState(false)
+  const [editingAccount, setEditingAccount] = useState<Account | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editColor, setEditColor] = useState('#E87A48')
+  const [savingAccount, setSavingAccount] = useState(false)
+
+  const openEditAccount = (acc: Account) => {
+    setEditingAccount(acc)
+    setEditName(acc.name)
+    setEditColor(acc.color)
+  }
+
+  const handleSaveAccount = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingAccount) return
+    setSavingAccount(true)
+    try {
+      await window.glassmail.updateAccount({
+        ...editingAccount,
+        name: editName.trim() || editingAccount.email.split('@')[0],
+        color: editColor
+      })
+      setEditingAccount(null)
+      await refreshAll()
+      showToast('Account updated')
+    } finally {
+      setSavingAccount(false)
+    }
+  }
 
   const allSelected = activeAccountIds.length === 0
   const activeWs = workspaces.find((w) => w.id === activeWorkspaceId)
@@ -82,8 +128,8 @@ export const Sidebar: React.FC = () => {
 
   return (
     <aside
-      className="flex h-full w-[228px] shrink-0 flex-col border-r"
-      style={{ background: 'var(--bg-sidebar)', borderColor: 'var(--border-subtle)' }}
+      className="flex h-full shrink-0 flex-col border-r"
+      style={{ width, background: 'var(--bg-sidebar)', borderColor: 'var(--border-subtle)' }}
     >
       {/* Top Drag + Compose Row */}
       <div className="app-drag flex h-10 items-center justify-between px-3 pt-1">
@@ -242,38 +288,61 @@ export const Sidebar: React.FC = () => {
         {/* Accounts & Focus Toggles */}
         <div className="mt-5">
           <div className="mb-1.5 flex items-center justify-between px-2.5">
-            <span className="text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
-              Accounts (Focus)
+            <span className="text-[12.5px] font-semibold tracking-tight" style={{ color: 'var(--text-primary)' }}>
+              Accounts
             </span>
-            <div className="flex items-center gap-1">
-              {!allSelected && (
-                <button
-                  onClick={() => void selectAllAccounts()}
-                  className="rounded px-1.5 py-0.5 text-[10.5px] font-medium transition hover:opacity-80"
-                  style={{ background: 'var(--accent-soft)', color: 'var(--accent-text)' }}
-                  title="Show all accounts"
-                >
-                  All
-                </button>
-              )}
-              <button
-                onClick={() => openSettings('accounts')}
-                className="rounded p-0.5 transition hover:bg-[var(--bg-hover)]"
-                style={{ color: 'var(--text-muted)' }}
-                title="Add Gmail or IMAP account"
-              >
-                <Plus size={13} />
-              </button>
-            </div>
+            <button
+              onClick={() => openSettings('accounts')}
+              className="rounded p-1 transition hover:bg-[var(--bg-hover)]"
+              style={{ color: 'var(--text-muted)' }}
+              title="Add Gmail or IMAP account"
+            >
+              <Plus size={14} />
+            </button>
           </div>
 
           <div className="space-y-0.5">
+            {/* Full-width clickable All Accounts row */}
+            <button
+              onClick={() => void selectAllAccounts()}
+              className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-[12.5px] font-medium transition hover:bg-[var(--bg-hover)]"
+              style={{
+                background: allSelected ? 'var(--bg-selected)' : undefined,
+                color: allSelected ? 'var(--accent-text)' : 'var(--text-secondary)'
+              }}
+              title="Show all connected accounts in Mail & Calendar"
+            >
+              <span className="flex items-center gap-2">
+                <span
+                  className="flex h-4 w-4 shrink-0 items-center justify-center rounded border"
+                  style={{
+                    borderColor: allSelected ? 'var(--accent)' : 'var(--border-strong)',
+                    background: allSelected ? 'var(--accent)' : 'transparent'
+                  }}
+                >
+                  {allSelected ? (
+                    <Check size={10} className="text-white" strokeWidth={3} />
+                  ) : (
+                    <Layers size={10} style={{ color: 'var(--text-muted)' }} />
+                  )}
+                </span>
+                <span>All Accounts</span>
+              </span>
+              <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                {accounts.length}
+              </span>
+            </button>
+
             {accounts.map((acc) => {
               const isChecked = allSelected || activeAccountIds.includes(acc.id)
               const isSolo = activeAccountIds.length === 1 && activeAccountIds[0] === acc.id
               return (
                 <div
                   key={acc.id}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    openEditAccount(acc)
+                  }}
                   className="group flex items-center justify-between rounded-lg px-2 py-1.5 text-[12.5px] transition hover:bg-[var(--bg-hover)]"
                   style={{
                     background: isSolo ? 'var(--bg-selected)' : undefined,
@@ -301,23 +370,36 @@ export const Sidebar: React.FC = () => {
                     <button
                       onClick={() => void soloAccount(acc.id)}
                       className="flex min-w-0 flex-1 flex-col text-left"
-                      title={`Click to solo ${acc.name} (${acc.email})`}
+                      title={`Click to focus ${acc.name} (${acc.email}) · Right-click to rename or change color`}
                     >
                       <span className="truncate font-medium" style={{ color: 'var(--text-primary)' }}>
                         {acc.name}
                       </span>
                       <span className="truncate text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
-                        {acc.provider === 'gmail' ? 'Gmail' : 'IMAP'}
+                        {acc.email}
                         {acc.isDemo ? ' · Demo' : ''}
                       </span>
                     </button>
                   </div>
 
-                  {acc.unreadCount ? (
-                    <span className="ml-1 text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
-                      {acc.unreadCount}
-                    </span>
-                  ) : null}
+                  <div className="ml-1 flex shrink-0 items-center gap-1">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        openEditAccount(acc)
+                      }}
+                      className="hidden rounded p-1 transition hover:bg-[var(--bg-elevated)] group-hover:flex"
+                      style={{ color: 'var(--text-muted)' }}
+                      title="Rename or change account color"
+                    >
+                      <Pencil size={11} />
+                    </button>
+                    {acc.unreadCount ? (
+                      <span className="text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
+                        {acc.unreadCount}
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
               )
             })}
@@ -389,6 +471,108 @@ export const Sidebar: React.FC = () => {
           <Settings size={15} />
         </button>
       </div>
+      {/* Edit Account Modal (Rename & Color) */}
+      {editingAccount && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4"
+          onClick={() => setEditingAccount(null)}
+        >
+          <form
+            onSubmit={(e) => void handleSaveAccount(e)}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm space-y-4 rounded-2xl border p-5 shadow-2xl"
+            style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-strong)' }}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-[15px] font-semibold">Edit Account</h3>
+                <p className="text-[11.5px]" style={{ color: 'var(--text-muted)' }}>
+                  {editingAccount.email}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingAccount(null)}
+                className="rounded p-1 hover:bg-[var(--bg-hover)]"
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-[11.5px] font-medium" style={{ color: 'var(--text-muted)' }}>
+                Display Name
+              </label>
+              <input
+                autoFocus
+                required
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                placeholder="e.g. Work, Personal, Client Inbox"
+                className="w-full rounded-lg border bg-transparent px-3 py-2 text-[13px] outline-none"
+                style={{ borderColor: 'var(--border-strong)' }}
+              />
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-[11.5px] font-medium" style={{ color: 'var(--text-muted)' }}>
+                Account Color
+              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                {COLOR_SWATCHES.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setEditColor(c)}
+                    className="flex h-7 w-7 items-center justify-center rounded-full border-2 transition hover:scale-105"
+                    style={{
+                      background: c,
+                      borderColor: editColor.toLowerCase() === c.toLowerCase() ? '#ffffff' : 'transparent'
+                    }}
+                    title={c}
+                  >
+                    {editColor.toLowerCase() === c.toLowerCase() && (
+                      <Check size={13} className="text-white" strokeWidth={3} />
+                    )}
+                  </button>
+                ))}
+                <label
+                  className="flex h-7 cursor-pointer items-center gap-1 rounded-full border px-2 text-[11px]"
+                  style={{ borderColor: 'var(--border-strong)', color: 'var(--text-secondary)' }}
+                  title="Pick a custom color"
+                >
+                  <input
+                    type="color"
+                    value={editColor}
+                    onChange={(e) => setEditColor(e.target.value)}
+                    className="h-4 w-4 cursor-pointer border-0 bg-transparent p-0"
+                  />
+                  Custom
+                </label>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t pt-3" style={{ borderColor: 'var(--border-subtle)' }}>
+              <button
+                type="button"
+                onClick={() => setEditingAccount(null)}
+                className="rounded-lg border px-3.5 py-1.5 text-[12.5px] hover:bg-[var(--bg-hover)]"
+                style={{ borderColor: 'var(--border-strong)' }}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={savingAccount}
+                className="rounded-lg px-4 py-1.5 text-[12.5px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+                style={{ background: 'var(--accent)' }}
+              >
+                {savingAccount ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </aside>
   )
 }

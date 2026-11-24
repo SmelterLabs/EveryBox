@@ -1,9 +1,37 @@
-import React, { useEffect, useState } from 'react'
-import { ChevronLeft, ChevronRight, Download, MapPin, Plus, RefreshCw, Trash2, Upload, Video, X } from 'lucide-react'
+import React, { useEffect, useMemo, useState } from 'react'
+import { Check, ChevronLeft, ChevronRight, Download, Layers, MapPin, Plus, RefreshCw, Trash2, Upload, Video, X } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import type { CalendarEvent, OutlookCalendarInfo } from '../../../shared/types'
 
 type CalMode = 'day' | 'week' | 'month'
+
+interface MergedCalendarEvent {
+  primary: CalendarEvent
+  occurrences: { email: string; color: string; calendarName: string }[]
+}
+
+function mergeDuplicateEvents(list: CalendarEvent[]): MergedCalendarEvent[] {
+  const map = new Map<string, MergedCalendarEvent>()
+  for (const ev of list) {
+    const key = `${ev.title.trim().toLowerCase()}|${ev.startAt}|${ev.endAt}|${ev.allDay ? '1' : '0'}`
+    const existing = map.get(key)
+    const occ = { email: ev.accountEmail, color: ev.accountColor, calendarName: ev.calendarName }
+    if (!existing) {
+      map.set(key, { primary: ev, occurrences: [occ] })
+    } else {
+      // Prefer writable event or one with a meeting link/description as primary
+      const score = (e: CalendarEvent) =>
+        (e.readOnly ? 0 : 4) + (e.meetingUrl ? 2 : 0) + (e.description ? 1 : 0)
+      if (score(ev) > score(existing.primary)) {
+        existing.primary = ev
+      }
+      if (!existing.occurrences.some((o) => o.email === occ.email && o.color === occ.color)) {
+        existing.occurrences.push(occ)
+      }
+    }
+  }
+  return Array.from(map.values())
+}
 
 function startOfDay(d: Date): Date {
   const copy = new Date(d)
@@ -23,7 +51,8 @@ export const CalendarView: React.FC = () => {
   const [anchor, setAnchor] = useState<Date>(() => startOfDay(new Date()))
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [syncing, setSyncing] = useState(false)
-  const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null)
+  const [selectedEvent, setSelectedEvent] = useState<MergedCalendarEvent | null>(null)
+  const [mergeDuplicates, setMergeDuplicates] = useState(true)
   const [createOpen, setCreateOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [importAccountId, setImportAccountId] = useState('')
@@ -31,8 +60,13 @@ export const CalendarView: React.FC = () => {
   const [outlookCalendars, setOutlookCalendars] = useState<OutlookCalendarInfo[] | null>(null)
   const [outlookError, setOutlookError] = useState<string | null>(null)
   const [importingFolder, setImportingFolder] = useState<string | null>(null)
+  const [importedFolders, setImportedFolders] = useState<Record<string, { count: number; targetName: string }>>({})
+  const [importStatus, setImportStatus] = useState<string | null>(null)
   const [importingIcs, setImportingIcs] = useState(false)
   const [exportingIcs, setExportingIcs] = useState(false)
+
+  const imapAccounts = useMemo(() => accounts.filter((a) => a.provider === 'imap' && !a.isDemo), [accounts])
+  const importTargetAccounts = imapAccounts.length > 0 ? imapAccounts : accounts
 
   // Create form state
   const [title, setTitle] = useState('')
@@ -47,11 +81,10 @@ export const CalendarView: React.FC = () => {
     if (!accountId && accounts.length > 0) {
       setAccountId(activeAccountIds[0] || accounts[0].id)
     }
-    if (!importAccountId && accounts.length > 0) {
-      const imapAcc = accounts.find((a) => a.provider === 'imap' && !a.isDemo)
-      setImportAccountId(imapAcc?.id || activeAccountIds[0] || accounts[0].id)
+    if (importTargetAccounts.length > 0 && !importTargetAccounts.some((a) => a.id === importAccountId)) {
+      setImportAccountId(importTargetAccounts[0].id)
     }
-  }, [accounts, activeAccountIds, accountId, importAccountId])
+  }, [accounts, activeAccountIds, accountId, importAccountId, importTargetAccounts])
 
   const getRange = (): { start: Date; end: Date; days: Date[] } => {
     if (mode === 'day') {
@@ -143,13 +176,26 @@ export const CalendarView: React.FC = () => {
   const handleImportOutlook = async (folderPath: string) => {
     if (!importAccountId) return
     setImportingFolder(folderPath)
+    setImportStatus(null)
     try {
+      const targetAcc = accounts.find((a) => a.id === importAccountId)
+      const targetName = targetAcc?.name || targetAcc?.email || 'account'
       const res = await window.glassmail.importOutlookCalendar(importAccountId, folderPath)
       if (res.ok) {
+        setImportedFolders((prev) => ({
+          ...prev,
+          [folderPath]: { count: res.imported, targetName }
+        }))
         await loadEvents()
         await refreshTodayEvents()
-        showToast(`Imported ${res.imported} event${res.imported === 1 ? '' : 's'} from ${res.calendarName || 'Outlook'}`)
+        const msg =
+          res.imported === 0
+            ? `Checked "${res.calendarName || 'Outlook'}" — 0 events found in the active date window.`
+            : `Imported ${res.imported} event${res.imported === 1 ? '' : 's'} from "${res.calendarName || 'Outlook'}" into ${targetName}.`
+        setImportStatus(msg)
+        showToast(msg)
       } else {
+        setImportStatus(res.error || 'Outlook calendar import failed')
         showToast(res.error || 'Outlook calendar import failed')
       }
     } finally {
@@ -160,14 +206,20 @@ export const CalendarView: React.FC = () => {
   const handleImportIcs = async () => {
     if (!importAccountId) return
     setImportingIcs(true)
+    setImportStatus(null)
     try {
+      const targetAcc = accounts.find((a) => a.id === importAccountId)
+      const targetName = targetAcc?.name || targetAcc?.email || 'account'
       const res = await window.glassmail.importIcsCalendar(importAccountId)
       if (res.cancelled) return
       if (res.ok) {
         await loadEvents()
         await refreshTodayEvents()
-        showToast(`Imported ${res.imported} event${res.imported === 1 ? '' : 's'} from .ics file`)
+        const msg = `Imported ${res.imported} event${res.imported === 1 ? '' : 's'} from .ics file into ${targetName}.`
+        setImportStatus(msg)
+        showToast(msg)
       } else {
+        setImportStatus(res.error || 'Could not import .ics file')
         showToast(res.error || 'Could not import .ics file')
       }
     } finally {
@@ -177,13 +229,17 @@ export const CalendarView: React.FC = () => {
 
   const handleExportIcs = async () => {
     setExportingIcs(true)
+    setImportStatus(null)
     try {
       const filterIds = activeAccountIds.length > 0 ? activeAccountIds : undefined
       const res = await window.glassmail.exportIcsCalendar(filterIds)
       if (res.cancelled) return
       if (res.ok) {
-        showToast(`Exported ${res.count} event${res.count === 1 ? '' : 's'} to .ics`)
+        const msg = `Exported ${res.count} event${res.count === 1 ? '' : 's'} to .ics.`
+        setImportStatus(msg)
+        showToast(msg)
       } else {
+        setImportStatus(res.error || 'Could not export calendar')
         showToast(res.error || 'Could not export calendar')
       }
     } finally {
@@ -280,6 +336,19 @@ export const CalendarView: React.FC = () => {
           </div>
 
           <button
+            onClick={() => setMergeDuplicates((v) => !v)}
+            className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[12px] font-medium transition hover:bg-[var(--bg-hover)]"
+            style={{
+              borderColor: mergeDuplicates ? 'var(--accent)' : 'var(--border-strong)',
+              color: mergeDuplicates ? 'var(--accent-text)' : 'var(--text-secondary)',
+              background: mergeDuplicates ? 'var(--accent-soft)' : 'transparent'
+            }}
+            title="Combine duplicate events that appear across multiple connected accounts"
+          >
+            <Layers size={13} /> {mergeDuplicates ? 'Merged' : 'Raw'}
+          </button>
+
+          <button
             onClick={() => void handleSync()}
             className="rounded-lg border p-1.5 hover:bg-[var(--bg-hover)]"
             style={{ borderColor: 'var(--border-strong)' }}
@@ -318,7 +387,13 @@ export const CalendarView: React.FC = () => {
             const isToday = d.toDateString() === todayStr
             const dayStart = startOfDay(d).getTime()
             const dayEnd = dayStart + 86400_000
-            const dayEvents = events.filter((ev) => ev.endAt > dayStart && ev.startAt < dayEnd)
+            const rawDayEvents = events.filter((ev) => ev.endAt > dayStart && ev.startAt < dayEnd)
+            const dayEvents: MergedCalendarEvent[] = mergeDuplicates
+              ? mergeDuplicateEvents(rawDayEvents)
+              : rawDayEvents.map((ev) => ({
+                  primary: ev,
+                  occurrences: [{ email: ev.accountEmail, color: ev.accountColor, calendarName: ev.calendarName }]
+                }))
 
             return (
               <div
@@ -345,24 +420,45 @@ export const CalendarView: React.FC = () => {
                 </div>
 
                 <div className="flex-1 space-y-1.5 overflow-y-auto">
-                  {dayEvents.map((ev) => (
-                    <button
-                      key={ev.id}
-                      onClick={() => setSelectedEvent(ev)}
-                      className="block w-full rounded-lg border-l-[3px] px-2 py-1.5 text-left transition hover:brightness-110"
-                      style={{
-                        background: 'var(--bg-main)',
-                        borderLeftColor: ev.accountColor
-                      }}
-                    >
-                      <div className="truncate text-[12px] font-semibold">{ev.title}</div>
-                      <div className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
-                        {ev.allDay
-                          ? 'All day'
-                          : `${new Date(ev.startAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`}
-                      </div>
-                    </button>
-                  ))}
+                  {dayEvents.map((item) => {
+                    const ev = item.primary
+                    return (
+                      <button
+                        key={ev.id}
+                        onClick={() => setSelectedEvent(item)}
+                        className="block w-full rounded-lg border-l-[3px] px-2 py-1.5 text-left transition hover:brightness-110"
+                        style={{
+                          background: 'var(--bg-main)',
+                          borderLeftColor: ev.accountColor
+                        }}
+                        title={
+                          item.occurrences.length > 1
+                            ? `${ev.title} (${item.occurrences.map((o) => o.email).join(', ')})`
+                            : ev.title
+                        }
+                      >
+                        <div className="flex items-center justify-between gap-1">
+                          <div className="truncate text-[12px] font-semibold">{ev.title}</div>
+                          {item.occurrences.length > 1 && (
+                            <span className="flex shrink-0 items-center gap-0.5">
+                              {item.occurrences.map((o, idx) => (
+                                <span
+                                  key={`${o.email}-${idx}`}
+                                  className="h-1.5 w-1.5 rounded-full"
+                                  style={{ background: o.color }}
+                                />
+                              ))}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+                          {ev.allDay
+                            ? 'All day'
+                            : `${new Date(ev.startAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`}
+                        </div>
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
             )
@@ -383,8 +479,8 @@ export const CalendarView: React.FC = () => {
           >
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-2.5">
-                <span className="h-3.5 w-3.5 rounded-full" style={{ background: selectedEvent.accountColor }} />
-                <h3 className="text-[16px] font-semibold">{selectedEvent.title}</h3>
+                <span className="h-3.5 w-3.5 shrink-0 rounded-full" style={{ background: selectedEvent.primary.accountColor }} />
+                <h3 className="text-[16px] font-semibold">{selectedEvent.primary.title}</h3>
               </div>
               <button onClick={() => setSelectedEvent(null)} className="rounded p-1 hover:bg-[var(--bg-hover)]">
                 <X size={15} />
@@ -392,31 +488,49 @@ export const CalendarView: React.FC = () => {
             </div>
             <div className="mt-3 space-y-2 text-[13px]" style={{ color: 'var(--text-secondary)' }}>
               <div>
-                {new Date(selectedEvent.startAt).toLocaleString([], {
-                  weekday: 'short',
-                  month: 'short',
-                  day: 'numeric',
-                  hour: 'numeric',
-                  minute: '2-digit'
-                })}{' '}
-                –{' '}
-                {new Date(selectedEvent.endAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                {selectedEvent.primary.allDay
+                  ? new Date(selectedEvent.primary.startAt).toLocaleDateString([], {
+                      weekday: 'short',
+                      month: 'short',
+                      day: 'numeric'
+                    }) + ' · All day'
+                  : `${new Date(selectedEvent.primary.startAt).toLocaleString([], {
+                      weekday: 'short',
+                      month: 'short',
+                      day: 'numeric',
+                      hour: 'numeric',
+                      minute: '2-digit'
+                    })} – ${new Date(selectedEvent.primary.endAt).toLocaleTimeString([], {
+                      hour: 'numeric',
+                      minute: '2-digit'
+                    })}`}
               </div>
-              <div className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
-                {selectedEvent.calendarName} ({selectedEvent.accountEmail})
+              <div className="space-y-1 text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                {selectedEvent.occurrences.map((occ, idx) => (
+                  <div key={`${occ.email}-${idx}`} className="flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full" style={{ background: occ.color }} />
+                    <span>
+                      {occ.calendarName} ({occ.email})
+                    </span>
+                  </div>
+                ))}
               </div>
-              {selectedEvent.location && (
+              {selectedEvent.primary.location && (
                 <div className="flex items-center gap-1.5">
-                  <MapPin size={13} /> {selectedEvent.location}
+                  <MapPin size={13} /> {selectedEvent.primary.location}
                 </div>
               )}
-              {selectedEvent.description && <p className="pt-1 text-[12.5px]">{selectedEvent.description}</p>}
+              {selectedEvent.primary.description && (
+                <p className="max-h-40 overflow-y-auto pt-1 text-[12.5px] whitespace-pre-wrap">
+                  {selectedEvent.primary.description}
+                </p>
+              )}
             </div>
 
-            <div className="mt-5 flex items-center justify-between">
-              {selectedEvent.meetingUrl ? (
+            <div className="mt-5 flex items-center justify-between gap-2">
+              {selectedEvent.primary.meetingUrl ? (
                 <button
-                  onClick={() => void window.glassmail.openExternal(selectedEvent.meetingUrl!)}
+                  onClick={() => void window.glassmail.openExternal(selectedEvent.primary.meetingUrl!)}
                   className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-[12.5px] font-semibold text-white"
                   style={{ background: 'var(--accent)' }}
                 >
@@ -425,21 +539,30 @@ export const CalendarView: React.FC = () => {
               ) : (
                 <div />
               )}
-              {!selectedEvent.readOnly && (
+              <div className="flex items-center gap-2">
+                {!selectedEvent.primary.readOnly && (
+                  <button
+                    onClick={async () => {
+                      await window.glassmail.deleteCalendarEvent(selectedEvent.primary.id)
+                      setSelectedEvent(null)
+                      await loadEvents()
+                      await refreshTodayEvents()
+                      showToast('Deleted event')
+                    }}
+                    className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[12px] hover:bg-[var(--bg-hover)]"
+                    style={{ color: 'var(--danger)' }}
+                  >
+                    <Trash2 size={13} /> Delete
+                  </button>
+                )}
                 <button
-                  onClick={async () => {
-                    await window.glassmail.deleteCalendarEvent(selectedEvent.id)
-                    setSelectedEvent(null)
-                    await loadEvents()
-                    await refreshTodayEvents()
-                    showToast('Deleted event')
-                  }}
-                  className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[12px] hover:bg-[var(--bg-hover)]"
-                  style={{ color: 'var(--danger)' }}
+                  onClick={() => setSelectedEvent(null)}
+                  className="rounded-lg border px-3 py-1.5 text-[12px] font-medium hover:bg-[var(--bg-hover)]"
+                  style={{ borderColor: 'var(--border-strong)' }}
                 >
-                  <Trash2 size={13} /> Delete
+                  Close
                 </button>
-              )}
+              </div>
             </div>
           </div>
         </div>
@@ -483,13 +606,32 @@ export const CalendarView: React.FC = () => {
                 className="w-full rounded-lg border px-3 py-2 text-[12.5px] outline-none"
                 style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
               >
-                {accounts.map((a) => (
+                {importTargetAccounts.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.name} ({a.email})
                   </option>
                 ))}
               </select>
+              <p className="mt-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                {imapAccounts.length > 0
+                  ? 'Showing IMAP / local accounts only — Gmail accounts sync Google Calendar automatically.'
+                  : 'Imported events are stored locally on this PC.'}
+              </p>
             </div>
+
+            {importStatus && (
+              <div
+                className="flex items-center gap-2 rounded-lg border px-3 py-2 text-[12px]"
+                style={{
+                  background: 'var(--bg-main)',
+                  borderColor: 'var(--success)',
+                  color: 'var(--text-primary)'
+                }}
+              >
+                <Check size={14} style={{ color: 'var(--success)' }} className="shrink-0" />
+                <span>{importStatus}</span>
+              </div>
+            )}
 
             {/* 1. Classic Outlook Desktop (Windows) */}
             <div
@@ -523,29 +665,50 @@ export const CalendarView: React.FC = () => {
 
               {outlookCalendars && outlookCalendars.length > 0 && (
                 <div className="max-h-44 space-y-1.5 overflow-y-auto pt-1">
-                  {outlookCalendars.map((cal) => (
-                    <div
-                      key={cal.folderPath}
-                      className="flex items-center justify-between gap-2 rounded-lg border px-3 py-2"
-                      style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
-                    >
-                      <div className="min-w-0">
-                        <div className="truncate text-[12.5px] font-medium">{cal.folderName}</div>
-                        <div className="truncate text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                          {cal.storeName} · {cal.itemCount} item{cal.itemCount === 1 ? '' : 's'}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => void handleImportOutlook(cal.folderPath)}
-                        disabled={importingFolder !== null}
-                        className="shrink-0 rounded-lg border px-2.5 py-1 text-[11.5px] font-semibold transition hover:bg-[var(--bg-hover)] disabled:opacity-50"
-                        style={{ borderColor: 'var(--border-strong)' }}
+                  {outlookCalendars.map((cal) => {
+                    const done = importedFolders[cal.folderPath]
+                    return (
+                      <div
+                        key={cal.folderPath}
+                        className="flex items-center justify-between gap-2 rounded-lg border px-3 py-2"
+                        style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
                       >
-                        {importingFolder === cal.folderPath ? 'Importing…' : 'Import'}
-                      </button>
-                    </div>
-                  ))}
+                        <div className="min-w-0">
+                          <div className="truncate text-[12.5px] font-medium">{cal.folderName}</div>
+                          <div className="truncate text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                            {cal.storeName} · {cal.itemCount} item{cal.itemCount === 1 ? '' : 's'}
+                          </div>
+                        </div>
+                        {done ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleImportOutlook(cal.folderPath)}
+                            disabled={importingFolder !== null}
+                            className="inline-flex shrink-0 items-center gap-1 rounded-lg border px-2.5 py-1 text-[11.5px] font-medium transition hover:opacity-80 disabled:opacity-50"
+                            style={{
+                              borderColor: 'var(--success)',
+                              color: 'var(--success)',
+                              background: 'transparent'
+                            }}
+                            title={`Imported into ${done.targetName}. Click to re-import.`}
+                          >
+                            <Check size={12} />
+                            {done.count === 0 ? 'Imported (0)' : `Imported (${done.count})`}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => void handleImportOutlook(cal.folderPath)}
+                            disabled={importingFolder !== null}
+                            className="shrink-0 rounded-lg border px-2.5 py-1 text-[11.5px] font-semibold transition hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                            style={{ borderColor: 'var(--border-strong)' }}
+                          >
+                            {importingFolder === cal.folderPath ? 'Importing…' : 'Import'}
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
               )}
             </div>
@@ -569,6 +732,18 @@ export const CalendarView: React.FC = () => {
                 style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
               >
                 <Download size={14} /> {exportingIcs ? 'Exporting…' : 'Export .ics Backup'}
+              </button>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex justify-end border-t pt-3" style={{ borderColor: 'var(--border-subtle)' }}>
+              <button
+                type="button"
+                onClick={() => setImportOpen(false)}
+                className="rounded-lg px-4 py-1.5 text-[12.5px] font-semibold text-white transition hover:opacity-90"
+                style={{ background: 'var(--accent)' }}
+              >
+                Done
               </button>
             </div>
           </div>
