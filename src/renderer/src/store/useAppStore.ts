@@ -9,6 +9,7 @@ import type {
   MailboxId,
   ParsedSearchQuery,
   ScheduledEmail,
+  SendEmailPayload,
   Snippet,
   SubscriptionGroup,
   ThreadDetail,
@@ -118,11 +119,19 @@ interface AppState {
   closeSettings: () => void
   openComposer: (partial?: Partial<ComposerState>) => void
   closeComposer: () => void
-  showToast: (message: string, undo?: () => Promise<void>) => void
+  showToast: (message: string, undo?: () => Promise<void>, durationMs?: number) => void
   clearToast: () => void
+  queueSendWithUndo: (
+    payload: SendEmailPayload,
+    draftRestore: Partial<ComposerState>,
+    delaySeconds: number
+  ) => void
   triggerSync: () => Promise<void>
   saveSettings: (s: AppSettings) => Promise<void>
 }
+
+let toastTimer: number | null = null
+let pendingSendTimer: number | null = null
 
 export const useAppStore = create<AppState>((set, get) => ({
   settings: null,
@@ -425,10 +434,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       await get().selectThread(next?.id || null)
     }
     if (activeMailbox !== 'trash') {
-      get().showToast(`Moved to Trash`, async () => {
-        await window.glassmail.moveThreads(threadIds, 'inbox', 'Inbox')
-        await get().refreshAll()
-      })
+      get().showToast(
+        threadIds.length === 1 ? 'Deleted email' : `Deleted ${threadIds.length} emails`,
+        async () => {
+          await window.glassmail.moveThreads(threadIds, 'inbox', 'Inbox')
+          await get().refreshAll()
+        },
+        5000
+      )
     }
   },
 
@@ -488,16 +501,69 @@ export const useAppStore = create<AppState>((set, get) => ({
       composer: { ...s.composer, open: false }
     })),
 
-  showToast: (message, undo) => {
+  showToast: (message, undo, durationMs = 5000) => {
+    if (toastTimer) {
+      window.clearTimeout(toastTimer)
+      toastTimer = null
+    }
     set({ toast: { message, undo } })
-    setTimeout(() => {
+    toastTimer = window.setTimeout(() => {
       if (get().toast?.message === message) {
         set({ toast: null })
       }
-    }, 6000)
+      toastTimer = null
+    }, durationMs)
   },
 
-  clearToast: () => set({ toast: null }),
+  clearToast: () => {
+    if (toastTimer) {
+      window.clearTimeout(toastTimer)
+      toastTimer = null
+    }
+    set({ toast: null })
+  },
+
+  queueSendWithUndo: (payload, draftRestore, delaySeconds) => {
+    const ms = Math.max(0, delaySeconds) * 1000
+    if (pendingSendTimer) {
+      window.clearTimeout(pendingSendTimer)
+      pendingSendTimer = null
+    }
+
+    const doSend = async () => {
+      pendingSendTimer = null
+      const res = await window.glassmail.sendEmail(payload)
+      if (res.ok) {
+        await get().refreshAll()
+        get().showToast('Message sent', undefined, 3000)
+      } else {
+        get().openComposer(draftRestore)
+        get().showToast(res.error || 'Failed to send message', undefined, 5000)
+      }
+    }
+
+    if (ms === 0) {
+      void doSend()
+      return
+    }
+
+    pendingSendTimer = window.setTimeout(() => {
+      void doSend()
+    }, ms)
+
+    get().showToast(
+      `Sending message…`,
+      async () => {
+        if (pendingSendTimer) {
+          window.clearTimeout(pendingSendTimer)
+          pendingSendTimer = null
+        }
+        get().openComposer(draftRestore)
+        get().showToast('Send cancelled — draft restored', undefined, 3000)
+      },
+      ms
+    )
+  },
 
   triggerSync: async () => {
     set({ isSyncing: true })

@@ -13,10 +13,10 @@ function readSavedZoom(key: string): number {
 }
 
 export function usePaneZoom<T extends HTMLElement = HTMLDivElement>(paneKey: string) {
-  const ref = useRef<T | null>(null)
   const [zoom, setZoom] = useState<number>(() => readSavedZoom(paneKey))
   const [showBadge, setShowBadge] = useState(false)
   const hideTimerRef = useRef<number | null>(null)
+  const cleanupRef = useRef<(() => void) | null>(null)
 
   const triggerBadge = useCallback(() => {
     setShowBadge(true)
@@ -30,29 +30,43 @@ export function usePaneZoom<T extends HTMLElement = HTMLDivElement>(paneKey: str
     triggerBadge()
   }, [paneKey, triggerBadge])
 
+  // Callback ref guarantees the non-passive wheel listener attaches even if the
+  // component initially returns null (e.g. ThreadReader while loading a thread).
+  const ref = useCallback(
+    (node: T | null) => {
+      if (cleanupRef.current) {
+        cleanupRef.current()
+        cleanupRef.current = null
+      }
+      if (!node) return
+
+      const onWheel = (e: WheelEvent) => {
+        if (!(e.ctrlKey || e.metaKey)) return
+        e.preventDefault()
+        e.stopPropagation()
+        const delta = e.deltaY < 0 ? STEP : -STEP
+        setZoom((prev) => {
+          const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round((prev + delta) * 100) / 100))
+          localStorage.setItem(`everybox:zoom:${paneKey}`, String(next))
+          return next
+        })
+        triggerBadge()
+      }
+
+      node.addEventListener('wheel', onWheel, { passive: false })
+      cleanupRef.current = () => {
+        node.removeEventListener('wheel', onWheel)
+      }
+    },
+    [paneKey, triggerBadge]
+  )
+
   useEffect(() => {
-    const el = ref.current
-    if (!el) return
-
-    const onWheel = (e: WheelEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return
-      e.preventDefault()
-      e.stopPropagation()
-      const delta = e.deltaY < 0 ? STEP : -STEP
-      setZoom((prev) => {
-        const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round((prev + delta) * 100) / 100))
-        localStorage.setItem(`everybox:zoom:${paneKey}`, String(next))
-        return next
-      })
-      triggerBadge()
-    }
-
-    el.addEventListener('wheel', onWheel, { passive: false })
     return () => {
-      el.removeEventListener('wheel', onWheel)
+      if (cleanupRef.current) cleanupRef.current()
       if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current)
     }
-  }, [paneKey, triggerBadge])
+  }, [])
 
   const zoomBadge = showBadge ? (
     <button
