@@ -471,6 +471,13 @@ app.whenReady().then(() => {
   registerIpc()
   createWindow()
   syncManager.startBackgroundLoop()
+  // Sync calendars on startup and every 5 minutes so primary-calendar updates appear automatically
+  setTimeout(() => {
+    void calendarManager.syncAllCalendars().then(broadcastDataUpdated)
+  }, 1500)
+  setInterval(() => {
+    void calendarManager.syncAllCalendars().then(broadcastDataUpdated)
+  }, 5 * 60_000)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

@@ -204,6 +204,13 @@ export const CalendarView: React.FC = () => {
     void loadEvents()
   }, [mode, anchor.getTime(), activeAccountIds.join(',')])
 
+  useEffect(() => {
+    const unsub = window.glassmail.onDataUpdated(() => {
+      void loadEvents()
+    })
+    return unsub
+  }, [mode, anchor.getTime(), activeAccountIds.join(',')])
+
   const handleSync = async () => {
     setSyncing(true)
     try {
