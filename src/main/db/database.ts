@@ -37,6 +37,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
     ollamaModel: '',
     lmStudioUrl: 'http://localhost:1234',
     lmStudioModel: '',
+    claudeCliModel: 'sonnet',
+    codexCliModel: 'default',
     anthropicModel: 'claude-sonnet-4-5',
     geminiModel: 'gemini-2.5-flash',
     openaiModel: 'gpt-4.1-mini',
@@ -652,26 +654,44 @@ export class GlassmailDB {
       .prepare('INSERT INTO messages_fts (message_id, thread_id, account_id, subject, sender, recipients, body_text) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run(msg.id, msg.threadId, msg.accountId, msg.subject || '', senderStr, recipStr, msg.bodyText || '')
 
-    // Recompute thread message count & waiting_since
+    // Recompute thread message count, waiting_since, latest_from, and effective folder_role/folder_name
     const stats = this.db
       .prepare(`
         SELECT COUNT(*) AS cnt,
           (SELECT is_sent FROM messages WHERE thread_id = ? ORDER BY date DESC LIMIT 1) AS last_is_sent,
           (SELECT date FROM messages WHERE thread_id = ? ORDER BY date DESC LIMIT 1) AS last_date,
-          (SELECT from_json FROM messages WHERE thread_id = ? ORDER BY date DESC LIMIT 1) AS last_from
+          (SELECT from_json FROM messages WHERE thread_id = ? ORDER BY date DESC LIMIT 1) AS last_from,
+          (SELECT folder_role FROM messages WHERE thread_id = ? ORDER BY date DESC LIMIT 1) AS last_folder_role,
+          (SELECT folder_name FROM messages WHERE thread_id = ? ORDER BY date DESC LIMIT 1) AS last_folder_name,
+          (SELECT folder_name FROM messages WHERE thread_id = ? AND folder_role = 'inbox' ORDER BY date DESC LIMIT 1) AS inbox_folder_name
         FROM messages WHERE thread_id = ?
       `)
-      .get(msg.threadId, msg.threadId, msg.threadId, msg.threadId) as {
+      .get(
+        msg.threadId,
+        msg.threadId,
+        msg.threadId,
+        msg.threadId,
+        msg.threadId,
+        msg.threadId,
+        msg.threadId
+      ) as {
       cnt: number
       last_is_sent: number
       last_date: number
       last_from: string
+      last_folder_role: string | null
+      last_folder_name: string | null
+      inbox_folder_name: string | null
     }
 
+    const effectiveRole = stats.inbox_folder_name ? 'inbox' : stats.last_folder_role || msg.folderRole
+    const effectiveName = stats.inbox_folder_name || stats.last_folder_name || msg.folderName || 'Inbox'
     const waitingSince = stats.last_is_sent === 1 ? stats.last_date : null
     this.db
-      .prepare('UPDATE threads SET message_count = ?, waiting_since = ?, latest_from_json = ? WHERE id = ?')
-      .run(stats.cnt, waitingSince, stats.last_from || JSON.stringify(msg.from), msg.threadId)
+      .prepare(
+        'UPDATE threads SET message_count = ?, waiting_since = ?, latest_from_json = ?, folder_role = ?, folder_name = ? WHERE id = ?'
+      )
+      .run(stats.cnt, waitingSince, stats.last_from || JSON.stringify(msg.from), effectiveRole, effectiveName, msg.threadId)
   }
 
   listThreads(opts: {
@@ -690,8 +710,8 @@ export class GlassmailDB {
     }
 
     if (opts.folderName) {
-      where.push('t.folder_name = ?')
-      params.push(opts.folderName)
+      where.push('(t.folder_name = ? OR t.labels_json LIKE ?)')
+      params.push(opts.folderName, `%"${opts.folderName}"%`)
     } else {
       switch (opts.mailbox) {
         case 'inbox':
@@ -716,7 +736,9 @@ export class GlassmailDB {
           where.push("t.folder_role = 'drafts'")
           break
         case 'sent':
-          where.push("t.folder_role = 'sent' OR EXISTS (SELECT 1 FROM messages m WHERE m.thread_id = t.id AND m.is_sent = 1)")
+          where.push(
+            "((t.folder_role = 'sent' OR EXISTS (SELECT 1 FROM messages m WHERE m.thread_id = t.id AND m.is_sent = 1)) AND t.folder_role NOT IN ('trash', 'junk'))"
+          )
           break
         case 'archive':
           where.push("t.folder_role = 'archive'")
@@ -987,6 +1009,10 @@ export class GlassmailDB {
       snoozed: countQuery(`SELECT COUNT(*) AS c FROM threads WHERE snoozed_until IS NOT NULL AND snoozed_until > ? ${accFilter}`, [now]),
       waiting: countQuery(`SELECT COUNT(*) AS c FROM threads WHERE waiting_since IS NOT NULL AND folder_role NOT IN ('trash', 'junk') ${accFilter}`),
       drafts: countQuery(`SELECT COUNT(*) AS c FROM threads WHERE folder_role = 'drafts' ${accFilter}`),
+      sent: countQuery(`SELECT COUNT(*) AS c FROM threads WHERE (folder_role = 'sent' OR EXISTS (SELECT 1 FROM messages m WHERE m.thread_id = threads.id AND m.is_sent = 1)) AND folder_role NOT IN ('trash', 'junk') ${accFilter}`),
+      archive: countQuery(`SELECT COUNT(*) AS c FROM threads WHERE folder_role = 'archive' ${accFilter}`),
+      junk: countQuery(`SELECT COUNT(*) AS c FROM threads WHERE folder_role = 'junk' ${accFilter}`),
+      trash: countQuery(`SELECT COUNT(*) AS c FROM threads WHERE folder_role = 'trash' ${accFilter}`),
       scheduled: countQuery(`SELECT COUNT(*) AS c FROM scheduled_emails WHERE status = 'pending' ${accFilter}`)
     }
   }
