@@ -154,50 +154,50 @@ export const App: React.FC = () => {
     <div className="flex h-screen w-screen flex-col overflow-hidden" style={{ background: 'var(--bg-main)' }}>
       {/* Top Bar (with space on right for native Windows caption buttons) */}
       <header
-        className="app-drag flex h-10 shrink-0 items-center justify-between border-b pl-3 pr-36"
+        className="app-drag flex h-12 shrink-0 items-center justify-between border-b pl-3 pr-36"
         style={{ background: 'var(--bg-sidebar)', borderColor: 'var(--border-subtle)' }}
       >
         <div className="app-no-drag flex items-center gap-2">
           <button
             onClick={() => setSidebarVisible(!sidebarVisible)}
-            className="rounded-lg p-1.5 transition hover:bg-[var(--bg-hover)]"
+            className="rounded-lg p-2 transition hover:bg-[var(--bg-hover)]"
             style={{ color: 'var(--text-secondary)' }}
             title="Toggle Sidebar"
           >
-            <PanelLeft size={15} />
+            <PanelLeft size={16} />
           </button>
-          <span className="text-[12.5px] font-semibold tracking-tight" style={{ color: 'var(--text-secondary)' }}>
+          <span className="text-[13.5px] font-semibold tracking-tight" style={{ color: 'var(--text-secondary)' }}>
             EveryBox
           </span>
         </div>
 
-        {/* Natural-Language Search Bar */}
+        {/* Universal Natural-Language Search Bar */}
         <form
           onSubmit={(e) => {
             e.preventDefault()
             void runSearch(searchQuery)
           }}
-          className="app-no-drag flex w-full max-w-[380px] items-center gap-2 rounded-full border px-3 py-1"
-          style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
+          className="app-no-drag flex w-full max-w-[560px] items-center gap-2.5 rounded-full border px-4 py-1.5"
+          style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-strong)' }}
         >
-          <Search size={13} style={{ color: 'var(--text-muted)' }} />
+          <Search size={15} style={{ color: 'var(--text-muted)' }} />
           <input
             ref={searchInputRef}
             value={searchQuery}
             onChange={(e) => void runSearch(e.target.value)}
-            placeholder='Search, like "pdf from maya last week"'
-            className="flex-1 bg-transparent text-[12px] outline-none placeholder:text-[var(--text-muted)]"
+            placeholder='Search all accounts, e.g. "pdf from maya last week"'
+            className="flex-1 bg-transparent text-[13px] outline-none placeholder:text-[var(--text-muted)]"
           />
           <button
             type="button"
             onClick={() => setCommandPaletteOpen(true)}
-            className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10.5px] font-medium"
+            className="inline-flex items-center gap-0.5 rounded px-2 py-0.5 text-[11px] font-medium"
             style={{ background: 'var(--bg-hover)', color: 'var(--text-muted)' }}
             title={`Command Palette (${modKeyPrefix}K)`}
           >
             {isMac ? (
               <>
-                <Command size={10} />K
+                <Command size={11} />K
               </>
             ) : (
               'Ctrl+K'
