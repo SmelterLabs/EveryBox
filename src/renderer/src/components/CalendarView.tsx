@@ -21,6 +21,7 @@ import {
   X
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
+import { usePaneZoom } from '../hooks/usePaneZoom'
 import type { CalendarEvent, OutlookCalendarInfo } from '../../../shared/types'
 
 type CalMode = 'day' | 'week' | 'month'
@@ -350,9 +351,16 @@ export const CalendarView: React.FC = () => {
   }
 
   const todayStr = new Date().toDateString()
+  const { ref: zoomRef, zoom, zoomBadge } = usePaneZoom<HTMLDivElement>('calendar')
 
   return (
-    <div className="flex h-full flex-1 flex-col overflow-hidden" style={{ background: 'var(--bg-main)' }}>
+    <div
+      ref={zoomRef}
+      className="relative flex h-full flex-1 flex-col overflow-hidden"
+      style={{ background: 'var(--bg-main)' }}
+    >
+      {zoomBadge}
+      <div className="flex min-h-0 flex-1 flex-col" style={{ zoom }}>
       {/* Calendar Header */}
       <div
         className="flex flex-wrap items-center justify-between gap-3 border-b px-6 py-3"
@@ -1222,6 +1230,7 @@ export const CalendarView: React.FC = () => {
           </form>
         </div>
       )}
+      </div>
     </div>
   )
 }

@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { Archive, ArrowUp, Clock, Sparkles } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
+import { usePaneZoom } from '../hooks/usePaneZoom'
 import type { AssistantResponse } from '../../../shared/types'
 
 interface Turn {
@@ -13,6 +14,7 @@ export const AssistantView: React.FC = () => {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [turns, setTurns] = useState<Turn[]>([])
+  const { ref: zoomRef, zoom, zoomBadge } = usePaneZoom<HTMLDivElement>('assistant')
 
   const ask = async (q: string) => {
     const clean = q.trim()
@@ -34,7 +36,13 @@ export const AssistantView: React.FC = () => {
   }
 
   return (
-    <div className="flex h-full flex-1 flex-col overflow-hidden" style={{ background: 'var(--bg-main)' }}>
+    <div
+      ref={zoomRef}
+      className="relative flex h-full flex-1 flex-col overflow-hidden"
+      style={{ background: 'var(--bg-main)' }}
+    >
+      {zoomBadge}
+      <div className="flex min-h-0 flex-1 flex-col" style={{ zoom }}>
       {/* Header */}
       <div
         className="flex items-center justify-between border-b px-6 py-3"
@@ -313,6 +321,7 @@ export const AssistantView: React.FC = () => {
             <ArrowUp size={14} />
           </button>
         </form>
+      </div>
       </div>
     </div>
   )

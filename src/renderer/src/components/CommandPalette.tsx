@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { Calendar, Inbox, Palette, PenSquare, RefreshCw, Search, Settings, Sparkles, Zap } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
+import { modKeyPrefix } from '../utils/platform'
 import type { ThemeId } from '../../../shared/types'
 
 export const CommandPalette: React.FC = () => {
@@ -47,7 +48,7 @@ export const CommandPalette: React.FC = () => {
       icon: <Palette size={14} />,
       run: () => settings && void saveSettings({ ...settings, theme: t })
     })),
-    { id: 'settings', label: 'Open Settings', hint: 'Ctrl+,', icon: <Settings size={14} />, run: () => openSettings('accounts') }
+    { id: 'settings', label: 'Open Settings', hint: `${modKeyPrefix},`, icon: <Settings size={14} />, run: () => openSettings('accounts') }
   ]
 
   const filtered = commands.filter((c) => c.label.toLowerCase().includes(query.toLowerCase()))
