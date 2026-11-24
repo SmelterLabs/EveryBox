@@ -361,7 +361,6 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
 
             {accounts.map((acc) => {
               const isChecked = allSelected || activeAccountIds.includes(acc.id)
-              const isSolo = activeAccountIds.length === 1 && activeAccountIds[0] === acc.id
               const isDragging = draggedAccountId === acc.id
               const isDragOver = dragOverAccountId === acc.id && draggedAccountId !== acc.id
               return (
@@ -395,7 +394,7 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
                   }}
                   className="group flex items-center justify-between rounded-lg px-1.5 py-1.5 text-[12.5px] transition hover:bg-[var(--bg-hover)]"
                   style={{
-                    background: isSolo ? 'var(--bg-selected)' : undefined,
+                    background: !allSelected && isChecked ? 'var(--bg-selected)' : undefined,
                     opacity: isDragging ? 0.35 : isChecked ? 1 : 0.45,
                     boxShadow: isDragOver ? 'inset 0 2px 0 0 var(--accent)' : undefined
                   }}
@@ -424,11 +423,17 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
                       {isChecked && <Check size={10} className="text-white" strokeWidth={3} />}
                     </button>
 
-                    {/* Click name to solo / un-solo */}
+                    {/* Click name to solo; Ctrl+click to add/remove from multi-account view */}
                     <button
-                      onClick={() => void soloAccount(acc.id)}
+                      onClick={(e) => {
+                        if (e.ctrlKey || e.metaKey) {
+                          void toggleAccountFilter(acc.id)
+                        } else {
+                          void soloAccount(acc.id)
+                        }
+                      }}
                       className="flex min-w-0 flex-1 flex-col text-left"
-                      title={`Click to focus ${acc.name} (${acc.email}) · Right-click to rename or change color`}
+                      title={`Click to focus ${acc.name} · Ctrl+click to add/remove from view · Right-click to edit`}
                     >
                       <span className="truncate font-medium" style={{ color: 'var(--text-primary)' }}>
                         {acc.name}
