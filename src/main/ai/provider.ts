@@ -1,5 +1,6 @@
 import { execFile, spawn } from 'child_process'
-import { existsSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
+import { homedir } from 'os'
 import { join } from 'path'
 import { promisify } from 'util'
 import type { AISettings, DiscoveredModel, LocalAIStatus } from '../../shared/types'
@@ -217,6 +218,84 @@ async function probeOpenAiCompatibleServer(
   }
 }
 
+function readCodexCliModels(): DiscoveredModel[] {
+  try {
+    const cachePath = join(homedir(), '.codex', 'models_cache.json')
+    if (!existsSync(cachePath)) return []
+    const parsed = JSON.parse(readFileSync(cachePath, 'utf8')) as {
+      models?: { slug?: string; display_name?: string; visibility?: string }[]
+    }
+    const seen = new Set<string>()
+    const out: DiscoveredModel[] = []
+    for (const m of parsed.models || []) {
+      const id = m.slug?.trim()
+      if (!id || seen.has(id) || m.visibility === 'hide') continue
+      seen.add(id)
+      out.push({ id, label: m.display_name?.trim() || id })
+    }
+    return out
+  } catch {
+    return []
+  }
+}
+
+async function fetchAnthropicModels(apiKey: string | null): Promise<DiscoveredModel[]> {
+  if (!apiKey) return []
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/models?limit=40', {
+      headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      signal: AbortSignal.timeout(2500)
+    })
+    if (!res.ok) return []
+    const data = (await res.json()) as { data?: { id: string; display_name?: string }[] }
+    return (data.data || []).map((m) => ({ id: m.id, label: m.display_name || m.id }))
+  } catch {
+    return []
+  }
+}
+
+async function fetchOpenAiModels(apiKey: string | null): Promise<DiscoveredModel[]> {
+  if (!apiKey) return []
+  try {
+    const res = await fetch('https://api.openai.com/v1/models', {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(2500)
+    })
+    if (!res.ok) return []
+    const data = (await res.json()) as { data?: { id: string; created?: number }[] }
+    return (data.data || [])
+      .filter((m) => /^(gpt-|o[134]-|o[134]$|chatgpt-)/i.test(m.id) && !/audio|realtime|transcribe|tts|image|search|embed/i.test(m.id))
+      .sort((a, b) => (b.created || 0) - (a.created || 0))
+      .slice(0, 30)
+      .map((m) => ({ id: m.id }))
+  } catch {
+    return []
+  }
+}
+
+async function fetchGeminiModels(apiKey: string | null): Promise<DiscoveredModel[]> {
+  if (!apiKey) return []
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}&pageSize=50`,
+      { signal: AbortSignal.timeout(2500) }
+    )
+    if (!res.ok) return []
+    const data = (await res.json()) as {
+      models?: { name: string; displayName?: string; supportedGenerationMethods?: string[] }[]
+    }
+    return (data.models || [])
+      .filter((m) => m.supportedGenerationMethods?.includes('generateContent'))
+      .map((m) => ({
+        id: m.name.replace(/^models\//, ''),
+        label: m.displayName || m.name.replace(/^models\//, '')
+      }))
+      .slice(0, 30)
+  } catch {
+    return []
+  }
+}
+
 export async function detectLocalAI(
   settings: AISettings,
   secrets?: SecretStore,
@@ -226,6 +305,10 @@ export async function detectLocalAI(
   const lmStudioUrlUsed = normalizeLmStudioUrl(overrides?.lmStudioUrl ?? settings.lmStudioUrl)
   const localServerOverride = overrides?.localOpenAiUrl ?? settings.localOpenAiUrl
 
+  const anthropicKey = secrets?.get('ai_key:anthropic') ?? null
+  const geminiKey = secrets?.get('ai_key:gemini') ?? null
+  const openaiKey = secrets?.get('ai_key:openai') ?? null
+
   const [
     gpuName,
     localServerCheck,
@@ -234,7 +317,10 @@ export async function detectLocalAI(
     ollamaInstalledLocal,
     lmStudioInstalledLocal,
     claudeCliAvailable,
-    codexCliAvailable
+    codexCliAvailable,
+    anthropicModels,
+    geminiModels,
+    openaiModels
   ] = await Promise.all([
     detectGpuName(),
     probeOpenAiCompatibleServer(localServerOverride),
@@ -273,8 +359,13 @@ export async function detectLocalAI(
     isOllamaInstalledLocally(),
     isLmStudioInstalledLocally(),
     hasExecutableOnPath('claude'),
-    hasExecutableOnPath('codex')
+    hasExecutableOnPath('codex'),
+    fetchAnthropicModels(anthropicKey),
+    fetchGeminiModels(geminiKey),
+    fetchOpenAiModels(openaiKey)
   ])
+
+  const codexCliModels = codexCliAvailable ? readCodexCliModels() : []
 
   return {
     gpuName,
@@ -292,10 +383,16 @@ export async function detectLocalAI(
     lmStudioModels: lmStudioCheck.models,
     claudeCliAvailable,
     codexCliAvailable,
+    codexCliModels,
     apiKeysConfigured: {
-      anthropic: secrets ? secrets.has('ai_key:anthropic') : false,
-      gemini: secrets ? secrets.has('ai_key:gemini') : false,
-      openai: secrets ? secrets.has('ai_key:openai') : false
+      anthropic: Boolean(anthropicKey),
+      gemini: Boolean(geminiKey),
+      openai: Boolean(openaiKey)
+    },
+    cloudModels: {
+      anthropic: anthropicModels,
+      gemini: geminiModels,
+      openai: openaiModels
     }
   }
 }
