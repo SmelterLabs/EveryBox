@@ -43,7 +43,8 @@ function spawnWithStdin(cmd: string, args: string[], stdinText: string, timeoutM
       if (code === 0) {
         resolve(stdout.trim())
       } else {
-        reject(new Error(`${cmd} exited with code ${code}: ${(stderr || stdout).trim().slice(0, 300)}`))
+        const detail = (stdout.trim() || stderr.trim()).replace(/\s+/g, ' ').slice(0, 300)
+        reject(new Error(`${cmd} exited with code ${code}: ${detail}`))
       }
     })
     child.stdin.write(stdinText)
