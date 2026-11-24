@@ -424,8 +424,10 @@ function registerIpc(): void {
   })
 
   // ---- AI Suite ----
-  ipcMain.handle('ai:detect-local', (_, overrides?: { ollamaUrl?: string; lmStudioUrl?: string }) =>
-    detectLocalAI(db.getSettings().ai, secrets, overrides)
+  ipcMain.handle(
+    'ai:detect-local',
+    (_, overrides?: { localOpenAiUrl?: string; ollamaUrl?: string; lmStudioUrl?: string }) =>
+      detectLocalAI(db.getSettings().ai, secrets, overrides)
   )
   ipcMain.handle('ai:ask', (_, question: string, accountIds?: string[]) =>
     askInboxAssistant(question, accountIds, db, secrets)

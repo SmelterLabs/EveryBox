@@ -13,6 +13,7 @@ export const TodayBrief: React.FC = () => {
     threads,
     todayEvents,
     setActiveView,
+    setAssistantOpen,
     setActiveMailbox,
     selectThread,
     showToast
@@ -77,7 +78,7 @@ export const TodayBrief: React.FC = () => {
             Start triage
           </button>
           <button
-            onClick={() => setActiveView('assistant')}
+            onClick={() => setAssistantOpen(true)}
             className="inline-flex items-center gap-2 rounded-full border px-4 py-2 text-[13px] font-medium transition hover:bg-[var(--bg-hover)]"
             style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-strong)' }}
           >

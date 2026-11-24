@@ -53,10 +53,12 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
     activeAccountIds,
     activeWorkspaceId,
     activeView,
+    assistantOpen,
     activeMailbox,
     activeFolderName,
     isSyncing,
     setActiveView,
+    toggleAssistant,
     setActiveMailbox,
     setActiveFolder,
     selectAllAccounts,
@@ -227,12 +229,13 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
         {/* Assistant & Combined Calendar */}
         <div className="space-y-0.5">
           <button
-            onClick={() => setActiveView('assistant')}
-            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition"
+            onClick={() => toggleAssistant()}
+            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition hover:bg-[var(--bg-hover)]"
             style={{
-              background: activeView === 'assistant' ? 'var(--bg-selected)' : 'transparent',
-              color: activeView === 'assistant' ? 'var(--accent-text)' : 'var(--text-primary)'
+              background: assistantOpen ? 'var(--bg-selected)' : 'transparent',
+              color: assistantOpen ? 'var(--accent-text)' : 'var(--text-primary)'
             }}
+            title={assistantOpen ? 'Close AI Assistant panel' : 'Open AI Assistant panel'}
           >
             <Sparkles size={15} style={{ color: 'var(--accent)' }} />
             <span>Assistant</span>
