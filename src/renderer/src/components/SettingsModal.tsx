@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react'
-import { AlertCircle, Check, Copy, Cpu, Key, Mail, Plus, RefreshCw, Shield, Sparkles, Terminal, Trash2, X } from 'lucide-react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { AlertCircle, Check, Copy, Key, Mail, Palette, Plus, RefreshCw, Shield, Sparkles, Terminal, Trash2, X } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import type { AIProviderType, AppSettings, DiscoveredModel, LocalAIStatus, ReaderWidth, ThemeId } from '../../../shared/types'
 
@@ -97,8 +97,10 @@ export const SettingsModal: React.FC = () => {
     [saveSettings]
   )
 
+  const wasOpenRef = useRef(false)
+
   useEffect(() => {
-    if (settingsOpen) {
+    if (settingsOpen && !wasOpenRef.current) {
       setTab(settingsInitialTab)
       setDraft(settings ? JSON.parse(JSON.stringify(settings)) : null)
       void runLocalAIDetection(
@@ -108,7 +110,14 @@ export const SettingsModal: React.FC = () => {
         setMcpConfigJson(JSON.stringify({ mcpServers: { everybox: cfg } }, null, 2))
       )
     }
+    wasOpenRef.current = settingsOpen
   }, [settingsOpen, settingsInitialTab, settings, runLocalAIDetection])
+
+  useEffect(() => {
+    if (settingsOpen && settings) {
+      setDraft(JSON.parse(JSON.stringify(settings)))
+    }
+  }, [settingsOpen, settings])
 
   if (!settingsOpen || !draft) return null
 
@@ -169,13 +178,14 @@ export const SettingsModal: React.FC = () => {
   }
 
   const tabs: { id: typeof tab; label: string; icon: React.ReactNode }[] = [
-    { id: 'accounts', label: 'Accounts', icon: <Mail size={14} /> },
-    { id: 'ai', label: 'AI ($0 Local / CLI)', icon: <Sparkles size={14} /> },
-    { id: 'general', label: 'Themes & General', icon: <Cpu size={14} /> },
-    { id: 'privacy', label: 'Privacy', icon: <Shield size={14} /> },
-    { id: 'snippets', label: 'Snippets', icon: <Plus size={14} /> },
-    { id: 'mcp', label: 'MCP Agents', icon: <Terminal size={14} /> }
+    { id: 'accounts', label: 'Accounts', icon: <Mail size={14} className="shrink-0" /> },
+    { id: 'ai', label: 'AI ($0 Local / CLI)', icon: <Sparkles size={14} className="shrink-0" /> },
+    { id: 'general', label: 'Appearance', icon: <Palette size={14} className="shrink-0" /> },
+    { id: 'privacy', label: 'Privacy', icon: <Shield size={14} className="shrink-0" /> },
+    { id: 'snippets', label: 'Snippets', icon: <Plus size={14} className="shrink-0" /> },
+    { id: 'mcp', label: 'MCP Agents', icon: <Terminal size={14} className="shrink-0" /> }
   ]
+  const activeTabLabel = tabs.find((t) => t.id === tab)?.label || tab
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-6" onClick={closeSettings}>
@@ -186,23 +196,23 @@ export const SettingsModal: React.FC = () => {
       >
         {/* Settings Sidebar */}
         <div
-          className="w-48 shrink-0 border-r p-3"
+          className="w-52 shrink-0 border-r p-3"
           style={{ background: 'var(--bg-sidebar)', borderColor: 'var(--border-subtle)' }}
         >
-          <div className="mb-3 px-2 text-[13px] font-semibold">Settings</div>
+          <div className="mb-3 px-2.5 text-[13px] font-semibold">Settings</div>
           <div className="space-y-0.5">
             {tabs.map((t) => (
               <button
                 key={t.id}
                 onClick={() => setTab(t.id)}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[12.5px] font-medium transition hover:bg-[var(--bg-hover)]"
+                className="flex w-full items-center gap-2.5 whitespace-nowrap rounded-lg px-2.5 py-2 text-left text-[12.5px] font-medium transition hover:bg-[var(--bg-hover)]"
                 style={{
                   background: tab === t.id ? 'var(--bg-selected)' : undefined,
                   color: tab === t.id ? 'var(--accent-text)' : 'var(--text-secondary)'
                 }}
               >
                 {t.icon}
-                <span>{t.label}</span>
+                <span className="truncate">{t.label}</span>
               </button>
             ))}
           </div>
@@ -214,7 +224,7 @@ export const SettingsModal: React.FC = () => {
             className="flex items-center justify-between border-b px-6 py-3.5"
             style={{ borderColor: 'var(--border-subtle)' }}
           >
-            <h3 className="text-[15px] font-semibold capitalize">{tab}</h3>
+            <h3 className="text-[15px] font-semibold">{activeTabLabel}</h3>
             <button onClick={closeSettings} className="rounded-lg p-1 hover:bg-[var(--bg-hover)]">
               <X size={16} />
             </button>
