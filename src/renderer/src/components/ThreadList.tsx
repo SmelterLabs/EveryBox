@@ -67,19 +67,18 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
     return saved === 'asc' || saved === 'desc' ? saved : 'desc'
   })
 
-  const updateSortField = (next: SortField) => {
-    setSortField(next)
-    localStorage.setItem('everybox:sortField', next)
-    // Default text fields to A-Z (asc), date/unread/starred to desc
-    const defaultDir: SortDir = next === 'sender' || next === 'subject' || next === 'account' ? 'asc' : 'desc'
-    setSortDir(defaultDir)
-    localStorage.setItem('everybox:sortDir', defaultDir)
-  }
-
-  const toggleSortDir = () => {
-    const next: SortDir = sortDir === 'desc' ? 'asc' : 'desc'
-    setSortDir(next)
-    localStorage.setItem('everybox:sortDir', next)
+  const handleSortClick = (field: SortField) => {
+    if (sortField === field) {
+      const nextDir: SortDir = sortDir === 'desc' ? 'asc' : 'desc'
+      setSortDir(nextDir)
+      localStorage.setItem('everybox:sortDir', nextDir)
+    } else {
+      setSortField(field)
+      localStorage.setItem('everybox:sortField', field)
+      const defaultDir: SortDir = field === 'sender' || field === 'subject' || field === 'account' ? 'asc' : 'desc'
+      setSortDir(defaultDir)
+      localStorage.setItem('everybox:sortDir', defaultDir)
+    }
   }
 
   const sortedThreads = useMemo(() => {
@@ -164,59 +163,22 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
               {activeMailbox === 'inbox' ? `${counts.inbox || 0} unread` : `${threads.length} conversations`}
             </p>
           </div>
-          <div className="flex shrink-0 items-center gap-1">
-            {activeMailbox !== 'scheduled' && (
-              <>
-                <select
-                  value={sortField}
-                  onChange={(e) => updateSortField(e.target.value as SortField)}
-                  className="rounded-md border px-1.5 py-1 text-[11px] outline-none"
-                  style={{
-                    background: 'var(--bg-elevated)',
-                    borderColor: 'var(--border-subtle)',
-                    color: 'var(--text-secondary)'
-                  }}
-                  title="Sort emails by"
-                >
-                  <option value="date">Date</option>
-                  <option value="sender">Sender</option>
-                  <option value="subject">Subject</option>
-                  <option value="unread">Unread</option>
-                  <option value="starred">Starred</option>
-                  <option value="account">Account</option>
-                </select>
-                <button
-                  type="button"
-                  onClick={toggleSortDir}
-                  className="rounded-md border p-1 transition hover:bg-[var(--bg-hover)]"
-                  style={{
-                    background: 'var(--bg-elevated)',
-                    borderColor: 'var(--border-subtle)',
-                    color: 'var(--text-secondary)'
-                  }}
-                  title={sortDir === 'desc' ? 'Descending (click to flip)' : 'Ascending (click to flip)'}
-                >
-                  {sortDir === 'desc' ? <ArrowDown size={12} /> : <ArrowUp size={12} />}
-                </button>
-              </>
-            )}
-            {(activeMailbox === 'trash' || activeMailbox === 'junk') && threads.length > 0 && (
-              <button
-                onClick={async () => {
-                  await window.glassmail.emptyFolder(
-                    activeMailbox,
-                    activeAccountIds.length ? activeAccountIds : undefined
-                  )
-                  await refreshAll()
-                  showToast(`Emptied ${mailboxTitle}`)
-                }}
-                className="rounded-md px-2 py-1 text-[11px] font-medium transition hover:opacity-80"
-                style={{ background: 'var(--bg-elevated)', color: 'var(--danger)' }}
-              >
-                Empty {mailboxTitle}
-              </button>
-            )}
-          </div>
+          {(activeMailbox === 'trash' || activeMailbox === 'junk') && threads.length > 0 && (
+            <button
+              onClick={async () => {
+                await window.glassmail.emptyFolder(
+                  activeMailbox,
+                  activeAccountIds.length ? activeAccountIds : undefined
+                )
+                await refreshAll()
+                showToast(`Emptied ${mailboxTitle}`)
+              }}
+              className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium transition hover:opacity-80"
+              style={{ background: 'var(--bg-elevated)', color: 'var(--danger)' }}
+            >
+              Empty {mailboxTitle}
+            </button>
+          )}
         </div>
 
         {/* Active Account Focus Strip */}
@@ -246,26 +208,64 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
           </div>
         )}
 
-        {/* People / Updates / All Tabs */}
-        {activeMailbox === 'inbox' && !parsedSearch && (
-          <div className="mt-2.5 flex items-center gap-1">
-            {categories.map((c) => {
-              const active = activeCategory === c.id
-              return (
-                <button
-                  key={c.id}
-                  onClick={() => void setActiveCategory(c.id)}
-                  className="rounded-md px-2.5 py-1 text-[12px] font-medium transition"
-                  style={{
-                    background: active ? 'var(--bg-elevated)' : 'transparent',
-                    color: active ? 'var(--text-primary)' : 'var(--text-muted)'
-                  }}
-                >
-                  {c.label}
-                  {c.count ? <span className="ml-1 opacity-70">{c.count}</span> : null}
-                </button>
-              )
-            })}
+        {/* People / Updates / All Tabs + Right-Aligned Sort Tabs */}
+        {activeMailbox !== 'scheduled' && (
+          <div className="mt-2.5 flex flex-wrap items-center justify-between gap-1">
+            {activeMailbox === 'inbox' && !parsedSearch ? (
+              <div className="flex items-center gap-1">
+                {categories.map((c) => {
+                  const active = activeCategory === c.id
+                  return (
+                    <button
+                      key={c.id}
+                      onClick={() => void setActiveCategory(c.id)}
+                      className="rounded-md px-2.5 py-1 text-[12px] font-medium transition"
+                      style={{
+                        background: active ? 'var(--bg-elevated)' : 'transparent',
+                        color: active ? 'var(--text-primary)' : 'var(--text-muted)'
+                      }}
+                    >
+                      {c.label}
+                      {c.count ? <span className="ml-1 opacity-70">{c.count}</span> : null}
+                    </button>
+                  )
+                })}
+              </div>
+            ) : (
+              <div />
+            )}
+
+            <div className="ml-auto flex items-center gap-0.5">
+              {(
+                [
+                  { id: 'date', label: 'Date' },
+                  { id: 'sender', label: 'Sender' },
+                  { id: 'subject', label: 'Subject' }
+                ] as { id: SortField; label: string }[]
+              ).map((s) => {
+                const active = sortField === s.id
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => handleSortClick(s.id)}
+                    className="inline-flex items-center gap-0.5 rounded-md px-1.5 py-1 text-[11px] font-medium transition hover:bg-[var(--bg-hover)]"
+                    style={{
+                      background: active ? 'var(--bg-elevated)' : 'transparent',
+                      color: active ? 'var(--text-primary)' : 'var(--text-muted)'
+                    }}
+                    title={
+                      active
+                        ? `Sorted by ${s.label} (${sortDir === 'desc' ? 'descending' : 'ascending'}) — click to flip`
+                        : `Sort by ${s.label}`
+                    }
+                  >
+                    <span>{s.label}</span>
+                    {active && (sortDir === 'desc' ? <ArrowDown size={10} /> : <ArrowUp size={10} />)}
+                  </button>
+                )
+              })}
+            </div>
           </div>
         )}
 
