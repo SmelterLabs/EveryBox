@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { AlertCircle, Check, Copy, Cpu, Key, Mail, Plus, RefreshCw, Shield, Sparkles, Terminal, Trash2, X } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
-import type { AIProviderType, AppSettings, DiscoveredModel, LocalAIStatus, ThemeId } from '../../../shared/types'
+import type { AIProviderType, AppSettings, DiscoveredModel, LocalAIStatus, ReaderWidth, ThemeId } from '../../../shared/types'
 
 function formatModelLabel(m: DiscoveredModel): string {
   const parts = [m.id]
@@ -890,6 +890,44 @@ export const SettingsModal: React.FC = () => {
                         <span>{t}</span>
                       </button>
                     ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-[13px] font-semibold">Email Body Width</label>
+                  <p className="mb-2 text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                    Control how much horizontal space emails use in the reading pane.
+                  </p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(
+                      [
+                        { id: 'narrow', label: 'Narrow', desc: 'Focused column (680px)' },
+                        { id: 'comfortable', label: 'Comfortable', desc: 'Balanced width (860px)' },
+                        { id: 'wide', label: 'Wide', desc: 'Fill available screen' }
+                      ] as { id: ReaderWidth; label: string; desc: string }[]
+                    ).map((opt) => {
+                      const active = (draft.readerWidth || 'comfortable') === opt.id
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => void updateAndSave({ ...draft, readerWidth: opt.id })}
+                          className="flex flex-col items-start gap-0.5 rounded-xl border p-3 text-left transition"
+                          style={{
+                            borderColor: active ? 'var(--accent)' : 'var(--border-strong)',
+                            background: active ? 'var(--accent-soft)' : 'var(--bg-elevated)'
+                          }}
+                        >
+                          <div className="flex w-full items-center justify-between text-[12.5px] font-semibold">
+                            <span>{opt.label}</span>
+                            {active && <Check size={13} style={{ color: 'var(--accent-text)' }} />}
+                          </div>
+                          <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                            {opt.desc}
+                          </span>
+                        </button>
+                      )
+                    })}
                   </div>
                 </div>
 

@@ -2,6 +2,8 @@ export type AccountProvider = 'gmail' | 'imap'
 
 export type ThemeId = 'light' | 'paper' | 'dark' | 'black' | 'graphite'
 
+export type ReaderWidth = 'narrow' | 'comfortable' | 'wide'
+
 export type MailboxId =
   | 'inbox'
   | 'starred'
@@ -261,6 +263,8 @@ export interface AppSettings {
   matchSystemTheme: boolean
   lightTheme: ThemeId
   darkTheme: ThemeId
+  readerWidth?: ReaderWidth
+  accountOrder?: string[]
   defaultReplyAll: boolean
   undoSendSeconds: number
   ai: AISettings

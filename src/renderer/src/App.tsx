@@ -41,11 +41,11 @@ export const App: React.FC = () => {
   const searchInputRef = useRef<HTMLInputElement | null>(null)
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
     const saved = Number(localStorage.getItem('everybox:sidebarWidth'))
-    return Number.isFinite(saved) && saved >= 190 && saved <= 440 ? saved : 244
+    return Number.isFinite(saved) && saved >= 190 && saved <= 480 ? saved : 244
   })
   const [threadListWidth, setThreadListWidth] = useState<number>(() => {
     const saved = Number(localStorage.getItem('everybox:threadListWidth'))
-    return Number.isFinite(saved) && saved >= 250 && saved <= 580 ? saved : 340
+    return Number.isFinite(saved) && saved >= 250 && saved <= 960 ? saved : 340
   })
 
   const startResize = (
@@ -64,7 +64,8 @@ export const App: React.FC = () => {
     document.body.style.userSelect = 'none'
 
     const onMove = (ev: MouseEvent) => {
-      const next = Math.min(max, Math.max(min, startWidth + (ev.clientX - startX)))
+      const dynamicMax = Math.min(max, Math.max(min, window.innerWidth - 340))
+      const next = Math.min(dynamicMax, Math.max(min, startWidth + (ev.clientX - startX)))
       setter(next)
       localStorage.setItem(storageKey, String(next))
     }
@@ -206,7 +207,7 @@ export const App: React.FC = () => {
           <>
             <Sidebar width={sidebarWidth} />
             <div
-              onMouseDown={(e) => startResize(e, sidebarWidth, 190, 440, 'everybox:sidebarWidth', setSidebarWidth)}
+              onMouseDown={(e) => startResize(e, sidebarWidth, 190, 480, 'everybox:sidebarWidth', setSidebarWidth)}
               onDoubleClick={() => {
                 setSidebarWidth(244)
                 localStorage.setItem('everybox:sidebarWidth', '244')
@@ -226,7 +227,7 @@ export const App: React.FC = () => {
             <ThreadList width={threadListWidth} />
             <div
               onMouseDown={(e) =>
-                startResize(e, threadListWidth, 250, 580, 'everybox:threadListWidth', setThreadListWidth)
+                startResize(e, threadListWidth, 250, 960, 'everybox:threadListWidth', setThreadListWidth)
               }
               onDoubleClick={() => {
                 setThreadListWidth(340)
