@@ -28,9 +28,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ai: {
     provider: 'ollama',
     ollamaUrl: 'http://localhost:11434',
-    ollamaModel: 'qwen2.5:14b',
+    ollamaModel: '',
     lmStudioUrl: 'http://localhost:1234',
-    lmStudioModel: 'local-model',
+    lmStudioModel: '',
     anthropicModel: 'claude-sonnet-4-5',
     geminiModel: 'gemini-2.5-flash',
     openaiModel: 'gpt-4.1-mini',
@@ -1016,6 +1016,10 @@ export class GlassmailDB {
 
   deleteCalendarEvent(id: string): void {
     this.db.prepare('DELETE FROM calendar_events WHERE id = ?').run(id)
+  }
+
+  deleteCalendarEventsBySource(accountId: string, source: CalendarEvent['source']): void {
+    this.db.prepare('DELETE FROM calendar_events WHERE account_id = ? AND source = ?').run(accountId, source)
   }
 
   // ---- Scheduled Emails ----
