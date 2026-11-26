@@ -1,0 +1,319 @@
+@import "tailwindcss";
+
+:root,
+[data-theme="dark"] {
+  --bg-sidebar: #11151d;
+  --bg-list: #151a24;
+  --bg-main: #181e29;
+  --bg-elevated: #202837;
+  --bg-hover: #263042;
+  --bg-selected: #1c2f4f;
+  --border-subtle: rgba(210, 225, 255, 0.08);
+  --border-strong: rgba(210, 225, 255, 0.14);
+  --text-primary: #eef2f9;
+  --text-secondary: #9aa7bc;
+  --text-muted: #6b7890;
+  --accent: #3b82f6;
+  --accent-soft: rgba(59, 130, 246, 0.18);
+  --accent-text: #60a5fa;
+  --danger: #f06060;
+  --success: #2dd4bf;
+}
+
+[data-theme="black"] {
+  --bg-sidebar: #000000;
+  --bg-list: #07080a;
+  --bg-main: #0b0d11;
+  --bg-elevated: #14171f;
+  --bg-hover: #1c212c;
+  --bg-selected: #162642;
+  --border-subtle: rgba(210, 225, 255, 0.08);
+  --border-strong: rgba(210, 225, 255, 0.15);
+  --text-primary: #f4f7fb;
+  --text-secondary: #9aa5b6;
+  --text-muted: #687386;
+  --accent: #3b82f6;
+  --accent-soft: rgba(59, 130, 246, 0.2);
+  --accent-text: #60a5fa;
+  --danger: #f06060;
+  --success: #2dd4bf;
+}
+
+[data-theme="graphite"] {
+  --bg-sidebar: #14181f;
+  --bg-list: #181d26;
+  --bg-main: #1c222c;
+  --bg-elevated: #242c38;
+  --bg-hover: #2b3442;
+  --bg-selected: #20324d;
+  --border-subtle: rgba(210, 225, 255, 0.08);
+  --border-strong: rgba(210, 225, 255, 0.15);
+  --text-primary: #eef2f8;
+  --text-secondary: #9aa7ba;
+  --text-muted: #69768a;
+  --accent: #3b82f6;
+  --accent-soft: rgba(59, 130, 246, 0.18);
+  --accent-text: #60a5fa;
+  --danger: #f06060;
+  --success: #2dd4bf;
+}
+
+[data-theme="light"] {
+  --bg-sidebar: #f4f6fa;
+  --bg-list: #fafbfd;
+  --bg-main: #ffffff;
+  --bg-elevated: #f1f4f9;
+  --bg-hover: #e7ecf4;
+  --bg-selected: #dbeafe;
+  --border-subtle: rgba(15, 23, 42, 0.07);
+  --border-strong: rgba(15, 23, 42, 0.13);
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #7c8aa0;
+  --accent: #2563eb;
+  --accent-soft: rgba(37, 99, 235, 0.12);
+  --accent-text: #1d4ed8;
+  --danger: #d13438;
+  --success: #0d9488;
+}
+
+[data-theme="paper"] {
+  --bg-sidebar: #f0eee9;
+  --bg-list: #f6f5f0;
+  --bg-main: #fbfaf7;
+  --bg-elevated: #eceae3;
+  --bg-hover: #e4e1d8;
+  --bg-selected: #dce8fb;
+  --border-subtle: rgba(30, 41, 59, 0.09);
+  --border-strong: rgba(30, 41, 59, 0.16);
+  --text-primary: #1c222b;
+  --text-secondary: #525d6d;
+  --text-muted: #828d9c;
+  --accent: #2563eb;
+  --accent-soft: rgba(37, 99, 235, 0.13);
+  --accent-text: #1d4ed8;
+  --danger: #c63838;
+  --success: #0f766e;
+}
+
+/* Outlook Classic Experience Theme Overrides (for shared modals, Calendar, Composer, Assistant) */
+[data-ui-theme="outlook-classic"][data-theme="light"],
+[data-ui-theme="outlook-classic"][data-theme="paper"] {
+  --bg-sidebar: #f3f2f1;
+  --bg-list: #ffffff;
+  --bg-main: #ffffff;
+  --bg-elevated: #faf9f8;
+  --bg-hover: #eff6fc;
+  --bg-selected: #cfe4fa;
+  --border-subtle: #edebe9;
+  --border-strong: #d2d0ce;
+  --text-primary: #242424;
+  --text-secondary: #484644;
+  --text-muted: #605e5c;
+  --accent: #0f6cbd;
+  --accent-soft: rgba(15, 108, 189, 0.13);
+  --accent-text: #0f6cbd;
+  --danger: #d13438;
+  --success: #107c10;
+}
+
+[data-ui-theme="outlook-classic"][data-theme="dark"],
+[data-ui-theme="outlook-classic"][data-theme="black"],
+[data-ui-theme="outlook-classic"][data-theme="graphite"] {
+  --bg-sidebar: #201f1e;
+  --bg-list: #1f1f1f;
+  --bg-main: #1f1f1f;
+  --bg-elevated: #292827;
+  --bg-hover: #323130;
+  --bg-selected: #1d354d;
+  --border-subtle: #2d2c2b;
+  --border-strong: #3b3a39;
+  --text-primary: #f3f2f1;
+  --text-secondary: #c8c6c4;
+  --text-muted: #8a8886;
+  --accent: #0f6cbd;
+  --accent-soft: rgba(75, 160, 232, 0.18);
+  --accent-text: #4ba0e8;
+  --danger: #f1707b;
+  --success: #54b054;
+}
+
+/* Gmail Experience Theme Overrides (for shared modals, Calendar, Composer, Assistant) */
+[data-ui-theme="gmail"][data-theme="light"],
+[data-ui-theme="gmail"][data-theme="paper"] {
+  --bg-sidebar: #f6f8fc;
+  --bg-list: #ffffff;
+  --bg-main: #ffffff;
+  --bg-elevated: #f0f4f9;
+  --bg-hover: #e8eaed;
+  --bg-selected: #d3e3fd;
+  --border-subtle: #eceff1;
+  --border-strong: #dadce0;
+  --text-primary: #1f1f1f;
+  --text-secondary: #444746;
+  --text-muted: #5f6368;
+  --accent: #0b57d0;
+  --accent-soft: rgba(11, 87, 208, 0.12);
+  --accent-text: #0b57d0;
+  --danger: #d93025;
+  --success: #188038;
+}
+
+[data-ui-theme="gmail"][data-theme="dark"],
+[data-ui-theme="gmail"][data-theme="black"],
+[data-ui-theme="gmail"][data-theme="graphite"] {
+  --bg-sidebar: #111111;
+  --bg-list: #1e1f20;
+  --bg-main: #1e1f20;
+  --bg-elevated: #282a2c;
+  --bg-hover: #303134;
+  --bg-selected: #394457;
+  --border-subtle: #333537;
+  --border-strong: #444746;
+  --text-primary: #e3e3e3;
+  --text-secondary: #c4c7c5;
+  --text-muted: #8e918f;
+  --accent: #8ab4f8;
+  --accent-soft: rgba(138, 180, 248, 0.16);
+  --accent-text: #8ab4f8;
+  --danger: #f28b82;
+  --success: #81c995;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  background: var(--bg-main);
+  color: var(--text-primary);
+  font-family: "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 13.5px;
+  caret-color: var(--accent);
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Composer WYSIWYG rich-text editor */
+.composer-editor {
+  color: var(--text-primary);
+  font-size: 14.5px;
+  line-height: 1.68;
+  word-break: break-word;
+  outline: none;
+}
+
+.composer-editor:empty::before {
+  content: attr(data-placeholder);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.composer-editor p {
+  margin: 0 0 0.65em;
+}
+
+.composer-editor p:last-child {
+  margin-bottom: 0;
+}
+
+.composer-editor ul {
+  list-style-type: disc;
+  padding-left: 1.5em;
+  margin: 0.4em 0 0.7em;
+}
+
+.composer-editor ol {
+  list-style-type: decimal;
+  padding-left: 1.5em;
+  margin: 0.4em 0 0.7em;
+}
+
+.composer-editor a {
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.app-drag {
+  -webkit-app-region: drag;
+}
+
+.app-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+.email-prose {
+  color: var(--text-primary);
+  line-height: 1.6;
+  font-size: 14px;
+  word-break: break-word;
+}
+
+.email-prose a {
+  color: var(--accent-text);
+  text-decoration: underline;
+}
+
+.email-prose p {
+  margin: 0 0 0.75em;
+}
+
+.email-prose img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+
+@keyframes undo-fuse-burn {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: 100;
+  }
+}
+
+.undo-fuse-stroke {
+  stroke-dasharray: 100;
+  stroke-dashoffset: 0;
+  animation-name: undo-fuse-burn;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}

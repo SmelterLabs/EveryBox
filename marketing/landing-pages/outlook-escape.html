@@ -1,0 +1,736 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EveryBox — The Fast Windows Escape From New Outlook</title>
+  <meta name="description" content="Keep the calm, familiar speed of Classic Outlook on Windows—with 1-click Classic Outlook calendar import, local IMAP calendars, unified Gmail/M365/IMAP, and optional local AI with no $30/month tax." />
+  <link rel="icon" type="image/png" href="./assets/icon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --surface: #ffffff;
+      --surface-muted: #edf1f7;
+      --ink: #0f172a;
+      --ink-secondary: #475569;
+      --ink-muted: #64748b;
+      --border: #dde3ee;
+      --border-strong: #c6d0e1;
+      --outlook-blue: #0f6cbd;
+      --outlook-blue-dark: #0b5698;
+      --outlook-soft: #e6f2fc;
+      --teal: #0d9488;
+      --teal-soft: #e6f7f5;
+      --danger: #c63838;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .container {
+      max-width: 1140px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      background: rgba(245, 247, 251, 0.9);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav {
+      height: 68px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: var(--ink);
+      font-family: "Plus Jakarta Sans", sans-serif;
+      font-weight: 800;
+      font-size: 18px;
+      letter-spacing: -0.02em;
+    }
+    .logo img { width: 30px; height: 30px; border-radius: 7px; }
+    .win-badge {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px;
+      color: var(--outlook-blue);
+      background: var(--outlook-soft);
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-weight: 500;
+    }
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      font-size: 14px;
+    }
+    .nav-links a {
+      color: var(--ink-secondary);
+      text-decoration: none;
+      font-weight: 500;
+    }
+    .nav-links a:hover { color: var(--ink); }
+    @media (max-width: 780px) {
+      .nav-links a:not(.keep-mobile) { display: none; }
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 20px;
+      border-radius: 9px;
+      font-family: "Plus Jakarta Sans", sans-serif;
+      font-weight: 700;
+      font-size: 14px;
+      cursor: pointer;
+      text-decoration: none;
+      border: 1px solid transparent;
+      transition: all 0.15s ease;
+    }
+    .btn-blue { background: var(--outlook-blue); color: #ffffff; }
+    .btn-blue:hover { background: var(--outlook-blue-dark); }
+    .btn-outline { background: var(--surface); color: var(--ink); border-color: var(--border-strong); }
+    .btn-outline:hover { border-color: var(--outlook-blue); color: var(--outlook-blue); }
+
+    /* Hero */
+    .hero {
+      padding: 64px 0 64px;
+    }
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1.02fr 0.98fr;
+      gap: 40px;
+      align-items: center;
+    }
+    @media (max-width: 960px) {
+      .hero-grid { grid-template-columns: 1fr; }
+    }
+    .kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--outlook-blue);
+      background: var(--outlook-soft);
+      padding: 5px 12px;
+      border-radius: 999px;
+      margin-bottom: 18px;
+    }
+    h1 {
+      font-family: "Plus Jakarta Sans", sans-serif;
+      font-size: clamp(34px, 4.5vw, 52px);
+      line-height: 1.08;
+      letter-spacing: -0.03em;
+      margin: 0 0 18px;
+      color: var(--ink);
+    }
+    .hero-sub {
+      font-size: 17px;
+      color: var(--ink-secondary);
+      margin: 0 0 26px;
+      max-width: 560px;
+    }
+    .hero-ctas {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+    .trust-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      font-size: 13px;
+      color: var(--ink-muted);
+    }
+    .trust-row span::before {
+      content: "✓ ";
+      color: var(--teal);
+      font-weight: 700;
+    }
+
+    /* Interactive Windows Desktop Preview */
+    .desk-card {
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 22px 54px rgba(15, 23, 42, 0.12);
+    }
+    .desk-controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 12px 16px;
+      background: #eef2f8;
+      border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+    .skin-group {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .skin-btn {
+      font-family: "Plus Jakarta Sans", sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 11px;
+      border-radius: 7px;
+      border: 1px solid var(--border-strong);
+      background: var(--surface);
+      color: var(--ink-secondary);
+      cursor: pointer;
+    }
+    .skin-btn.active {
+      background: var(--outlook-blue);
+      color: #ffffff;
+      border-color: var(--outlook-blue);
+    }
+    .import-btn {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11.5px;
+      font-weight: 500;
+      padding: 6px 10px;
+      border-radius: 7px;
+      border: 1px solid rgba(13, 148, 136, 0.35);
+      background: var(--teal-soft);
+      color: #0f766e;
+      cursor: pointer;
+    }
+
+    /* Simulated App Shell */
+    .app-shell {
+      display: grid;
+      grid-template-columns: 150px 1fr;
+      min-height: 315px;
+      font-size: 12.5px;
+      transition: background 0.2s, color 0.2s;
+    }
+    .app-side {
+      padding: 14px 12px;
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .app-main {
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .app-item {
+      padding: 6px 8px;
+      border-radius: 6px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: 500;
+    }
+    .app-thread {
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    .app-thread strong { display: block; font-size: 13px; }
+    .app-thread small { opacity: 0.72; }
+
+    /* Skin Themes */
+    .skin-outlook .app-side { background: #f3f2f1; color: #242424; border-color: #e1dfdd; }
+    .skin-outlook .app-main { background: #ffffff; color: #242424; }
+    .skin-outlook .app-item.sel { background: #cfe4fa; color: #0f6cbd; font-weight: 700; }
+    .skin-outlook .app-thread.active { border-left: 3px solid #0f6cbd; background: #eff6fc; }
+
+    .skin-everybox .app-side { background: #11151d; color: #eef2f9; border-color: rgba(210, 225, 255, 0.1); }
+    .skin-everybox .app-main { background: #181e29; color: #eef2f9; }
+    .skin-everybox .app-item.sel { background: #1c2f4f; color: #60a5fa; font-weight: 700; }
+    .skin-everybox .app-thread { border-color: rgba(210, 225, 255, 0.1); background: #1f2736; }
+    .skin-everybox .app-thread.active { border-color: #3b82f6; background: #1c2f4f; }
+
+    .skin-gmail .app-side { background: #f6f8fc; color: #1f1f1f; border-color: #e2e7ef; }
+    .skin-gmail .app-main { background: #ffffff; color: #1f1f1f; }
+    .skin-gmail .app-item.sel { background: #d3e3fd; color: #0b57d0; border-radius: 999px; font-weight: 700; }
+    .skin-gmail .app-thread.active { background: #edf2fc; border-color: #c2d7fa; }
+
+    .import-toast {
+      padding: 10px 14px;
+      background: #0f172a;
+      color: #e2e8f0;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11.5px;
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .import-toast.show { display: flex; }
+
+    /* Pain Section */
+    .section {
+      padding: 72px 0;
+      border-top: 1px solid var(--border);
+    }
+    .sec-white { background: var(--surface); }
+    .sec-head {
+      max-width: 720px;
+      margin-bottom: 40px;
+    }
+    .sec-label {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--outlook-blue);
+      margin-bottom: 8px;
+    }
+    h2 {
+      font-family: "Plus Jakarta Sans", sans-serif;
+      font-size: clamp(26px, 3.4vw, 38px);
+      line-height: 1.14;
+      letter-spacing: -0.025em;
+      margin: 0 0 12px;
+    }
+    .sec-desc {
+      font-size: 16px;
+      color: var(--ink-secondary);
+      margin: 0;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+    @media (max-width: 900px) {
+      .grid-3 { grid-template-columns: 1fr; }
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+    }
+    .sec-white .card { background: var(--bg); }
+    .card h3 {
+      font-family: "Plus Jakarta Sans", sans-serif;
+      font-size: 17px;
+      margin: 0 0 8px;
+    }
+    .card p {
+      font-size: 14px;
+      color: var(--ink-secondary);
+      margin: 0;
+    }
+    .card-num {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 12px;
+      color: var(--outlook-blue);
+      font-weight: 600;
+      margin-bottom: 10px;
+      display: block;
+    }
+
+    /* Side by side math */
+    .cost-strip {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 24px;
+      align-items: center;
+      background: #0f172a;
+      color: #f8fafc;
+      border-radius: 16px;
+      padding: 34px;
+    }
+    @media (max-width: 860px) {
+      .cost-strip { grid-template-columns: 1fr; }
+    }
+    .cost-strip h3 {
+      font-family: "Plus Jakarta Sans", sans-serif;
+      font-size: 24px;
+      margin: 0 0 10px;
+      line-height: 1.2;
+    }
+    .cost-strip p { color: #cbd5e1; margin: 0; font-size: 15px; }
+    .cost-table {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 12px;
+      padding: 18px;
+      display: grid;
+      gap: 10px;
+      font-size: 14px;
+    }
+    .cost-row {
+      display: flex;
+      justify-content: space-between;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .cost-row:last-child { border-bottom: none; padding-bottom: 0; color: #5eead4; font-weight: 700; }
+
+    /* Pricing */
+    .price-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 28px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .price-card.best {
+      border: 2px solid var(--outlook-blue);
+      box-shadow: 0 16px 40px rgba(15, 108, 189, 0.12);
+    }
+    .price-tag {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px;
+      color: var(--outlook-blue);
+      font-weight: 600;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .price-big {
+      font-family: "Plus Jakarta Sans", sans-serif;
+      font-size: 38px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+      margin-bottom: 6px;
+    }
+    .price-big span { font-size: 15px; font-weight: 500; color: var(--ink-muted); }
+    .plist {
+      list-style: none;
+      padding: 0;
+      margin: 18px 0 24px;
+      display: grid;
+      gap: 9px;
+      font-size: 14px;
+      color: var(--ink-secondary);
+    }
+    .plist li::before { content: "✓ "; color: var(--teal); font-weight: 700; }
+
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 32px 0 48px;
+      color: var(--ink-muted);
+      font-size: 13px;
+    }
+    .foot-row { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+    footer a { color: var(--ink-secondary); text-decoration: none; }
+
+    /* Modal */
+    .modal-bg {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.6);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      z-index: 100;
+    }
+    .modal-bg.open { display: flex; }
+    .modal {
+      width: 100%;
+      max-width: 440px;
+      background: var(--surface);
+      border-radius: 14px;
+      padding: 26px;
+      box-shadow: 0 24px 60px rgba(15, 23, 42, 0.25);
+    }
+    .modal h3 { margin: 0 0 8px; font-family: "Plus Jakarta Sans", sans-serif; }
+    .modal p { margin: 0 0 16px; font-size: 14px; color: var(--ink-secondary); }
+    .field {
+      width: 100%;
+      padding: 11px 13px;
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 14px;
+      margin-bottom: 10px;
+    }
+    .feedback { margin-top: 10px; font-size: 13px; color: var(--teal); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="container nav">
+      <a class="logo" href="#">
+        <img src="./assets/icon.png" alt="EveryBox" />
+        <span>EveryBox</span>
+        <span class="win-badge">for Windows</span>
+      </a>
+      <nav class="nav-links">
+        <a href="#migration">Outlook Migration</a>
+        <a href="#ai">Local AI</a>
+        <a href="#pricing">Pricing</a>
+        <a href="./index.html" style="font-size:12px;opacity:.65">All 3 Tests</a>
+        <button class="btn btn-blue keep-mobile" style="padding:9px 15px;font-size:13.5px" onclick="openModal('Founding Pro ($79/yr or $149 Once)')">Get Early Access</button>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="container hero-grid">
+        <div>
+          <div class="kicker">Escape the "New Outlook" Web Wrapper</div>
+          <h1>Classic Outlook comfort. Modern speed. No $30/month AI tax.</h1>
+          <p class="hero-sub">
+            Microsoft is pushing Windows users into a sluggish web wrapper that breaks local IMAP calendars and routes third-party passwords through Microsoft's cloud. EveryBox is a fast Windows desktop client with 1-click Classic Outlook import, a familiar Classic Outlook skin, and optional local AI.
+          </p>
+          <div class="hero-ctas">
+            <button class="btn btn-blue" onclick="openModal('Founding Pay-Once License ($149)')">Reserve Pay-Once License — $149</button>
+            <a class="btn btn-outline" href="#pricing">Compare Annual &amp; MSP Plans</a>
+          </div>
+          <div class="trust-row">
+            <span>1-click Classic Outlook Calendar Import</span>
+            <span>Local Calendar for IMAP Accounts</span>
+            <span>Gmail, M365 &amp; Legacy IMAP</span>
+          </div>
+        </div>
+
+        <!-- Interactive Skin & Outlook Import Preview -->
+        <div class="desk-card">
+          <div class="desk-controls">
+            <div class="skin-group">
+              <button class="skin-btn active" onclick="setSkin('outlook', this)">Classic Outlook Skin</button>
+              <button class="skin-btn" onclick="setSkin('everybox', this)">EveryBox Dark</button>
+              <button class="skin-btn" onclick="setSkin('gmail', this)">Gmail Layout</button>
+            </div>
+            <button class="import-btn" onclick="runOutlookScan()">&darr; Test Classic Outlook Scan</button>
+          </div>
+          <div id="appShell" class="app-shell skin-outlook">
+            <div class="app-side">
+              <div style="font-size:11px;opacity:.65;text-transform:uppercase;padding:2px 6px;">Accounts</div>
+              <div class="app-item sel"><span>All Accounts</span><span>7</span></div>
+              <div class="app-item"><span>Work (IMAP)</span><span>4</span></div>
+              <div class="app-item"><span>Sales (Gmail)</span><span>3</span></div>
+              <div style="font-size:11px;opacity:.65;text-transform:uppercase;padding:10px 6px 2px;">Folders</div>
+              <div class="app-item"><span>Inbox</span><span>7</span></div>
+              <div class="app-item"><span>Local Calendar</span><span>14</span></div>
+              <div class="app-item"><span>Waiting On</span><span>2</span></div>
+            </div>
+            <div class="app-main">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <strong id="skinTitle" style="font-size:14px;">Inbox — Classic Outlook Experience</strong>
+                <span style="font-size:11px;opacity:.7">Local SQLite · Instant Search</span>
+              </div>
+              <div class="app-thread active">
+                <strong>Q4 Renewal Proposal — Northstar Supply</strong>
+                <small>AI Pre-Draft ready (Ollama local · $0 API cost) · Click to review</small>
+              </div>
+              <div class="app-thread">
+                <strong>Calendar (This computer only) — 142 events synced</strong>
+                <small>Imported directly from Classic Outlook MAPI without duplicates</small>
+              </div>
+              <div class="app-thread">
+                <strong>Verify your login — 481 207</strong>
+                <small>1-click OTP copy pill · Auto-cleans after 24 hours</small>
+              </div>
+            </div>
+          </div>
+          <div id="importToast" class="import-toast">
+            <span id="toastText">Scanning Outlook.Application MAPI stores...</span>
+            <button onclick="document.getElementById('importToast').classList.remove('show')" style="background:none;border:none;color:#94a3b8;cursor:pointer;">&times;</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="migration" class="section sec-white">
+      <div class="container">
+        <div class="sec-head">
+          <div class="sec-label">Built Specifically for Windows Switchers</div>
+          <h2>Everything New Outlook broke—fixed on day one.</h2>
+          <p class="sec-desc">You shouldn't have to retrain your staff or lose ten years of local IMAP calendar appointments just because Microsoft wants everyone in a browser wrapper.</p>
+        </div>
+        <div class="grid-3">
+          <div class="card">
+            <span class="card-num">01 · ZERO-DUPLICATE IMPORT</span>
+            <h3>1-Click Classic Outlook Calendar Import</h3>
+            <p>Scans your local Classic Outlook Desktop MAPI folders—including <em>"Calendar (This computer only)"</em>—expands recurrences, preserves meeting links, and re-runs anytime without creating duplicates.</p>
+          </div>
+          <div class="card">
+            <span class="card-num">02 · IMAP FIRST-CLASS</span>
+            <h3>Built-In Local Calendars for IMAP</h3>
+            <p>Using Network Solutions, GoDaddy, Namecheap, Fastmail, or cPanel? Every IMAP account automatically gets a fast local SQLite calendar plus full <code>.ics</code> import/export and optional CalDAV.</p>
+          </div>
+          <div class="card">
+            <span class="card-num">03 · ZERO RETRAINING</span>
+            <h3>Familiar Classic Outlook UI Mode</h3>
+            <p>Switch instantly between EveryBox Modern, Classic Outlook, and Gmail layouts—plus customizable keyboard shortcuts and drag-to-resize panes so your team feels at home in five minutes.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="ai" class="section">
+      <div class="container">
+        <div class="cost-strip">
+          <div>
+            <h3>Use the PC you already paid for—not a $360/year cloud AI subscription.</h3>
+            <p>
+              Superhuman, Shortwave, and Microsoft Copilot charge $25–$40 every single month per person and run your inbox through third-party AI clouds. EveryBox connects directly to your own local Ollama / LM Studio model or your own API key—so AI summarization, search, and voice-matched drafts cost $0 extra from us.
+            </p>
+          </div>
+          <div class="cost-table">
+            <div class="cost-row"><span>Superhuman Business</span><span>$396 / user / year</span></div>
+            <div class="cost-row"><span>Microsoft 365 Copilot Add-On</span><span>$360 / user / year</span></div>
+            <div class="cost-row"><span>Shortwave Business</span><span>$288 / user / year</span></div>
+            <div class="cost-row"><span>EveryBox Pro (Local / BYO AI)</span><span>$79 / yr (or $149 once)</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="pricing" class="section sec-white">
+      <div class="container">
+        <div class="sec-head">
+          <div class="sec-label">Simple, Anti-Subscription Pricing</div>
+          <h2>Own your desktop software—or deploy it across an entire MSP fleet.</h2>
+        </div>
+        <div class="grid-3">
+          <div class="price-card">
+            <div>
+              <div class="price-tag">Personal Free</div>
+              <div class="price-big">$0 <span>/ home use</span></div>
+              <ul class="plist">
+                <li>Up to 2 email accounts (Gmail or IMAP)</li>
+                <li>Unified inbox &amp; combined local calendar</li>
+                <li>1-click Classic Outlook calendar import</li>
+                <li>Manual local AI (Ollama / LM Studio / BYOK)</li>
+              </ul>
+            </div>
+            <button class="btn btn-outline" onclick="openModal('Personal Free Early Build ($0)')">Join Free Early Access</button>
+          </div>
+
+          <div class="price-card best">
+            <div>
+              <div class="price-tag">Founding Pro · Most Popular</div>
+              <div class="price-big">$79 <span>/ year</span></div>
+              <div style="font-size:13px;color:var(--outlook-blue);font-weight:600;margin-bottom:4px;">Or $149 Pay-Once Founding License (v1.x lifetime)</div>
+              <ul class="plist">
+                <li>Unlimited Gmail, M365 &amp; IMAP accounts</li>
+                <li>Classic Outlook, Gmail &amp; EveryBox UI modes</li>
+                <li>Background Autopilot &amp; Voice-Matched Pre-Drafts</li>
+                <li>Workspaces (Ctrl+1..9) &amp; 1-click Unsubscribe</li>
+                <li>Commercial use rights on up to 3 Windows PCs</li>
+              </ul>
+            </div>
+            <button class="btn btn-blue" onclick="openModal('Founding Pro ($79/yr or $149 Once)')">Reserve Founding License</button>
+          </div>
+
+          <div class="price-card">
+            <div>
+              <div class="price-tag">Business &amp; MSP Partner</div>
+              <div class="price-big">$19 <span>/ seat / mo</span></div>
+              <div style="font-size:13px;color:var(--ink-muted);margin-bottom:4px;">Wholesale MSP partner margin (35–40%) available</div>
+              <ul class="plist">
+                <li>Silent MSI / Intune / GPO Windows deployment</li>
+                <li>Centralized MSP license management portal</li>
+                <li>Shared company AI endpoint (LAN GPU / Azure)</li>
+                <li>Shared Voice Profiles &amp; Autopilot rules</li>
+                <li>Priority Windows migration engineering support</li>
+              </ul>
+            </div>
+            <button class="btn btn-outline" onclick="openModal('MSP / Business Pilot Inquiry')">Request MSP Partner Kit</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container foot-row">
+      <div>&copy; 2026 EveryBox · Fast Windows Email &amp; Calendar Without the New Outlook Bloat</div>
+      <div style="display:flex;gap:18px;">
+        <a href="./index.html">Positioning Lab</a>
+        <a href="./ai-firewall.html">AI Firewall Variant</a>
+        <a href="./multi-inbox.html">Multi-Inbox Variant</a>
+      </div>
+    </div>
+  </footer>
+
+  <div class="modal-bg" id="modal">
+    <div class="modal">
+      <h3 id="modalTitle">Reserve Founding License</h3>
+      <p>Enter your email to get notified when the signed Windows installer drops and lock in Founding pricing.</p>
+      <form onsubmit="submitForm(event)">
+        <input class="field" type="email" id="uEmail" required placeholder="you@company.com" />
+        <input class="field" type="text" id="uSetup" placeholder="Current setup (e.g. Classic Outlook + IMAP, 15 seats)" />
+        <div style="display:flex;gap:10px;margin-top:6px;">
+          <button type="submit" class="btn btn-blue" style="flex:1">Claim Founding Spot</button>
+          <button type="button" class="btn btn-outline" onclick="closeModal()">Cancel</button>
+        </div>
+        <div class="feedback" id="formMsg"></div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    function setSkin(mode, btn) {
+      document.querySelectorAll('.skin-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const shell = document.getElementById('appShell');
+      const title = document.getElementById('skinTitle');
+      shell.className = 'app-shell skin-' + mode;
+      if (mode === 'outlook') title.textContent = 'Inbox — Classic Outlook Experience';
+      if (mode === 'everybox') title.textContent = 'Inbox — EveryBox Calm Dark';
+      if (mode === 'gmail') title.textContent = 'Inbox — Gmail Familiar Layout';
+    }
+
+    function runOutlookScan() {
+      const toast = document.getElementById('importToast');
+      const text = document.getElementById('toastText');
+      toast.classList.add('show');
+      text.textContent = 'Scanning Outlook.Application MAPI stores...';
+      setTimeout(() => {
+        text.textContent = '✓ Found "Calendar (This computer only)" · Imported 142 events · 0 duplicates';
+      }, 650);
+    }
+
+    let planChoice = '';
+    function openModal(plan) {
+      planChoice = plan;
+      document.getElementById('modalTitle').textContent = plan;
+      document.getElementById('formMsg').textContent = '';
+      document.getElementById('modal').classList.add('open');
+    }
+    function closeModal() { document.getElementById('modal').classList.remove('open'); }
+    function submitForm(e) {
+      e.preventDefault();
+      const email = document.getElementById('uEmail').value;
+      document.getElementById('formMsg').textContent = `Test capture recorded for ${email} (${planChoice}). Wire Stripe/Lemon Squeezy checkout here.`;
+    }
+  </script>
+</body>
+</html>
