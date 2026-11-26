@@ -7,3 +7,5 @@ dist/
 .env
 .env.*
 secrets.dpapi.json
+.local/
+journal/

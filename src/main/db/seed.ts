@@ -227,11 +227,11 @@ export function seedDemoDataIfEmpty(db: GlassmailDB): void {
         cc: [],
         bcc: [],
         subject: 'Dinner on Saturday?',
-        snippet: "We're thinking 7:30 at the new place downtown — can you make it?",
+        snippet: "We're thinking 7:30 at the new place downtown — can you and Sam make it?",
         bodyText:
-          "Hey Alex!\n\nWe're thinking 7:30 at the new place downtown this Saturday — can you make it? Need to lock in the reservation by Friday.\n\nPriya",
+          "Hey Alex!\n\nWe're thinking 7:30 at the new place downtown this Saturday — can you and Sam make it? Need to lock in the reservation by Friday.\n\nPriya",
         bodyHtml:
-          "<p>Hey Alex!</p><p>We're thinking 7:30 at the new place downtown this Saturday — can you make it? Need to lock in the reservation by Friday.</p><p>Priya</p>",
+          "<p>Hey Alex!</p><p>We're thinking 7:30 at the new place downtown this Saturday — can you and Sam make it? Need to lock in the reservation by Friday.</p><p>Priya</p>",
         date: now - 5 * hour,
         isRead: false,
         isStarred: false,
