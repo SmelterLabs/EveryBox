@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertCircle, Check, Copy, Key, Keyboard, Mail, Palette, Plus, RefreshCw, RotateCcw, Shield, Sparkles, Terminal, Trash2, X } from 'lucide-react'
+import { AlertCircle, Check, ChevronDown, ChevronRight, Copy, Key, Keyboard, Layout, Mail, Moon, Palette, Plus, RefreshCw, RotateCcw, Shield, Sparkles, Sun, Terminal, Trash2, X } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { isMac } from '../utils/platform'
+import { detectPresetByEmail, MAIL_PROVIDER_PRESETS, type MailProviderPreset } from '../utils/mailPresets'
 import {
   SHORTCUT_DEFINITIONS,
   eventToCombo,
@@ -10,14 +11,18 @@ import {
   getEffectiveShortcut
 } from '../utils/shortcuts'
 import type {
+  AccountRowStyle,
   AccountSwitchBehavior,
   AIProviderType,
   AppSettings,
   DiscoveredModel,
+  ListDensity,
   LocalAIStatus,
+  OutlookStoreInfo,
   ReaderWidth,
   ShortcutActionId,
-  ThemeId
+  ThemeId,
+  UIThemeId
 } from '../../../shared/types'
 
 function formatModelLabel(m: DiscoveredModel): string {
@@ -44,6 +49,7 @@ export const SettingsModal: React.FC = () => {
   } = useAppStore()
 
   const [tab, setTab] = useState(settingsInitialTab)
+  const [appearanceExpanded, setAppearanceExpanded] = useState(true)
   const [draft, setDraft] = useState<AppSettings | null>(settings)
 
   // Gmail OAuth
@@ -51,6 +57,9 @@ export const SettingsModal: React.FC = () => {
   const [showOAuthFields, setShowOAuthFields] = useState(false)
 
   // Add IMAP form
+  const [showImapForm, setShowImapForm] = useState(false)
+  const [selectedPresetId, setSelectedPresetId] = useState<string>('custom')
+  const [showImapAdvanced, setShowImapAdvanced] = useState(false)
   const [imapName, setImapName] = useState('')
   const [imapEmail, setImapEmail] = useState('')
   const [imapPass, setImapPass] = useState('')
@@ -61,6 +70,12 @@ export const SettingsModal: React.FC = () => {
   const [caldavUrl, setCaldavUrl] = useState('')
   const [icsFeedUrl, setIcsFeedUrl] = useState('')
   const [addingImap, setAddingImap] = useState(false)
+
+  // Classic Outlook Desktop local sync
+  const [scanningOutlookStores, setScanningOutlookStores] = useState(false)
+  const [outlookStores, setOutlookStores] = useState<OutlookStoreInfo[] | null>(null)
+  const [outlookStoreError, setOutlookStoreError] = useState<string | null>(null)
+  const [connectingOutlookEmail, setConnectingOutlookEmail] = useState<string | null>(null)
 
   // Local AI detection
   const [localAI, setLocalAI] = useState<LocalAIStatus | null>(null)
@@ -203,6 +218,23 @@ export const SettingsModal: React.FC = () => {
     }
   }
 
+  const applyImapPreset = (preset: MailProviderPreset) => {
+    setSelectedPresetId(preset.id)
+    setShowImapForm(true)
+    setImapHost(preset.imapHost)
+    setImapPort(preset.imapPort)
+    setSmtpHost(preset.smtpHost)
+    setSmtpPort(preset.smtpPort)
+    if (preset.caldavUrl !== undefined) {
+      setCaldavUrl(preset.caldavUrl)
+    } else {
+      setCaldavUrl('')
+    }
+    if (!imapName && preset.id !== 'custom') {
+      setImapName(preset.label)
+    }
+  }
+
   const handleAddImap = async (e: React.FormEvent) => {
     e.preventDefault()
     setAddingImap(true)
@@ -229,6 +261,8 @@ export const SettingsModal: React.FC = () => {
         setSmtpHost('')
         setCaldavUrl('')
         setIcsFeedUrl('')
+        setShowImapForm(false)
+        setShowImapAdvanced(false)
         await refreshAll()
       } else {
         showToast(res.error || 'Could not connect IMAP account')
@@ -238,16 +272,17 @@ export const SettingsModal: React.FC = () => {
     }
   }
 
-  const tabs: { id: typeof tab; label: string; icon: React.ReactNode }[] = [
+  const tabs: { id: typeof tab; label: string; icon: React.ReactNode; hasSubmenu?: boolean }[] = [
     { id: 'accounts', label: 'Accounts', icon: <Mail size={14} className="shrink-0" /> },
     { id: 'ai', label: 'AI Providers', icon: <Sparkles size={14} className="shrink-0" /> },
-    { id: 'general', label: 'Appearance', icon: <Palette size={14} className="shrink-0" /> },
+    { id: 'general', label: 'Appearance', icon: <Palette size={14} className="shrink-0" />, hasSubmenu: true },
     { id: 'shortcuts', label: 'Shortcut Keys', icon: <Keyboard size={14} className="shrink-0" /> },
     { id: 'privacy', label: 'Privacy', icon: <Shield size={14} className="shrink-0" /> },
     { id: 'snippets', label: 'Snippets', icon: <Plus size={14} className="shrink-0" /> },
     { id: 'mcp', label: 'MCP Agents', icon: <Terminal size={14} className="shrink-0" /> }
   ]
-  const activeTabLabel = tabs.find((t) => t.id === tab)?.label || tab
+  const activeTabLabel =
+    tab === 'themes' ? 'Appearance › Themes' : tabs.find((t) => t.id === tab)?.label || tab
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-6" onClick={closeSettings}>
@@ -264,18 +299,58 @@ export const SettingsModal: React.FC = () => {
           <div className="mb-3 px-2.5 text-[13px] font-semibold">Settings</div>
           <div className="space-y-0.5">
             {tabs.map((t) => (
-              <button
-                key={t.id}
-                onClick={() => setTab(t.id)}
-                className="flex w-full items-center gap-2.5 whitespace-nowrap rounded-lg px-2.5 py-2 text-left text-[12.5px] font-medium transition hover:bg-[var(--bg-hover)]"
-                style={{
-                  background: tab === t.id ? 'var(--bg-selected)' : undefined,
-                  color: tab === t.id ? 'var(--accent-text)' : 'var(--text-secondary)'
-                }}
-              >
-                {t.icon}
-                <span className="truncate">{t.label}</span>
-              </button>
+              <div key={t.id}>
+                <button
+                  onClick={() => {
+                    if (t.hasSubmenu) {
+                      if (tab === 'general') {
+                        setAppearanceExpanded((v) => !v)
+                      } else {
+                        setTab(t.id)
+                        setAppearanceExpanded(true)
+                      }
+                    } else {
+                      setTab(t.id)
+                    }
+                  }}
+                  className="flex w-full items-center justify-between gap-2 whitespace-nowrap rounded-lg px-2.5 py-2 text-left text-[12.5px] font-medium transition hover:bg-[var(--bg-hover)]"
+                  style={{
+                    background: tab === t.id ? 'var(--bg-selected)' : undefined,
+                    color: tab === t.id ? 'var(--accent-text)' : 'var(--text-secondary)'
+                  }}
+                >
+                  <span className="flex min-w-0 items-center gap-2.5">
+                    {t.icon}
+                    <span className="truncate">{t.label}</span>
+                  </span>
+                  {t.hasSubmenu && (
+                    <span
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setAppearanceExpanded((v) => !v)
+                      }}
+                      className="rounded p-0.5 hover:bg-[var(--bg-hover)]"
+                    >
+                      {appearanceExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                    </span>
+                  )}
+                </button>
+                {t.hasSubmenu && appearanceExpanded && (
+                  <div className="mt-0.5 space-y-0.5 pl-4">
+                    <button
+                      onClick={() => setTab('themes')}
+                      className="flex w-full items-center gap-2 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-left text-[12px] font-medium transition hover:bg-[var(--bg-hover)]"
+                      style={{
+                        background: tab === 'themes' ? 'var(--bg-selected)' : undefined,
+                        color: tab === 'themes' ? 'var(--accent-text)' : 'var(--text-secondary)'
+                      }}
+                    >
+                      <Layout size={13} className="shrink-0" />
+                      <span className="truncate">Themes</span>
+                    </button>
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         </div>
@@ -416,102 +491,333 @@ export const SettingsModal: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Add IMAP / SMTP + Optional CalDAV/ICS */}
-                <form
-                  onSubmit={(e) => void handleAddImap(e)}
+                {/* Connect Microsoft 365 / Exchange via Classic Outlook Desktop */}
+                <div
                   className="space-y-3 rounded-xl border p-4"
                   style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
                 >
-                  <div>
-                    <h4 className="text-[13.5px] font-semibold">Add IMAP / SMTP Account</h4>
-                    <p className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
-                      Includes a built-in local calendar automatically (import from Classic Outlook or .ics in the
-                      Calendar tab). CalDAV and ICS feed URLs are optional for server sync.
-                    </p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <input
-                      placeholder="Display Name (e.g. Work IMAP)"
-                      value={imapName}
-                      onChange={(e) => setImapName(e.target.value)}
-                      className="rounded-lg border bg-transparent px-3 py-2 text-[12.5px] outline-none"
-                      style={{ borderColor: 'var(--border-strong)' }}
-                    />
-                    <input
-                      required
-                      type="email"
-                      placeholder="Email Address"
-                      value={imapEmail}
-                      onChange={(e) => setImapEmail(e.target.value)}
-                      className="rounded-lg border bg-transparent px-3 py-2 text-[12.5px] outline-none"
-                      style={{ borderColor: 'var(--border-strong)' }}
-                    />
-                    <input
-                      required
-                      type="password"
-                      placeholder="Password / App Password"
-                      value={imapPass}
-                      onChange={(e) => setImapPass(e.target.value)}
-                      className="rounded-lg border bg-transparent px-3 py-2 text-[12.5px] outline-none"
-                      style={{ borderColor: 'var(--border-strong)' }}
-                    />
-                    <div className="flex gap-2">
-                      <input
-                        required
-                        placeholder="IMAP Host (imap.example.com)"
-                        value={imapHost}
-                        onChange={(e) => setImapHost(e.target.value)}
-                        className="flex-1 rounded-lg border bg-transparent px-3 py-2 text-[12.5px] outline-none"
-                        style={{ borderColor: 'var(--border-strong)' }}
-                      />
-                      <input
-                        type="number"
-                        value={imapPort}
-                        onChange={(e) => setImapPort(Number(e.target.value))}
-                        className="w-20 rounded-lg border bg-transparent px-2 py-2 text-[12.5px] outline-none"
-                        style={{ borderColor: 'var(--border-strong)' }}
-                      />
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-[13.5px] font-semibold">Connect Microsoft 365 / Exchange (via Classic Outlook)</h4>
+                      <p className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                        Sync corporate Exchange or Microsoft 365 accounts signed into Classic Outlook Desktop — full Mail, Calendar, and AI with zero IT approval.
+                      </p>
                     </div>
-                    <div className="flex gap-2">
-                      <input
-                        placeholder="SMTP Host (optional)"
-                        value={smtpHost}
-                        onChange={(e) => setSmtpHost(e.target.value)}
-                        className="flex-1 rounded-lg border bg-transparent px-3 py-2 text-[12.5px] outline-none"
-                        style={{ borderColor: 'var(--border-strong)' }}
-                      />
-                      <input
-                        type="number"
-                        value={smtpPort}
-                        onChange={(e) => setSmtpPort(Number(e.target.value))}
-                        className="w-20 rounded-lg border bg-transparent px-2 py-2 text-[12.5px] outline-none"
-                        style={{ borderColor: 'var(--border-strong)' }}
-                      />
-                    </div>
-                    <input
-                      placeholder="CalDAV URL (optional two-way calendar)"
-                      value={caldavUrl}
-                      onChange={(e) => setCaldavUrl(e.target.value)}
-                      className="rounded-lg border bg-transparent px-3 py-2 text-[12.5px] outline-none"
-                      style={{ borderColor: 'var(--border-strong)' }}
-                    />
+                    {outlookStores && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOutlookStores(null)
+                          setOutlookStoreError(null)
+                        }}
+                        className="shrink-0 text-[11.5px] hover:underline"
+                        style={{ color: 'var(--text-muted)' }}
+                      >
+                        Hide
+                      </button>
+                    )}
                   </div>
-                  <input
-                    placeholder="Read-only ICS Calendar Feed URL (optional)"
-                    value={icsFeedUrl}
-                    onChange={(e) => setIcsFeedUrl(e.target.value)}
-                    className="w-full rounded-lg border bg-transparent px-3 py-2 text-[12.5px] outline-none"
-                    style={{ borderColor: 'var(--border-strong)' }}
-                  />
-                  <button
-                    type="submit"
-                    disabled={addingImap}
-                    className="rounded-lg border px-4 py-1.5 text-[12.5px] font-semibold transition hover:bg-[var(--bg-hover)]"
-                    style={{ borderColor: 'var(--border-strong)' }}
-                  >
-                    {addingImap ? 'Testing & Connecting…' : 'Connect IMAP Account'}
-                  </button>
-                </form>
+
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      disabled={scanningOutlookStores}
+                      onClick={async () => {
+                        setScanningOutlookStores(true)
+                        setOutlookStoreError(null)
+                        try {
+                          const res = await window.glassmail.listOutlookStores()
+                          if (res.available) {
+                            setOutlookStores(res.stores)
+                            if (res.stores.length === 0) {
+                              setOutlookStoreError('No mail accounts found in Classic Outlook Desktop.')
+                            }
+                          } else {
+                            setOutlookStoreError(res.error || 'Could not detect Classic Outlook Desktop.')
+                          }
+                        } finally {
+                          setScanningOutlookStores(false)
+                        }
+                      }}
+                      className="inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-[12.5px] font-semibold transition hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                      style={{ borderColor: 'var(--border-strong)', background: 'var(--bg-main)' }}
+                    >
+                      <Plus size={14} /> {scanningOutlookStores ? 'Scanning Classic Outlook…' : 'Scan Classic Outlook Accounts'}
+                    </button>
+                  </div>
+
+                  {outlookStoreError && (
+                    <div className="rounded-lg border px-3 py-2 text-[12px]" style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }}>
+                      {outlookStoreError}
+                    </div>
+                  )}
+
+                  {outlookStores && outlookStores.length > 0 && (
+                    <div className="space-y-2 pt-1">
+                      {outlookStores.map((st) => {
+                        const alreadyConnected = accounts.some(
+                          (a) => !a.isDemo && a.email.toLowerCase() === st.email.toLowerCase()
+                        )
+                        const isConnecting = connectingOutlookEmail === st.email
+                        return (
+                          <div
+                            key={st.storeId}
+                            className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5"
+                            style={{ background: 'var(--bg-main)', borderColor: 'var(--border-subtle)' }}
+                          >
+                            <div className="min-w-0">
+                              <div className="truncate text-[13px] font-semibold">
+                                {st.email}{' '}
+                                <span className="text-[11px] font-normal" style={{ color: 'var(--text-muted)' }}>
+                                  ({st.storeType})
+                                </span>
+                              </div>
+                              <div className="text-[11.5px]" style={{ color: 'var(--text-muted)' }}>
+                                {st.inboxCount} in Inbox · {st.unreadCount} unread
+                                {st.calendarPath ? ' · Calendar detected' : ''}
+                              </div>
+                            </div>
+                            {alreadyConnected ? (
+                              <span className="inline-flex shrink-0 items-center gap-1 text-[11.5px] font-medium" style={{ color: 'var(--success)' }}>
+                                <Check size={13} /> Connected
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={Boolean(connectingOutlookEmail)}
+                                onClick={async () => {
+                                  setConnectingOutlookEmail(st.email)
+                                  try {
+                                    const domainLabel = st.email.split('@')[1]?.split('.')[0] || st.displayName
+                                    const friendlyName = domainLabel.charAt(0).toUpperCase() + domainLabel.slice(1)
+                                    const res = await window.glassmail.connectOutlookLocalAccount({
+                                      name: friendlyName,
+                                      email: st.email,
+                                      storeName: st.displayName,
+                                      calendarPath: st.calendarPath
+                                    })
+                                    if (res.ok) {
+                                      await refreshAll()
+                                      showToast(`Connected ${st.email} — syncing mail & calendar…`)
+                                    } else {
+                                      showToast(res.error || 'Could not connect Outlook account')
+                                    }
+                                  } finally {
+                                    setConnectingOutlookEmail(null)
+                                  }
+                                }}
+                                className="shrink-0 rounded-lg px-3.5 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+                                style={{ background: 'var(--accent)' }}
+                              >
+                                {isConnecting ? 'Connecting…' : 'Connect'}
+                              </button>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Connect IMAP / SMTP Account with 1-Click Provider Presets */}
+                <div
+                  className="space-y-3 rounded-xl border p-4"
+                  style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-[13.5px] font-semibold">Connect iCloud, Yahoo, Fastmail, Zoho &amp; IMAP</h4>
+                      <p className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                        Pick a provider below to pre-fill server settings, or enter any custom IMAP / SMTP server.
+                      </p>
+                    </div>
+                    {showImapForm && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowImapForm(false)
+                          setShowImapAdvanced(false)
+                        }}
+                        className="shrink-0 text-[11.5px] hover:underline"
+                        style={{ color: 'var(--text-muted)' }}
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+
+                  {/* 1-Click Provider Preset Pills */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {MAIL_PROVIDER_PRESETS.map((preset) => {
+                      const active = showImapForm && selectedPresetId === preset.id
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => applyImapPreset(preset)}
+                          className="rounded-lg border px-2.5 py-1.5 text-[12px] font-medium transition hover:border-[var(--accent)] hover:bg-[var(--bg-hover)]"
+                          style={{
+                            borderColor: active ? 'var(--accent)' : 'var(--border-strong)',
+                            background: active ? 'var(--accent-soft)' : 'var(--bg-main)',
+                            color: active ? 'var(--accent-text)' : 'var(--text-primary)'
+                          }}
+                        >
+                          {preset.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+
+                  {showImapForm && (() => {
+                    const activePreset = MAIL_PROVIDER_PRESETS.find((p) => p.id === selectedPresetId)
+                    return (
+                      <form onSubmit={(e) => void handleAddImap(e)} className="space-y-3 pt-1">
+                        {activePreset?.hint && (
+                          <div
+                            className="rounded-lg border px-3 py-2 text-[11.5px]"
+                            style={{
+                              background: 'var(--bg-main)',
+                              borderColor: 'var(--border-subtle)',
+                              color: 'var(--text-secondary)'
+                            }}
+                          >
+                            {activePreset.hint}
+                          </div>
+                        )}
+                        <div className="grid grid-cols-2 gap-2.5">
+                          <input
+                            placeholder="Display Name (e.g. iCloud Mail)"
+                            value={imapName}
+                            onChange={(e) => setImapName(e.target.value)}
+                            className="rounded-lg border bg-transparent px-3 py-2 text-[12.5px] outline-none"
+                            style={{ borderColor: 'var(--border-strong)' }}
+                          />
+                          <input
+                            required
+                            type="email"
+                            placeholder="Email Address"
+                            value={imapEmail}
+                            onChange={(e) => {
+                              const nextEmail = e.target.value
+                              setImapEmail(nextEmail)
+                              if (!imapHost || selectedPresetId === 'custom') {
+                                const detected = detectPresetByEmail(nextEmail)
+                                if (detected) {
+                                  setSelectedPresetId(detected.id)
+                                  setImapHost(detected.imapHost)
+                                  setImapPort(detected.imapPort)
+                                  setSmtpHost(detected.smtpHost)
+                                  setSmtpPort(detected.smtpPort)
+                                  if (detected.caldavUrl) setCaldavUrl(detected.caldavUrl)
+                                  if (!imapName) setImapName(detected.label)
+                                }
+                              }
+                            }}
+                            className="rounded-lg border bg-transparent px-3 py-2 text-[12.5px] outline-none"
+                            style={{ borderColor: 'var(--border-strong)' }}
+                          />
+                          <input
+                            required
+                            type="password"
+                            placeholder="Password / App Password"
+                            value={imapPass}
+                            onChange={(e) => setImapPass(e.target.value)}
+                            className="rounded-lg border bg-transparent px-3 py-2 text-[12.5px] outline-none"
+                            style={{ borderColor: 'var(--border-strong)' }}
+                          />
+                          <div className="flex gap-2">
+                            <input
+                              required
+                              placeholder="IMAP Host (imap.example.com)"
+                              value={imapHost}
+                              onChange={(e) => setImapHost(e.target.value)}
+                              className="flex-1 rounded-lg border bg-transparent px-3 py-2 text-[12.5px] outline-none"
+                              style={{ borderColor: 'var(--border-strong)' }}
+                            />
+                            <input
+                              type="number"
+                              value={imapPort}
+                              onChange={(e) => setImapPort(Number(e.target.value))}
+                              className="w-20 rounded-lg border bg-transparent px-2 py-2 text-[12.5px] outline-none"
+                              style={{ borderColor: 'var(--border-strong)' }}
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <button
+                            type="button"
+                            onClick={() => setShowImapAdvanced((v) => !v)}
+                            className="inline-flex items-center gap-1 text-[11.5px] font-medium hover:underline"
+                            style={{ color: 'var(--text-muted)' }}
+                          >
+                            {showImapAdvanced ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                            <span>Optional: SMTP, CalDAV &amp; ICS calendar sync</span>
+                          </button>
+
+                          {showImapAdvanced && (
+                            <div className="mt-2.5 space-y-2.5">
+                              <div className="grid grid-cols-2 gap-2.5">
+                                <div className="flex gap-2">
+                                  <input
+                                    placeholder="SMTP Host (optional)"
+                                    value={smtpHost}
+                                    onChange={(e) => setSmtpHost(e.target.value)}
+                                    className="flex-1 rounded-lg border bg-transparent px-3 py-2 text-[12.5px] outline-none"
+                                    style={{ borderColor: 'var(--border-strong)' }}
+                                  />
+                                  <input
+                                    type="number"
+                                    value={smtpPort}
+                                    onChange={(e) => setSmtpPort(Number(e.target.value))}
+                                    className="w-20 rounded-lg border bg-transparent px-2 py-2 text-[12.5px] outline-none"
+                                    style={{ borderColor: 'var(--border-strong)' }}
+                                  />
+                                </div>
+                                <input
+                                  placeholder="CalDAV URL (optional two-way calendar)"
+                                  value={caldavUrl}
+                                  onChange={(e) => setCaldavUrl(e.target.value)}
+                                  className="rounded-lg border bg-transparent px-3 py-2 text-[12.5px] outline-none"
+                                  style={{ borderColor: 'var(--border-strong)' }}
+                                />
+                              </div>
+                              <input
+                                placeholder="Read-only ICS Calendar Feed URL (optional)"
+                                value={icsFeedUrl}
+                                onChange={(e) => setIcsFeedUrl(e.target.value)}
+                                className="w-full rounded-lg border bg-transparent px-3 py-2 text-[12.5px] outline-none"
+                                style={{ borderColor: 'var(--border-strong)' }}
+                              />
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2.5 pt-0.5">
+                          <button
+                            type="submit"
+                            disabled={addingImap}
+                            className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-[12.5px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+                            style={{ background: 'var(--accent)' }}
+                          >
+                            {addingImap ? 'Testing & Connecting…' : `Connect ${activePreset && activePreset.id !== 'custom' ? activePreset.label : 'IMAP Account'}`}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowImapForm(false)
+                              setShowImapAdvanced(false)
+                            }}
+                            className="rounded-lg px-3 py-2 text-[12.5px] font-medium transition hover:bg-[var(--bg-hover)]"
+                            style={{ color: 'var(--text-secondary)' }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
+                    )
+                  })()}
+                </div>
               </div>
             )}
 
@@ -1196,11 +1502,298 @@ export const SettingsModal: React.FC = () => {
               )
             })()}
 
-            {/* GENERAL / THEMES TAB */}
+            {/* APPEARANCE › THEMES SUBMENU */}
+            {tab === 'themes' && (() => {
+              const activeUiTheme: UIThemeId = draft.uiTheme || 'everybox'
+              const isDarkPalette = ['dark', 'black', 'graphite'].includes(draft.theme)
+              const themeCards: {
+                id: UIThemeId
+                name: string
+                badge: string
+                desc: string
+                highlights: string[]
+              }[] = [
+                {
+                  id: 'everybox',
+                  name: 'EveryBox',
+                  badge: 'Default',
+                  desc: 'Calm 3-pane workspace with universal natural-language search, Today Brief, and multi-account focus pills.',
+                  highlights: ['3-pane split view', 'Today Brief home', '5 color palettes']
+                },
+                {
+                  id: 'outlook-classic',
+                  name: 'Outlook Classic',
+                  badge: 'Microsoft 365 Desktop',
+                  desc: 'Authentic Classic Outlook Desktop email experience with Office blue title bar, Home Ribbon, left app rail, collapsible account folder trees, blue unread bars, right reading pane, and bottom status bar.',
+                  highlights: ['Home / View Ribbon', 'Favorites & Folder Tree', 'Right Reading Pane']
+                },
+                {
+                  id: 'gmail',
+                  name: 'Gmail',
+                  badge: 'Web Experience',
+                  desc: 'Authentic Gmail experience with floating Compose pill, rounded-pill sidebar, Primary/People/Updates category tabs, dense single-row inbox with hover actions, and full-width conversation view.',
+                  highlights: ['Full-width inbox & threads', 'Hover quick actions', 'Optional split pane']
+                }
+              ]
+
+              return (
+                <div className="space-y-6">
+                  <div>
+                    <div className="text-[13.5px] font-semibold">Email Experience Theme</div>
+                    <p className="mt-0.5 text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                      Transform EveryBox&apos;s entire email layout, navigation, and visual style while keeping all your
+                      accounts, unified calendar, and private AI features seamlessly integrated.
+                    </p>
+                  </div>
+
+                  {/* Quick Light / Dark Mode Switch */}
+                  <div
+                    className="flex items-center justify-between rounded-xl border px-4 py-3"
+                    style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
+                  >
+                    <div>
+                      <div className="text-[12.5px] font-semibold">Color Mode</div>
+                      <div className="text-[11.5px]" style={{ color: 'var(--text-muted)' }}>
+                        Applies to EveryBox, Outlook Classic (Office Colorful / Dark Gray), and Gmail (Light / Dark).
+                      </div>
+                    </div>
+                    <div
+                      className="flex items-center rounded-lg border p-0.5"
+                      style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => void updateAndSave({ ...draft, theme: 'light' })}
+                        className="inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-[12px] font-medium transition"
+                        style={{
+                          background: !isDarkPalette ? 'var(--accent-soft)' : 'transparent',
+                          color: !isDarkPalette ? 'var(--accent-text)' : 'var(--text-secondary)'
+                        }}
+                      >
+                        <Sun size={13} /> Light
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void updateAndSave({ ...draft, theme: 'dark' })}
+                        className="inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-[12px] font-medium transition"
+                        style={{
+                          background: isDarkPalette ? 'var(--accent-soft)' : 'transparent',
+                          color: isDarkPalette ? 'var(--accent-text)' : 'var(--text-secondary)'
+                        }}
+                      >
+                        <Moon size={13} /> Dark
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Experience Theme Cards */}
+                  <div className="space-y-3">
+                    {themeCards.map((card) => {
+                      const selected = activeUiTheme === card.id
+                      return (
+                        <button
+                          key={card.id}
+                          type="button"
+                          onClick={() => {
+                            void updateAndSave({ ...draft, uiTheme: card.id })
+                            showToast(`Switched theme to ${card.name}`)
+                          }}
+                          className="flex w-full items-stretch gap-4 rounded-xl border p-4 text-left transition hover:bg-[var(--bg-hover)]"
+                          style={{
+                            borderColor: selected ? 'var(--accent)' : 'var(--border-strong)',
+                            background: selected ? 'var(--accent-soft)' : 'var(--bg-elevated)'
+                          }}
+                        >
+                          {/* Mini Wireframe Preview */}
+                          <div
+                            className="flex h-[84px] w-[124px] shrink-0 flex-col overflow-hidden rounded-lg border shadow-sm"
+                            style={{
+                              borderColor: 'var(--border-strong)',
+                              background:
+                                card.id === 'outlook-classic'
+                                  ? isDarkPalette
+                                    ? '#1f1f1f'
+                                    : '#ffffff'
+                                  : card.id === 'gmail'
+                                    ? isDarkPalette
+                                      ? '#111111'
+                                      : '#f6f8fc'
+                                    : isDarkPalette
+                                      ? '#1f1e1d'
+                                      : '#ffffff'
+                            }}
+                          >
+                            {card.id === 'outlook-classic' && (
+                              <>
+                                <div className="h-3 w-full" style={{ background: isDarkPalette ? '#252423' : '#0f6cbd' }} />
+                                <div
+                                  className="flex h-3.5 items-center gap-1 border-b px-1.5"
+                                  style={{
+                                    background: isDarkPalette ? '#292827' : '#f3f2f1',
+                                    borderColor: isDarkPalette ? '#3b3a39' : '#edebe9'
+                                  }}
+                                >
+                                  <span className="h-2 w-5 rounded-[2px]" style={{ background: '#0f6cbd' }} />
+                                  <span className="h-1.5 w-3 rounded-[1px]" style={{ background: '#8a8886' }} />
+                                  <span className="h-1.5 w-3 rounded-[1px]" style={{ background: '#8a8886' }} />
+                                </div>
+                                <div className="flex flex-1 overflow-hidden">
+                                  <div className="w-2.5 border-r" style={{ background: isDarkPalette ? '#252423' : '#f3f2f1', borderColor: isDarkPalette ? '#3b3a39' : '#edebe9' }} />
+                                  <div className="w-6 border-r p-1 space-y-1" style={{ background: isDarkPalette ? '#201f1e' : '#faf9f8', borderColor: isDarkPalette ? '#3b3a39' : '#edebe9' }}>
+                                    <div className="h-1 w-full rounded bg-[#0f6cbd]/50" />
+                                    <div className="h-1 w-4/5 rounded bg-current opacity-20" />
+                                    <div className="h-1 w-3/4 rounded bg-current opacity-20" />
+                                  </div>
+                                  <div className="w-10 border-r p-1 space-y-1" style={{ borderColor: isDarkPalette ? '#3b3a39' : '#edebe9' }}>
+                                    <div className="h-2.5 border-l-2 border-[#0f6cbd] bg-[#0f6cbd]/10 pl-0.5" />
+                                    <div className="h-2 bg-current opacity-10" />
+                                    <div className="h-2 bg-current opacity-10" />
+                                  </div>
+                                  <div className="flex-1 p-1.5 space-y-1">
+                                    <div className="h-1.5 w-3/4 rounded bg-current opacity-25" />
+                                    <div className="h-1 w-full rounded bg-current opacity-15" />
+                                    <div className="h-1 w-2/3 rounded bg-current opacity-15" />
+                                  </div>
+                                </div>
+                              </>
+                            )}
+                            {card.id === 'gmail' && (
+                              <>
+                                <div className="flex h-4 items-center gap-1.5 px-1.5">
+                                  <span className="h-2 w-2.5 rounded-[2px]" style={{ background: '#ea4335' }} />
+                                  <span className="h-2 flex-1 rounded-full" style={{ background: isDarkPalette ? '#282a2c' : '#eaf1fb' }} />
+                                </div>
+                                <div className="flex flex-1 gap-1 px-1 pb-1">
+                                  <div className="w-7 space-y-1 pt-0.5">
+                                    <div className="h-2.5 w-6 rounded-md" style={{ background: isDarkPalette ? '#e3e3e3' : '#c2e7ff' }} />
+                                    <div className="h-1.5 w-full rounded-r-full" style={{ background: isDarkPalette ? '#394457' : '#d3e3fd' }} />
+                                    <div className="h-1 w-4/5 rounded bg-current opacity-20" />
+                                    <div className="h-1 w-3/4 rounded bg-current opacity-20" />
+                                  </div>
+                                  <div
+                                    className="flex-1 rounded-md border p-1 space-y-1"
+                                    style={{
+                                      background: isDarkPalette ? '#1e1f20' : '#ffffff',
+                                      borderColor: isDarkPalette ? '#333' : '#e0e3eb'
+                                    }}
+                                  >
+                                    <div className="flex gap-1 border-b pb-0.5" style={{ borderColor: isDarkPalette ? '#333' : '#e0e3eb' }}>
+                                      <span className="h-1 w-4 rounded bg-[#0b57d0]" />
+                                      <span className="h-1 w-4 rounded bg-current opacity-20" />
+                                    </div>
+                                    <div className="h-1.5 w-full rounded bg-current opacity-20" />
+                                    <div className="h-1.5 w-full rounded bg-current opacity-10" />
+                                    <div className="h-1.5 w-full rounded bg-current opacity-10" />
+                                    <div className="h-1.5 w-full rounded bg-current opacity-10" />
+                                  </div>
+                                </div>
+                              </>
+                            )}
+                            {card.id === 'everybox' && (
+                              <>
+                                <div className="flex h-3.5 items-center justify-center border-b px-2" style={{ background: isDarkPalette ? '#171615' : '#f4f3f1', borderColor: 'var(--border-subtle)' }}>
+                                  <span className="h-1.5 w-14 rounded-full bg-current opacity-20" />
+                                </div>
+                                <div className="flex flex-1 overflow-hidden">
+                                  <div className="w-7 border-r p-1 space-y-1" style={{ background: isDarkPalette ? '#171615' : '#f4f3f1', borderColor: 'var(--border-subtle)' }}>
+                                    <div className="h-1.5 w-full rounded bg-[#e87a48]" />
+                                    <div className="h-1 w-4/5 rounded bg-current opacity-20" />
+                                    <div className="h-1 w-3/4 rounded bg-current opacity-20" />
+                                  </div>
+                                  <div className="w-10 border-r p-1 space-y-1" style={{ background: isDarkPalette ? '#1b1a19' : '#fafafa', borderColor: 'var(--border-subtle)' }}>
+                                    <div className="h-2.5 rounded bg-[#e87a48]/25" />
+                                    <div className="h-2 rounded bg-current opacity-10" />
+                                    <div className="h-2 rounded bg-current opacity-10" />
+                                  </div>
+                                  <div className="flex-1 p-1.5 space-y-1">
+                                    <div className="h-1.5 w-3/4 rounded bg-current opacity-25" />
+                                    <div className="h-1 w-full rounded bg-current opacity-15" />
+                                    <div className="h-1 w-2/3 rounded bg-current opacity-15" />
+                                  </div>
+                                </div>
+                              </>
+                            )}
+                          </div>
+
+                          {/* Theme Info */}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[13.5px] font-semibold">{card.name}</span>
+                                <span
+                                  className="rounded-full px-2 py-0.5 text-[10.5px] font-medium"
+                                  style={{ background: 'var(--bg-main)', color: 'var(--text-secondary)' }}
+                                >
+                                  {card.badge}
+                                </span>
+                              </div>
+                              {selected && (
+                                <span
+                                  className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                                  style={{ background: 'var(--accent)', color: '#ffffff' }}
+                                >
+                                  <Check size={11} /> Active
+                                </span>
+                              )}
+                            </div>
+                            <p className="mt-1 text-[12px] leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+                              {card.desc}
+                            </p>
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {card.highlights.map((h) => (
+                                <span
+                                  key={h}
+                                  className="rounded-md px-2 py-0.5 text-[10.5px]"
+                                  style={{ background: 'var(--bg-main)', color: 'var(--text-muted)' }}
+                                >
+                                  {h}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })()}
+
+            {/* GENERAL / APPEARANCE TAB */}
             {tab === 'general' && (
               <div className="space-y-6">
+                <div
+                  className="flex items-center justify-between gap-3 rounded-xl border p-4"
+                  style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
+                >
+                  <div>
+                    <div className="text-[13px] font-semibold">Experience Theme</div>
+                    <div className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                      Currently using{' '}
+                      <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>
+                        {draft.uiTheme === 'outlook-classic'
+                          ? 'Outlook Classic'
+                          : draft.uiTheme === 'gmail'
+                            ? 'Gmail'
+                            : 'EveryBox (Default)'}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAppearanceExpanded(true)
+                      setTab('themes')
+                    }}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12px] font-medium transition hover:bg-[var(--bg-hover)]"
+                    style={{ borderColor: 'var(--border-strong)', color: 'var(--accent-text)' }}
+                  >
+                    <Layout size={13} /> Open Themes
+                  </button>
+                </div>
+
                 <div>
-                  <label className="mb-2 block text-[13px] font-semibold">Theme</label>
+                  <label className="mb-2 block text-[13px] font-semibold">Color Palette</label>
                   <div className="grid grid-cols-5 gap-2">
                     {(['dark', 'black', 'graphite', 'light', 'paper'] as ThemeId[]).map((t) => (
                       <button
@@ -1216,6 +1809,113 @@ export const SettingsModal: React.FC = () => {
                         <span>{t}</span>
                       </button>
                     ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-[13px] font-semibold">Message List Density</label>
+                  <p className="mb-2 text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                    Choose how many lines each conversation shows in your inbox list. You can also switch this anytime from the list header.
+                  </p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(
+                      [
+                        {
+                          id: 'compact',
+                          label: 'Compact',
+                          desc: '1 line · Sender only'
+                        },
+                        {
+                          id: 'comfortable',
+                          label: 'Comfortable',
+                          desc: '2 lines · Sender & subject'
+                        },
+                        {
+                          id: 'expanded',
+                          label: 'Expanded',
+                          desc: '3 lines · With preview'
+                        }
+                      ] as { id: ListDensity; label: string; desc: string }[]
+                    ).map((opt) => {
+                      const active = (draft.listDensity || 'expanded') === opt.id
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => void updateAndSave({ ...draft, listDensity: opt.id })}
+                          className="flex flex-col items-start gap-0.5 rounded-xl border p-3 text-left transition"
+                          style={{
+                            borderColor: active ? 'var(--accent)' : 'var(--border-strong)',
+                            background: active ? 'var(--accent-soft)' : 'var(--bg-elevated)'
+                          }}
+                        >
+                          <div className="flex w-full items-center justify-between text-[12.5px] font-semibold">
+                            <span>{opt.label}</span>
+                            {active && <Check size={13} style={{ color: 'var(--accent-text)' }} />}
+                          </div>
+                          <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                            {opt.desc}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                <label
+                  className="flex cursor-pointer items-center justify-between gap-4 rounded-xl border p-4"
+                  style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
+                >
+                  <div>
+                    <div className="text-[13px] font-semibold">Day &amp; Date Separators</div>
+                    <div className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                      Group messages with collapsible headers (Today, Yesterday, weekday, Last Week, Two Weeks Ago, Last
+                      Month, Older) across all themes.
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={draft.showDateGroups !== false}
+                    onChange={(e) => void updateAndSave({ ...draft, showDateGroups: e.target.checked })}
+                    className="h-4 w-4 shrink-0 cursor-pointer accent-[var(--accent)]"
+                  />
+                </label>
+
+                <div>
+                  <label className="mb-1 block text-[13px] font-semibold">Account Color Style (Unified Inbox)</label>
+                  <p className="mb-2 text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                    Choose how each account&apos;s color stands out in your unified inbox list. Assign symbols by right-clicking any account in the sidebar.
+                  </p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(
+                      [
+                        { id: 'gradient', label: 'Gradient wash', desc: 'Left rail + soft color fade' },
+                        { id: 'bar', label: 'Accent bar', desc: 'Crisp left edge rail only' },
+                        { id: 'dot', label: 'Symbol / dot', desc: 'Minimal badge on avatar' }
+                      ] as { id: AccountRowStyle; label: string; desc: string }[]
+                    ).map((opt) => {
+                      const active = (draft.accountRowStyle || 'gradient') === opt.id
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => void updateAndSave({ ...draft, accountRowStyle: opt.id })}
+                          className="flex flex-col items-start gap-0.5 rounded-xl border p-3 text-left transition"
+                          style={{
+                            borderColor: active ? 'var(--accent)' : 'var(--border-strong)',
+                            background: active ? 'var(--accent-soft)' : 'var(--bg-elevated)'
+                          }}
+                        >
+                          <div className="flex w-full items-center justify-between text-[12.5px] font-semibold">
+                            <span>{opt.label}</span>
+                            {active && <Check size={13} style={{ color: 'var(--accent)' }} />}
+                          </div>
+                          <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                            {opt.desc}
+                          </span>
+                        </button>
+                      )
+                    })}
                   </div>
                 </div>
 

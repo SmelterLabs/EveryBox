@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { CheckCircle2, Sparkles } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
+import { buildReplyComposerState } from '../utils/replyHelper'
 import type { ThreadDetail } from '../../../shared/types'
 
 export const TriageView: React.FC = () => {
@@ -40,13 +41,17 @@ export const TriageView: React.FC = () => {
       } else if (k === 'k') {
         setIndex((i) => Math.max(0, i - 1))
       } else if (k === 'r') {
-        openComposer({
-          mode: 'reply',
-          accountId: currentSummary.accountId,
-          to: currentSummary.latestFrom.email,
-          subject: currentSummary.subject.startsWith('Re:') ? currentSummary.subject : `Re: ${currentSummary.subject}`,
-          replyToThreadId: currentSummary.id
-        })
+        if (detail) {
+          openComposer(buildReplyComposerState(detail, 'reply'))
+        } else {
+          openComposer({
+            mode: 'reply',
+            accountId: currentSummary.accountId,
+            to: currentSummary.latestFrom.email,
+            subject: /^re:/i.test(currentSummary.subject) ? currentSummary.subject : `Re: ${currentSummary.subject}`,
+            replyToThreadId: currentSummary.id
+          })
+        }
       }
     }
     window.addEventListener('keydown', onKey)
@@ -175,16 +180,21 @@ export const TriageView: React.FC = () => {
               Tomorrow
             </button>
             <button
-              onClick={() =>
-                currentSummary &&
-                openComposer({
-                  mode: 'reply',
-                  accountId: currentSummary.accountId,
-                  to: currentSummary.latestFrom.email,
-                  subject: `Re: ${currentSummary.subject}`,
-                  replyToThreadId: currentSummary.id
-                })
-              }
+              onClick={() => {
+                if (detail) {
+                  openComposer(buildReplyComposerState(detail, 'reply'))
+                } else if (currentSummary) {
+                  openComposer({
+                    mode: 'reply',
+                    accountId: currentSummary.accountId,
+                    to: currentSummary.latestFrom.email,
+                    subject: /^re:/i.test(currentSummary.subject)
+                      ? currentSummary.subject
+                      : `Re: ${currentSummary.subject}`,
+                    replyToThreadId: currentSummary.id
+                  })
+                }
+              }}
               className="flex items-center gap-1.5 hover:opacity-80"
             >
               <kbd className="rounded border px-1.5 py-0.5 text-[10.5px]" style={{ borderColor: 'var(--border-strong)' }}>
