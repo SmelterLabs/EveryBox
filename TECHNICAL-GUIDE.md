@@ -28,6 +28,7 @@ npm run package     # electron-builder --win -> dist/
 To launch the built app directly on Windows, run `launch-everybox.bat` (or `.\node_modules\electron\dist\electron.exe .`).
 
 ## Key Decisions & Trade-Offs
+- **Gmail incremental sync & persisted rate-limit backoff:** Gmail accounts sync incrementally via `users.history.list` using `accounts.gmail_history_id` (2 quota units when idle instead of re-downloading ~145 full messages every minute). Full/initial syncs and label syncs skip `remoteId`s already cached in SQLite, propagate API errors instead of wiping local folders, and persist `sync_backoff_until` / `sync_consecutive_errors` in SQLite so Google `429`/`403` `Retry-After` lockouts are honored across polls and restarts.
 - **Local calendar enabled by default on IMAP accounts:** IMAP is email-only; many Windows users coming from Classic Outlook + IMAP (Network Solutions, GoDaddy, Namecheap, cPanel) store events in Outlook's local "Calendar (This computer only)" folder. EveryBox enables a local SQLite calendar by default for IMAP accounts, provides 1-click Classic Outlook COM import + universal `.ics` import/export, and keeps CalDAV/ICS feed URLs optional.
 - **Deduplicated Outlook import:** Imported events use deterministic IDs (`${account.id}|local|outlook:${folderPath}|${uid}|${startAt}`) so users transitioning from Outlook can re-import without duplicates.
 - **Public-app rule:** Zero hardcoded personal names, GPUs, or OAuth secrets in source code.

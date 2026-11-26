@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Calendar, Inbox, Palette, PenSquare, RefreshCw, Search, Settings, Sparkles, Zap } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { modKeyPrefix } from '../utils/platform'
@@ -22,10 +22,24 @@ export const CommandPalette: React.FC = () => {
   } = useAppStore()
 
   const [query, setQuery] = useState('')
+  const [activeIndex, setActiveIndex] = useState(0)
+  const itemRefs = useRef<(HTMLButtonElement | null)[]>([])
 
   useEffect(() => {
-    if (commandPaletteOpen) setQuery('')
+    if (commandPaletteOpen) {
+      setQuery('')
+      setActiveIndex(0)
+    }
   }, [commandPaletteOpen])
+
+  useEffect(() => {
+    setActiveIndex(0)
+  }, [query])
+
+  useEffect(() => {
+    if (!commandPaletteOpen) return
+    itemRefs.current[activeIndex]?.scrollIntoView({ block: 'nearest' })
+  }, [activeIndex, commandPaletteOpen])
 
   if (!commandPaletteOpen) return null
 
@@ -33,6 +47,7 @@ export const CommandPalette: React.FC = () => {
     { id: 'compose', label: 'New Message', hint: 'C', icon: <PenSquare size={14} />, run: () => openComposer({ mode: 'new' }) },
     { id: 'triage', label: 'Start Triage Mode', icon: <Zap size={14} />, run: () => setActiveView('triage') },
     { id: 'assistant', label: 'Open AI Assistant', icon: <Sparkles size={14} />, run: () => setAssistantOpen(true) },
+    { id: 'autopilot', label: 'Open Autopilot (AI Rules & Voices)', icon: <Zap size={14} fill="#f5b841" style={{ color: '#e5a424' }} />, run: () => setActiveView('autopilot') },
     { id: 'calendar', label: 'Open Combined Calendar', icon: <Calendar size={14} />, run: () => setActiveView('calendar') },
     { id: 'inbox', label: 'Go to Inbox', icon: <Inbox size={14} />, run: () => void setActiveMailbox('inbox') },
     { id: 'all-acc', label: 'Show All Accounts', icon: <Inbox size={14} />, run: () => void selectAllAccounts() },
@@ -53,6 +68,7 @@ export const CommandPalette: React.FC = () => {
   ]
 
   const filtered = commands.filter((c) => c.label.toLowerCase().includes(query.toLowerCase()))
+  const clampedIndex = filtered.length > 0 ? Math.min(activeIndex, filtered.length - 1) : 0
 
   return (
     <div
@@ -71,9 +87,18 @@ export const CommandPalette: React.FC = () => {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Escape') setCommandPaletteOpen(false)
-              if (e.key === 'Enter' && filtered[0]) {
-                filtered[0].run()
+              if (e.key === 'Escape') {
+                e.preventDefault()
+                setCommandPaletteOpen(false)
+              } else if (e.key === 'ArrowDown' && filtered.length > 0) {
+                e.preventDefault()
+                setActiveIndex((prev) => (prev + 1) % filtered.length)
+              } else if (e.key === 'ArrowUp' && filtered.length > 0) {
+                e.preventDefault()
+                setActiveIndex((prev) => (prev - 1 + filtered.length) % filtered.length)
+              } else if (e.key === 'Enter' && filtered[clampedIndex]) {
+                e.preventDefault()
+                filtered[clampedIndex].run()
                 setCommandPaletteOpen(false)
               }
             }}
@@ -86,26 +111,52 @@ export const CommandPalette: React.FC = () => {
         </div>
 
         <div className="max-h-80 overflow-y-auto p-1.5">
-          {filtered.map((cmd) => (
-            <button
-              key={cmd.id}
-              onClick={() => {
-                cmd.run()
-                setCommandPaletteOpen(false)
-              }}
-              className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[13px] transition hover:bg-[var(--bg-hover)]"
-            >
-              <span className="flex items-center gap-2.5">
-                <span style={{ color: 'var(--text-secondary)' }}>{cmd.icon}</span>
-                <span>{cmd.label}</span>
-              </span>
-              {cmd.hint && (
-                <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                  {cmd.hint}
-                </span>
-              )}
-            </button>
-          ))}
+          {filtered.length === 0 ? (
+            <div className="px-3 py-6 text-center text-[12.5px]" style={{ color: 'var(--text-muted)' }}>
+              No matching commands
+            </div>
+          ) : (
+            filtered.map((cmd, idx) => {
+              const isActive = idx === clampedIndex
+              return (
+                <button
+                  key={cmd.id}
+                  ref={(el) => {
+                    itemRefs.current[idx] = el
+                  }}
+                  type="button"
+                  onMouseEnter={() => setActiveIndex(idx)}
+                  onClick={() => {
+                    cmd.run()
+                    setCommandPaletteOpen(false)
+                  }}
+                  className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[13px] transition"
+                  style={{
+                    background: isActive ? 'var(--bg-selected)' : 'transparent',
+                    color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)'
+                  }}
+                >
+                  <span className="flex items-center gap-2.5">
+                    <span style={{ color: isActive ? 'var(--accent)' : 'var(--text-secondary)' }}>{cmd.icon}</span>
+                    <span className={isActive ? 'font-medium' : undefined}>{cmd.label}</span>
+                  </span>
+                  {cmd.hint && (
+                    <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                      {cmd.hint}
+                    </span>
+                  )}
+                </button>
+              )
+            })
+          )}
+        </div>
+
+        <div
+          className="flex items-center justify-between border-t px-4 py-1.5 text-[11px]"
+          style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }}
+        >
+          <span>↑↓ Navigate · ↵ Run</span>
+          <span>Esc Close</span>
         </div>
       </div>
     </div>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { Archive, ArrowUp, Clock, Sparkles, X } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { usePaneZoom } from '../hooks/usePaneZoom'
@@ -9,8 +9,26 @@ interface Turn {
   response: AssistantResponse
 }
 
+function formatCardDate(ms: number): string {
+  const d = new Date(ms)
+  const now = new Date()
+  if (d.toDateString() === now.toDateString()) {
+    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  }
+  return d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+}
+
 export const AssistantView: React.FC<{ width?: number }> = ({ width = 390 }) => {
-  const { activeAccountIds, selectThread, setActiveView, setAssistantOpen, archiveThreads, showToast } = useAppStore()
+  const {
+    activeAccountIds,
+    assistantDraftPrompt,
+    clearAssistantDraftPrompt,
+    selectThread,
+    setActiveView,
+    setAssistantOpen,
+    archiveThreads,
+    showToast
+  } = useAppStore()
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [turns, setTurns] = useState<Turn[]>([])
@@ -29,6 +47,13 @@ export const AssistantView: React.FC<{ width?: number }> = ({ width = 390 }) => 
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (!assistantDraftPrompt) return
+    const prompt = assistantDraftPrompt
+    clearAssistantDraftPrompt()
+    void ask(prompt)
+  }, [assistantDraftPrompt])
 
   const openThread = async (threadId: string) => {
     setActiveView('mail')
@@ -204,7 +229,7 @@ export const AssistantView: React.FC<{ width?: number }> = ({ width = 390 }) => 
                                 </span>
                               </div>
                               <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                                {new Date(c.date).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                                {formatCardDate(c.date)}
                               </span>
                             </div>
                             <div className="mt-0.5 text-[13px] font-medium">{c.subject}</div>
@@ -236,7 +261,7 @@ export const AssistantView: React.FC<{ width?: number }> = ({ width = 390 }) => 
                             <div className="flex items-center justify-between">
                               <span className="text-[13px] font-semibold">{c.senderName}</span>
                               <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                                {new Date(c.date).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                                {formatCardDate(c.date)}
                               </span>
                             </div>
                             <div className="mt-0.5 text-[13px] font-medium">{c.subject}</div>

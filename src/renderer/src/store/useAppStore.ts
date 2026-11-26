@@ -1,21 +1,40 @@
 import { create } from 'zustand'
+import type { ConfirmDialogState } from '../components/ConfirmModal'
 import type {
   Account,
   ActiveView,
   AppSettings,
+  AutopilotLogEntry,
+  AutopilotRule,
   CalendarEvent,
+  ComposerAttachment,
+  CreateReminderPayload,
   Folder,
   InboxCategory,
   MailboxId,
   ParsedSearchQuery,
+  Reminder,
   ScheduledEmail,
   SendEmailPayload,
   Snippet,
   SubscriptionGroup,
   ThreadDetail,
+  ThreadPreDraft,
   ThreadSummary,
+  VoiceProfile,
   Workspace
 } from '../../../shared/types'
+
+export interface QuotedMessageContext {
+  fromName: string
+  fromEmail: string
+  to: string
+  cc?: string
+  date: number
+  subject: string
+  bodyHtml: string
+  bodyText: string
+}
 
 export interface ComposerState {
   open: boolean
@@ -26,8 +45,13 @@ export interface ComposerState {
   bcc: string
   subject: string
   body: string
+  bodyHtml?: string
   replyToThreadId?: string
   replyToMessageId?: string
+  draftThreadId?: string
+  draftRemoteId?: string
+  attachments?: ComposerAttachment[]
+  quotedMessage?: QuotedMessageContext
 }
 
 export interface UndoItem {
@@ -59,8 +83,11 @@ interface AppState {
   selectedThread: ThreadDetail | null
   lastSelectedThreadByAccount: Record<string, string>
   checkedThreadIds: string[]
+  lastCheckedThreadId: string | null
   searchQuery: string
   parsedSearch: ParsedSearchQuery | null
+  searchIncludeTrash: boolean
+  searchScopeAccountId: string | null
   subscriptions: SubscriptionGroup[]
   scheduledEmails: ScheduledEmail[]
 
@@ -68,14 +95,35 @@ interface AppState {
   todayEvents: CalendarEvent[]
   calendarEvents: CalendarEvent[]
 
+  // Reminders, Pre-Drafts, Autopilot & Voice Profiles
+  reminders: Reminder[]
+  preDrafts: ThreadPreDraft[]
+  autopilotRules: AutopilotRule[]
+  autopilotLogs: AutopilotLogEntry[]
+  voiceProfiles: VoiceProfile[]
+
   // UI Overlays
   sidebarVisible: boolean
   assistantOpen: boolean
+  assistantDraftPrompt: string | null
+  pendingSummarizeThreadId: string | null
+  pendingDraftThreadId: string | null
+  pendingCalendarDraft: {
+    title?: string
+    description?: string
+    location?: string
+    accountId?: string
+    dateStr?: string
+    startTime?: string
+    endTime?: string
+  } | null
   commandPaletteOpen: boolean
+  shortcutHelpOpen: boolean
+  confirmDialog: ConfirmDialogState | null
   settingsOpen: boolean
-  settingsInitialTab: 'accounts' | 'ai' | 'general' | 'shortcuts' | 'privacy' | 'snippets' | 'mcp'
+  settingsInitialTab: 'accounts' | 'ai' | 'general' | 'themes' | 'shortcuts' | 'privacy' | 'snippets' | 'mcp'
   composer: ComposerState
-  toast: { message: string; undo?: () => Promise<void> } | null
+  toast: { id: number; message: string; undo?: () => Promise<void>; durationMs: number } | null
   isSyncing: boolean
 
   // Actions
@@ -92,29 +140,57 @@ interface AppState {
   // Account Focus Toggles
   selectAllAccounts: () => Promise<void>
   soloAccount: (accountId: string) => Promise<void>
+  selectAccountMailbox: (accountId: string, mailbox: MailboxId, folderName?: string | null) => Promise<void>
   toggleAccountFilter: (accountId: string) => Promise<void>
   selectWorkspace: (ws: Workspace) => Promise<void>
 
   // Search
   runSearch: (query: string) => Promise<void>
   clearSearch: () => Promise<void>
+  setSearchIncludeTrash: (include: boolean) => Promise<void>
+  setSearchScopeAccountId: (accountId: string | null) => Promise<void>
 
   // Multi-select
   toggleCheckThread: (threadId: string) => void
+  checkThreadRange: (targetId: string, orderedIds: string[]) => void
+  setCheckedThreads: (threadIds: string[]) => void
   clearCheckedThreads: () => void
 
   // Mutations with Undo
   archiveThreads: (threadIds: string[]) => Promise<void>
   trashThreads: (threadIds: string[]) => Promise<void>
+  moveThreadsToFolder: (threadIds: string[], role: Folder['role'], folderName?: string) => Promise<void>
   snoozeThreads: (threadIds: string[], untilMs: number, label: string) => Promise<void>
   toggleStarThread: (threadId: string, current: boolean) => Promise<void>
   toggleReadThread: (threadId: string, current: boolean) => Promise<void>
+  setStarredThreads: (threadIds: string[], isStarred: boolean) => Promise<void>
+  setReadThreads: (threadIds: string[], isRead: boolean) => Promise<void>
+  markFolderRead: (opts: {
+    mailbox: MailboxId
+    accountIds?: string[]
+    folderName?: string
+    label: string
+  }) => Promise<void>
 
   // Overlays
   setSidebarVisible: (v: boolean) => void
   setAssistantOpen: (v: boolean) => void
   toggleAssistant: () => void
+  askAssistantPrompt: (prompt: string) => void
+  clearAssistantDraftPrompt: () => void
+  requestSummarizeThread: (threadId: string) => Promise<void>
+  clearPendingSummarize: () => void
+  requestDraftReply: (threadId: string) => Promise<void>
+  clearPendingDraft: () => void
+  createReminder: (payload: CreateReminderPayload) => Promise<void>
+  completeReminder: (id: string) => Promise<void>
+  deleteReminder: (id: string) => Promise<void>
+  openCalendarCreate: (draft?: AppState['pendingCalendarDraft']) => void
+  clearCalendarDraft: () => void
   setCommandPaletteOpen: (v: boolean) => void
+  setShortcutHelpOpen: (v: boolean) => void
+  openConfirm: (dialog: ConfirmDialogState) => void
+  closeConfirm: () => void
   openSettings: (tab?: AppState['settingsInitialTab']) => void
   closeSettings: () => void
   openComposer: (partial?: Partial<ComposerState>) => void
@@ -131,7 +207,6 @@ interface AppState {
 }
 
 let toastTimer: number | null = null
-let pendingSendTimer: number | null = null
 
 export const useAppStore = create<AppState>((set, get) => ({
   settings: null,
@@ -153,17 +228,32 @@ export const useAppStore = create<AppState>((set, get) => ({
   selectedThread: null,
   lastSelectedThreadByAccount: {},
   checkedThreadIds: [],
+  lastCheckedThreadId: null,
   searchQuery: '',
   parsedSearch: null,
+  searchIncludeTrash: false,
+  searchScopeAccountId: null,
   subscriptions: [],
   scheduledEmails: [],
 
   todayEvents: [],
   calendarEvents: [],
 
+  reminders: [],
+  preDrafts: [],
+  autopilotRules: [],
+  autopilotLogs: [],
+  voiceProfiles: [],
+
   sidebarVisible: true,
   assistantOpen: false,
+  assistantDraftPrompt: null,
+  pendingSummarizeThreadId: null,
+  pendingDraftThreadId: null,
+  pendingCalendarDraft: null,
   commandPaletteOpen: false,
+  shortcutHelpOpen: false,
+  confirmDialog: null,
   settingsOpen: false,
   settingsInitialTab: 'accounts',
   composer: {
@@ -187,6 +277,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       window.glassmail.listSnippets()
     ])
     document.documentElement.setAttribute('data-theme', settings.theme)
+    document.documentElement.setAttribute('data-ui-theme', settings.uiTheme || 'everybox')
     set({ settings, accounts, workspaces, snippets })
     await get().refreshAll()
   },
@@ -194,24 +285,60 @@ export const useAppStore = create<AppState>((set, get) => ({
   refreshAll: async () => {
     const { activeAccountIds } = get()
     const filterIds = activeAccountIds.length > 0 ? activeAccountIds : undefined
-    const [accounts, workspaces, folders, counts, snippets] = await Promise.all([
+    const [
+      accounts,
+      workspaces,
+      folders,
+      counts,
+      snippets,
+      reminders,
+      preDrafts,
+      autopilotRules,
+      autopilotLogs,
+      voiceProfiles
+    ] = await Promise.all([
       window.glassmail.listAccounts(),
       window.glassmail.listWorkspaces(),
-      window.glassmail.listFolders(filterIds),
+      window.glassmail.listFolders(),
       window.glassmail.getMailboxCounts(filterIds),
-      window.glassmail.listSnippets()
+      window.glassmail.listSnippets(),
+      window.glassmail.listReminders(filterIds),
+      window.glassmail.listPreDrafts(),
+      window.glassmail.listAutopilotRules(),
+      window.glassmail.listAutopilotLogs(50),
+      window.glassmail.listVoiceProfiles()
     ])
-    set({ accounts, workspaces, folders, counts, snippets })
+    set({
+      accounts,
+      workspaces,
+      folders,
+      counts,
+      snippets,
+      reminders,
+      preDrafts,
+      autopilotRules,
+      autopilotLogs,
+      voiceProfiles
+    })
     await Promise.all([get().refreshThreads(), get().refreshTodayEvents()])
   },
 
   refreshThreads: async () => {
-    const { activeAccountIds, activeMailbox, activeCategory, activeFolderName, searchQuery } = get()
+    const {
+      activeAccountIds,
+      activeMailbox,
+      activeCategory,
+      activeFolderName,
+      searchQuery,
+      searchIncludeTrash,
+      searchScopeAccountId
+    } = get()
     const filterIds = activeAccountIds.length > 0 ? activeAccountIds : undefined
 
     if (searchQuery.trim()) {
-      // Top bar is universal search across all accounts
-      const { parsed, threads } = await window.glassmail.searchMail(searchQuery, undefined)
+      // Top search searches All Accounts by default, or a single account when explicitly scoped in the search bar
+      const searchAccountIds = searchScopeAccountId ? [searchScopeAccountId] : undefined
+      const { parsed, threads } = await window.glassmail.searchMail(searchQuery, searchAccountIds, searchIncludeTrash)
       set({ parsedSearch: parsed, threads })
       return
     }
@@ -285,6 +412,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       selectedThreadId: null,
       selectedThread: null,
       checkedThreadIds: [],
+      lastCheckedThreadId: null,
       searchQuery: '',
       parsedSearch: null
     })
@@ -292,7 +420,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setActiveCategory: async (cat) => {
-    set({ activeCategory: cat, checkedThreadIds: [] })
+    set({ activeCategory: cat, checkedThreadIds: [], lastCheckedThreadId: null })
     await get().refreshThreads()
   },
 
@@ -302,9 +430,21 @@ export const useAppStore = create<AppState>((set, get) => ({
       activeFolderName: folderName,
       selectedThreadId: null,
       selectedThread: null,
-      checkedThreadIds: []
+      checkedThreadIds: [],
+      lastCheckedThreadId: null
     })
     await get().refreshThreads()
+    if (folderName) {
+      const activeIds = get().activeAccountIds
+      const filterIds = activeIds.length > 0 ? activeIds : undefined
+      set({ isSyncing: true })
+      try {
+        await window.glassmail.syncFolder(folderName, filterIds)
+        await get().refreshAll()
+      } finally {
+        set({ isSyncing: false })
+      }
+    }
   },
 
   // ---- Multi-Account Focus Toggles ----
@@ -314,7 +454,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       activeWorkspaceId: 'ws-all',
       activeFolderName: null,
       selectedThreadId: null,
-      selectedThread: null
+      selectedThread: null,
+      checkedThreadIds: [],
+      lastCheckedThreadId: null
     })
     await get().refreshAll()
   },
@@ -332,7 +474,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       activeWorkspaceId: null,
       activeFolderName: null,
       selectedThreadId: null,
-      selectedThread: null
+      selectedThread: null,
+      checkedThreadIds: [],
+      lastCheckedThreadId: null
     })
     await get().refreshAll()
 
@@ -349,6 +493,31 @@ export const useAppStore = create<AppState>((set, get) => ({
       const first = get().threads[0]
       if (first) {
         await get().selectThread(first.id)
+      }
+    }
+  },
+
+  selectAccountMailbox: async (accountId, mailbox, folderName = null) => {
+    set({
+      activeAccountIds: [accountId],
+      activeWorkspaceId: null,
+      activeView: mailbox === 'subscriptions' ? 'subscriptions' : 'mail',
+      activeMailbox: mailbox,
+      activeFolderName: folderName,
+      selectedThreadId: null,
+      selectedThread: null,
+      checkedThreadIds: [],
+      searchQuery: '',
+      parsedSearch: null
+    })
+    await get().refreshAll()
+    if (folderName) {
+      set({ isSyncing: true })
+      try {
+        await window.glassmail.syncFolder(folderName, [accountId])
+        await get().refreshAll()
+      } finally {
+        set({ isSyncing: false })
       }
     }
   },
@@ -383,25 +552,75 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   clearSearch: async () => {
-    set({ searchQuery: '', parsedSearch: null })
+    set({ searchQuery: '', parsedSearch: null, searchIncludeTrash: false })
     await get().refreshThreads()
+  },
+
+  setSearchIncludeTrash: async (include) => {
+    set({ searchIncludeTrash: include })
+    await get().refreshThreads()
+  },
+
+  setSearchScopeAccountId: async (accountId) => {
+    set({ searchScopeAccountId: accountId })
+    if (get().searchQuery.trim()) {
+      await get().refreshThreads()
+    }
   },
 
   toggleCheckThread: (threadId) => {
     const cur = get().checkedThreadIds
+    const exists = cur.includes(threadId)
+    const next = exists ? cur.filter((id) => id !== threadId) : [...cur, threadId]
     set({
-      checkedThreadIds: cur.includes(threadId) ? cur.filter((id) => id !== threadId) : [...cur, threadId]
+      checkedThreadIds: next,
+      lastCheckedThreadId: next.length > 0 ? threadId : null
     })
   },
 
-  clearCheckedThreads: () => set({ checkedThreadIds: [] }),
+  checkThreadRange: (targetId, orderedIds) => {
+    const { checkedThreadIds, lastCheckedThreadId } = get()
+    const targetIdx = orderedIds.indexOf(targetId)
+    if (targetIdx === -1) {
+      get().toggleCheckThread(targetId)
+      return
+    }
+    const anchorId =
+      lastCheckedThreadId && orderedIds.includes(lastCheckedThreadId)
+        ? lastCheckedThreadId
+        : checkedThreadIds.length > 0 && orderedIds.includes(checkedThreadIds[checkedThreadIds.length - 1])
+          ? checkedThreadIds[checkedThreadIds.length - 1]
+          : null
+
+    if (!anchorId) {
+      const next = checkedThreadIds.includes(targetId) ? checkedThreadIds : [...checkedThreadIds, targetId]
+      set({ checkedThreadIds: next, lastCheckedThreadId: targetId })
+      return
+    }
+
+    const anchorIdx = orderedIds.indexOf(anchorId)
+    const [start, end] = anchorIdx <= targetIdx ? [anchorIdx, targetIdx] : [targetIdx, anchorIdx]
+    const rangeIds = orderedIds.slice(start, end + 1)
+    const merged = Array.from(new Set([...checkedThreadIds, ...rangeIds]))
+    set({ checkedThreadIds: merged, lastCheckedThreadId: targetId })
+  },
+
+  setCheckedThreads: (threadIds) => {
+    const unique = Array.from(new Set(threadIds))
+    set({
+      checkedThreadIds: unique,
+      lastCheckedThreadId: unique.length > 0 ? unique[unique.length - 1] : null
+    })
+  },
+
+  clearCheckedThreads: () => set({ checkedThreadIds: [], lastCheckedThreadId: null }),
 
   archiveThreads: async (threadIds) => {
     if (!threadIds.length) return
     const { threads, selectedThreadId } = get()
     const currentIdx = threads.findIndex((t) => t.id === selectedThreadId)
     await window.glassmail.moveThreads(threadIds, 'archive', 'Archive')
-    set({ checkedThreadIds: [] })
+    set({ checkedThreadIds: [], lastCheckedThreadId: null })
     await get().refreshAll()
 
     // Auto-advance to next thread like Glassmail
@@ -425,7 +644,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     } else {
       await window.glassmail.moveThreads(threadIds, 'trash', 'Trash')
     }
-    set({ checkedThreadIds: [] })
+    set({ checkedThreadIds: [], lastCheckedThreadId: null })
     await get().refreshAll()
 
     if (selectedThreadId && threadIds.includes(selectedThreadId)) {
@@ -448,7 +667,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   snoozeThreads: async (threadIds, untilMs, label) => {
     if (!threadIds.length) return
     await window.glassmail.snoozeThreads(threadIds, untilMs)
-    set({ checkedThreadIds: [] })
+    set({ checkedThreadIds: [], lastCheckedThreadId: null })
     if (get().selectedThreadId && threadIds.includes(get().selectedThreadId!)) {
       set({ selectedThreadId: null, selectedThread: null })
     }
@@ -469,10 +688,117 @@ export const useAppStore = create<AppState>((set, get) => ({
     await get().refreshAll()
   },
 
+  setStarredThreads: async (threadIds, isStarred) => {
+    if (!threadIds.length) return
+    await window.glassmail.setStarred(threadIds, isStarred)
+    await get().refreshAll()
+    const n = threadIds.length
+    get().showToast(
+      isStarred
+        ? n === 1
+          ? 'Starred conversation'
+          : `Starred ${n} conversations`
+        : n === 1
+          ? 'Removed star'
+          : `Removed star from ${n} conversations`,
+      undefined,
+      3000
+    )
+  },
+
+  setReadThreads: async (threadIds, isRead) => {
+    if (!threadIds.length) return
+    await window.glassmail.setRead(threadIds, isRead)
+    await get().refreshAll()
+    const n = threadIds.length
+    get().showToast(
+      isRead
+        ? n === 1
+          ? 'Marked as read'
+          : `Marked ${n} conversations as read`
+        : n === 1
+          ? 'Marked as unread'
+          : `Marked ${n} conversations as unread`,
+      undefined,
+      3000
+    )
+  },
+
+  moveThreadsToFolder: async (threadIds, role, folderName) => {
+    if (!threadIds.length) return
+    const { threads, selectedThreadId } = get()
+    const currentIdx = threads.findIndex((t) => t.id === selectedThreadId)
+    await window.glassmail.moveThreads(threadIds, role, folderName)
+    set({ checkedThreadIds: [], lastCheckedThreadId: null })
+    await get().refreshAll()
+
+    if (selectedThreadId && threadIds.includes(selectedThreadId)) {
+      const remaining = get().threads
+      const next = remaining[currentIdx] || remaining[currentIdx - 1] || null
+      await get().selectThread(next?.id || null)
+    }
+    const destLabel = folderName || role.charAt(0).toUpperCase() + role.slice(1)
+    get().showToast(
+      `Moved ${threadIds.length === 1 ? 'conversation' : `${threadIds.length} conversations`} to ${destLabel}`,
+      async () => {
+        await window.glassmail.moveThreads(threadIds, 'inbox', 'Inbox')
+        await get().refreshAll()
+      }
+    )
+  },
+
+  markFolderRead: async ({ mailbox, accountIds, folderName, label }) => {
+    const list = await window.glassmail.listThreads({
+      accountIds: accountIds && accountIds.length > 0 ? accountIds : undefined,
+      mailbox,
+      category: 'all',
+      folderName
+    })
+    const unreadIds = list.filter((t) => !t.isRead).map((t) => t.id)
+    if (unreadIds.length === 0) {
+      get().showToast(`${label} is already all read`, undefined, 2500)
+      return
+    }
+    await window.glassmail.setRead(unreadIds, true)
+    await get().refreshAll()
+    get().showToast(`Marked ${unreadIds.length} email${unreadIds.length === 1 ? '' : 's'} in ${label} as read`, undefined, 3000)
+  },
+
   setSidebarVisible: (v) => set({ sidebarVisible: v }),
   setAssistantOpen: (v) => set({ assistantOpen: v }),
   toggleAssistant: () => set((s) => ({ assistantOpen: !s.assistantOpen })),
+  askAssistantPrompt: (prompt) => set({ assistantOpen: true, assistantDraftPrompt: prompt }),
+  clearAssistantDraftPrompt: () => set({ assistantDraftPrompt: null }),
+  requestSummarizeThread: async (threadId) => {
+    set({ activeView: 'mail', pendingSummarizeThreadId: threadId })
+    await get().selectThread(threadId)
+  },
+  clearPendingSummarize: () => set({ pendingSummarizeThreadId: null }),
+  requestDraftReply: async (threadId) => {
+    set({ activeView: 'mail', pendingDraftThreadId: threadId })
+    await get().selectThread(threadId)
+  },
+  clearPendingDraft: () => set({ pendingDraftThreadId: null }),
+  createReminder: async (payload) => {
+    await window.glassmail.createReminder(payload)
+    await get().refreshAll()
+    get().showToast(`Reminder set: ${payload.title}`, undefined, 3000)
+  },
+  completeReminder: async (id) => {
+    await window.glassmail.completeReminder(id)
+    await get().refreshAll()
+    get().showToast('Reminder completed', undefined, 2500)
+  },
+  deleteReminder: async (id) => {
+    await window.glassmail.deleteReminder(id)
+    await get().refreshAll()
+  },
+  openCalendarCreate: (draft) => set({ activeView: 'calendar', pendingCalendarDraft: draft || {} }),
+  clearCalendarDraft: () => set({ pendingCalendarDraft: null }),
   setCommandPaletteOpen: (v) => set({ commandPaletteOpen: v }),
+  setShortcutHelpOpen: (v) => set({ shortcutHelpOpen: v }),
+  openConfirm: (dialog) => set({ confirmDialog: dialog }),
+  closeConfirm: () => set({ confirmDialog: null }),
   openSettings: (tab = 'accounts') => set({ settingsOpen: true, settingsInitialTab: tab }),
   closeSettings: () => set({ settingsOpen: false }),
 
@@ -490,8 +816,13 @@ export const useAppStore = create<AppState>((set, get) => ({
         bcc: partial?.bcc || '',
         subject: partial?.subject || '',
         body: partial?.body || '',
+        bodyHtml: partial?.bodyHtml,
         replyToThreadId: partial?.replyToThreadId,
-        replyToMessageId: partial?.replyToMessageId
+        replyToMessageId: partial?.replyToMessageId,
+        draftThreadId: partial?.draftThreadId,
+        draftRemoteId: partial?.draftRemoteId,
+        attachments: partial?.attachments || [],
+        quotedMessage: partial?.quotedMessage
       }
     })
   },
@@ -506,9 +837,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       window.clearTimeout(toastTimer)
       toastTimer = null
     }
-    set({ toast: { message, undo } })
+    const id = Date.now() + Math.random()
+    set({ toast: { id, message, undo, durationMs } })
     toastTimer = window.setTimeout(() => {
-      if (get().toast?.message === message) {
+      if (get().toast?.id === id) {
         set({ toast: null })
       }
       toastTimer = null
@@ -525,13 +857,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   queueSendWithUndo: (payload, draftRestore, delaySeconds) => {
     const ms = Math.max(0, delaySeconds) * 1000
-    if (pendingSendTimer) {
-      window.clearTimeout(pendingSendTimer)
-      pendingSendTimer = null
-    }
+    let timerId: number | null = null
+    let cancelled = false
 
     const doSend = async () => {
-      pendingSendTimer = null
+      timerId = null
+      if (cancelled) return
       const res = await window.glassmail.sendEmail(payload)
       if (res.ok) {
         await get().refreshAll()
@@ -547,16 +878,18 @@ export const useAppStore = create<AppState>((set, get) => ({
       return
     }
 
-    pendingSendTimer = window.setTimeout(() => {
+    // Independent timer per send so rapid-fire sending of multiple emails/drafts never cancels earlier sends
+    timerId = window.setTimeout(() => {
       void doSend()
     }, ms)
 
     get().showToast(
       `Sending message…`,
       async () => {
-        if (pendingSendTimer) {
-          window.clearTimeout(pendingSendTimer)
-          pendingSendTimer = null
+        cancelled = true
+        if (timerId !== null) {
+          window.clearTimeout(timerId)
+          timerId = null
         }
         get().openComposer(draftRestore)
         get().showToast('Send cancelled — draft restored', undefined, 3000)
@@ -569,6 +902,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ isSyncing: true })
     try {
       await window.glassmail.syncAll()
+      const { activeFolderName, activeAccountIds } = get()
+      if (activeFolderName) {
+        await window.glassmail.syncFolder(
+          activeFolderName,
+          activeAccountIds.length > 0 ? activeAccountIds : undefined
+        )
+      }
       await get().refreshAll()
     } finally {
       set({ isSyncing: false })
@@ -578,6 +918,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   saveSettings: async (s) => {
     await window.glassmail.saveSettings(s)
     document.documentElement.setAttribute('data-theme', s.theme)
+    document.documentElement.setAttribute('data-ui-theme', s.uiTheme || 'everybox')
     set({ settings: s })
   }
 }))

@@ -1,0 +1,3051 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EveryBox Android — Interactive Design Board</title>
+  <style>
+    /* ============================================================
+       EveryBox 5 Canonical Themes (Reconciled with DESIGN.md + WCAG AA)
+       ============================================================ */
+    :root,
+    [data-theme="dark"] {
+      --board-bg: #0c1018;
+      --board-bar: #121722;
+      --bg-sidebar: #11151d;
+      --bg-nav: #1c2330;
+      --bg-list: #151a24;
+      --bg-main: #181e29;
+      --bg-elevated: #202837;
+      --bg-hover: #263042;
+      --bg-selected: #1c2f4f;
+      --border-subtle: rgba(210, 225, 255, 0.08);
+      --border-strong: rgba(210, 225, 255, 0.14);
+      --text-primary: #eef2f9;
+      --text-secondary: #9aa7bc;
+      --text-muted: #8f9db6;
+      --accent: #3b82f6;
+      --accent-btn: #2563eb;
+      --accent-soft: rgba(59, 130, 246, 0.18);
+      --accent-text: #7cb8ff;
+      --danger: #f87171;
+      --danger-soft: rgba(248, 113, 113, 0.14);
+      --success: #2dd4bf;
+      --success-soft: rgba(45, 212, 191, 0.16);
+      --amber: #f5b841;
+      --amber-text: #fbbf24;
+      --amber-soft: rgba(245, 184, 65, 0.16);
+      --phone-shell: #0a0d13;
+      --phone-ring: rgba(210, 225, 255, 0.16);
+      --phone-shadow: 0 28px 60px -16px rgba(0, 0, 0, 0.65), 0 8px 20px rgba(0, 0, 0, 0.4);
+      --wash-start: 13%;
+      --wash-mid: 4%;
+    }
+
+    [data-theme="black"] {
+      --board-bg: #030406;
+      --board-bar: #090b10;
+      --bg-sidebar: #000000;
+      --bg-nav: #0f1218;
+      --bg-list: #07080a;
+      --bg-main: #0b0d11;
+      --bg-elevated: #14171f;
+      --bg-hover: #1c212c;
+      --bg-selected: #162642;
+      --border-subtle: rgba(210, 225, 255, 0.12);
+      --border-strong: rgba(210, 225, 255, 0.18);
+      --text-primary: #f4f7fb;
+      --text-secondary: #9aa5b6;
+      --text-muted: #8792a7;
+      --accent: #3b82f6;
+      --accent-btn: #2563eb;
+      --accent-soft: rgba(59, 130, 246, 0.2);
+      --accent-text: #7cb8ff;
+      --danger: #f87171;
+      --danger-soft: rgba(248, 113, 113, 0.16);
+      --success: #2dd4bf;
+      --success-soft: rgba(45, 212, 191, 0.18);
+      --amber: #f5b841;
+      --amber-text: #fbbf24;
+      --amber-soft: rgba(245, 184, 65, 0.18);
+      --phone-shell: #000000;
+      --phone-ring: rgba(210, 225, 255, 0.2);
+      --phone-shadow: 0 28px 60px -16px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(210, 225, 255, 0.14);
+      --wash-start: 14%;
+      --wash-mid: 5%;
+    }
+
+    [data-theme="graphite"] {
+      --board-bg: #11151c;
+      --board-bar: #161b23;
+      --bg-sidebar: #14181f;
+      --bg-nav: #202733;
+      --bg-list: #181d26;
+      --bg-main: #1c222c;
+      --bg-elevated: #242c38;
+      --bg-hover: #2b3442;
+      --bg-selected: #20324d;
+      --border-subtle: rgba(210, 225, 255, 0.08);
+      --border-strong: rgba(210, 225, 255, 0.15);
+      --text-primary: #eef2f8;
+      --text-secondary: #9aa7ba;
+      --text-muted: #93a0b5;
+      --accent: #3b82f6;
+      --accent-btn: #2563eb;
+      --accent-soft: rgba(59, 130, 246, 0.18);
+      --accent-text: #7cb8ff;
+      --danger: #f87171;
+      --danger-soft: rgba(248, 113, 113, 0.14);
+      --success: #2dd4bf;
+      --success-soft: rgba(45, 212, 191, 0.16);
+      --amber: #f5b841;
+      --amber-text: #fbbf24;
+      --amber-soft: rgba(245, 184, 65, 0.16);
+      --phone-shell: #0e1218;
+      --phone-ring: rgba(210, 225, 255, 0.16);
+      --phone-shadow: 0 28px 60px -16px rgba(0, 0, 0, 0.58), 0 8px 20px rgba(0, 0, 0, 0.34);
+      --wash-start: 13%;
+      --wash-mid: 4%;
+    }
+
+    [data-theme="light"] {
+      --board-bg: #e9eef6;
+      --board-bar: #f8fafd;
+      --bg-sidebar: #f4f6fa;
+      --bg-nav: #f4f6fa;
+      --bg-list: #fafbfd;
+      --bg-main: #ffffff;
+      --bg-elevated: #f1f4f9;
+      --bg-hover: #e7ecf4;
+      --bg-selected: #dbeafe;
+      --border-subtle: rgba(15, 23, 42, 0.07);
+      --border-strong: rgba(15, 23, 42, 0.13);
+      --text-primary: #0f172a;
+      --text-secondary: #475569;
+      --text-muted: #58657a;
+      --accent: #2563eb;
+      --accent-btn: #2563eb;
+      --accent-soft: rgba(37, 99, 235, 0.12);
+      --accent-text: #1d4ed8;
+      --danger: #c81e22;
+      --danger-soft: rgba(200, 30, 34, 0.1);
+      --success: #0f766e;
+      --success-soft: rgba(15, 118, 110, 0.12);
+      --amber: #d97706;
+      --amber-text: #92400e;
+      --amber-soft: rgba(217, 119, 6, 0.14);
+      --phone-shell: #1e2430;
+      --phone-ring: rgba(15, 23, 42, 0.18);
+      --phone-shadow: 0 24px 50px -16px rgba(15, 23, 42, 0.22), 0 6px 16px rgba(15, 23, 42, 0.08);
+      --wash-start: 11%;
+      --wash-mid: 3.5%;
+    }
+
+    [data-theme="paper"] {
+      --board-bg: #e5e1d7;
+      --board-bar: #f7f5f0;
+      --bg-sidebar: #f0eee9;
+      --bg-nav: #f0eee9;
+      --bg-list: #f6f5f0;
+      --bg-main: #fbfaf7;
+      --bg-elevated: #eceae3;
+      --bg-hover: #e4e1d8;
+      --bg-selected: #dce8fb;
+      --border-subtle: rgba(30, 41, 59, 0.09);
+      --border-strong: rgba(30, 41, 59, 0.16);
+      --text-primary: #1c222b;
+      --text-secondary: #525d6d;
+      --text-muted: #566070;
+      --accent: #2563eb;
+      --accent-btn: #2563eb;
+      --accent-soft: rgba(37, 99, 235, 0.13);
+      --accent-text: #1d4ed8;
+      --danger: #b91c1c;
+      --danger-soft: rgba(185, 28, 28, 0.1);
+      --success: #0f766e;
+      --success-soft: rgba(15, 118, 110, 0.12);
+      --amber: #b45309;
+      --amber-text: #92400e;
+      --amber-soft: rgba(180, 83, 9, 0.14);
+      --phone-shell: #26231e;
+      --phone-ring: rgba(30, 41, 59, 0.18);
+      --phone-shadow: 0 24px 50px -16px rgba(30, 26, 18, 0.22), 0 6px 16px rgba(30, 26, 18, 0.09);
+      --wash-start: 11%;
+      --wash-mid: 3.5%;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      min-height: 100%;
+      background: var(--board-bg);
+      color: var(--text-primary);
+      font-family: "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 13.5px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      caret-color: var(--accent);
+      transition: background-color 180ms ease, color 180ms ease;
+    }
+
+    ::selection {
+      background: var(--accent-soft);
+      color: var(--text-primary);
+    }
+
+    button {
+      font: inherit;
+      color: inherit;
+      background: none;
+      border: none;
+      cursor: pointer;
+    }
+
+    button:focus-visible,
+    textarea:focus-visible,
+    input:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .tabular {
+      font-variant-numeric: tabular-nums;
+    }
+
+    ::-webkit-scrollbar {
+      width: 5px;
+      height: 5px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--border-strong);
+      border-radius: 9999px;
+    }
+
+    /* ============================================================
+       Board Header & Live Controls
+       ============================================================ */
+    .board-header {
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px 24px;
+      padding: 16px 28px;
+      background: var(--board-bar);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .board-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-mark {
+      width: 36px;
+      height: 36px;
+      border-radius: 12px;
+      background: var(--accent-btn);
+      color: #ffffff;
+      display: grid;
+      place-items: center;
+      flex-shrink: 0;
+    }
+
+    .board-title {
+      font-size: 20px;
+      font-weight: 600;
+      letter-spacing: -0.015em;
+      line-height: 1.25;
+      color: var(--text-primary);
+    }
+
+    .board-subtitle {
+      font-size: 13.5px;
+      color: var(--text-secondary);
+      margin-top: 2px;
+    }
+
+    .controls-cluster {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .control-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .control-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      white-space: nowrap;
+    }
+
+    .seg-group {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px;
+      border-radius: 12px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+    }
+
+    .seg-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 11px;
+      border-radius: 8px;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      transition: background 150ms ease, color 150ms ease;
+    }
+
+    .seg-btn:hover {
+      color: var(--text-primary);
+      background: var(--bg-hover);
+    }
+
+    .seg-btn.active {
+      background: var(--accent-btn);
+      color: #ffffff;
+    }
+
+    .theme-swatch {
+      width: 10px;
+      height: 10px;
+      border-radius: 9999px;
+      border: 1px solid rgba(128, 140, 160, 0.45);
+      flex-shrink: 0;
+    }
+
+    .action-chip-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 12px;
+      border-radius: 12px;
+      font-size: 12.5px;
+      font-weight: 600;
+      background: var(--accent-soft);
+      color: var(--accent-text);
+      border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+      transition: filter 150ms ease;
+    }
+
+    .action-chip-btn:hover {
+      filter: brightness(1.08);
+    }
+
+    /* ============================================================
+       4-Phone Canvas Grid
+       ============================================================ */
+    .board-canvas {
+      max-width: 1740px;
+      margin: 0 auto;
+      padding: 28px 24px 40px;
+    }
+
+    .phones-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 390px);
+      justify-content: center;
+      gap: 28px;
+    }
+
+    @media (max-width: 1690px) {
+      .phones-grid {
+        grid-template-columns: repeat(2, 390px);
+        gap: 36px 36px;
+      }
+    }
+
+    @media (max-width: 860px) {
+      .phones-grid {
+        grid-template-columns: 390px;
+      }
+      .board-header {
+        padding: 14px 16px;
+      }
+    }
+
+    .screen-column {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .screen-caption {
+      width: 390px;
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      padding: 0 4px;
+    }
+
+    .screen-caption h2 {
+      font-size: 15.5px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: var(--text-primary);
+    }
+
+    .screen-caption span {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* ============================================================
+       Android Phone Hardware Frame (390 x 844 dp, bezel via pseudo-layer)
+       ============================================================ */
+    .phone-frame {
+      position: relative;
+      width: 390px;
+      height: 844px;
+      padding: 8px;
+      flex-shrink: 0;
+    }
+
+    .phone-frame::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: 36px;
+      background: var(--phone-shell);
+      outline: 1px solid var(--phone-ring);
+      box-shadow: var(--phone-shadow);
+      pointer-events: none;
+    }
+
+    .phone-viewport {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      height: 100%;
+      border-radius: 28px;
+      background: var(--bg-main);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Android Status Bar */
+    .status-bar {
+      height: 34px;
+      padding: 0 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary);
+      flex-shrink: 0;
+      position: relative;
+      z-index: 5;
+    }
+
+    .camera-punch {
+      position: absolute;
+      left: 50%;
+      top: 9px;
+      transform: translateX(-50%);
+      width: 14px;
+      height: 14px;
+      border-radius: 9999px;
+      background: #05070b;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+    }
+
+    .status-icons {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-primary);
+    }
+
+    .gesture-bar-wrap {
+      height: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      background: inherit;
+    }
+
+    .gesture-pill {
+      width: 108px;
+      height: 4px;
+      border-radius: 9999px;
+      background: var(--text-muted);
+      opacity: 0.45;
+    }
+
+    /* ============================================================
+       Shared Material 3 Components Inside Phone (>=48dp touch targets)
+       ============================================================ */
+    .top-app-bar {
+      height: 52px;
+      padding: 0 4px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+
+    .top-bar-left, .top-bar-right {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+    }
+
+    .icon-btn {
+      width: 48px;
+      height: 48px;
+      border-radius: 9999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-secondary);
+      transition: background 140ms ease, color 140ms ease;
+      flex-shrink: 0;
+    }
+
+    .icon-btn:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
+    .app-bar-title {
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: -0.015em;
+      color: var(--text-primary);
+    }
+
+    .app-bar-count {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-left: 6px;
+    }
+
+    .user-avatar-wrap {
+      width: 48px;
+      height: 48px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 9999px;
+    }
+
+    .user-avatar-wrap:hover {
+      background: var(--bg-hover);
+    }
+
+    .user-avatar-badge {
+      width: 32px;
+      height: 32px;
+      border-radius: 9999px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-strong);
+      color: var(--text-primary);
+      font-size: 12px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .acc-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 9999px;
+      flex-shrink: 0;
+    }
+
+    .acc-badge.sm {
+      width: 18px;
+      height: 18px;
+    }
+
+    .acc-badge.xs {
+      width: 16px;
+      height: 16px;
+    }
+
+    /* Coupled Multi-Account Focus Pill Strip */
+    .focus-strip {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 12px 8px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      flex-shrink: 0;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .focus-strip::-webkit-scrollbar {
+      display: none;
+    }
+
+    .focus-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 36px;
+      padding: 0 11px;
+      border-radius: 9999px;
+      font-size: 12.5px;
+      font-weight: 600;
+      white-space: nowrap;
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+      border: 1px solid var(--border-subtle);
+      transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
+      flex-shrink: 0;
+    }
+
+    .focus-pill:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
+    .focus-pill.active {
+      background: var(--bg-selected);
+      color: var(--text-primary);
+      border-color: var(--pill-color, var(--accent));
+    }
+
+    .focus-pill-count {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+
+    .focus-pill.active .focus-pill-count {
+      color: var(--accent-text);
+    }
+
+    /* Bottom Navigation Bar (Material 3 surfaceContainer) */
+    .m3-nav-bar {
+      background: var(--bg-nav);
+      border-top: 1px solid var(--border-subtle);
+      flex-shrink: 0;
+    }
+
+    .m3-nav-row {
+      height: 60px;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      padding: 6px 8px 2px;
+    }
+
+    .m3-nav-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .m3-nav-item.active {
+      color: var(--text-primary);
+    }
+
+    .m3-nav-indicator {
+      width: 54px;
+      height: 28px;
+      border-radius: 9999px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 160ms ease;
+    }
+
+    .m3-nav-item.active .m3-nav-indicator {
+      background: var(--accent-soft);
+      color: var(--accent-text);
+    }
+
+    /* ============================================================
+       SCREEN 1: Unified Inbox
+       ============================================================ */
+    .inbox-filter-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 12px;
+      background: var(--bg-list);
+      border-bottom: 1px solid var(--border-subtle);
+      flex-shrink: 0;
+    }
+
+    .cat-tabs {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .cat-tab {
+      height: 32px;
+      padding: 0 10px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .cat-tab.active {
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+    }
+
+    .cat-tab-num {
+      font-size: 12px;
+      opacity: 0.85;
+    }
+
+    .sort-chip {
+      height: 32px;
+      padding: 0 10px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .thread-scroll {
+      flex: 1;
+      overflow-y: auto;
+      background: var(--bg-list);
+      padding: 6px 8px 84px;
+    }
+
+    .date-group-hdr {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      padding: 5px 10px;
+      margin: 4px 0;
+      border-radius: 8px;
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .date-group-hdr-left {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .thread-row {
+      position: relative;
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px 10px 10px 12px;
+      margin-bottom: 4px;
+      border-radius: 12px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: background 140ms ease;
+    }
+
+    .thread-row:hover {
+      background-color: var(--bg-hover);
+    }
+
+    .thread-row[data-row-style="gradient"] {
+      background: linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--row-acc) var(--wash-start), transparent) 0%,
+        color-mix(in srgb, var(--row-acc) var(--wash-mid), transparent) 38%,
+        transparent 74%
+      );
+    }
+
+    .thread-row[data-row-style="bar"],
+    .thread-row[data-row-style="dot"] {
+      background: transparent;
+    }
+
+    .row-acc-pill {
+      position: absolute;
+      left: 3px;
+      top: 9px;
+      bottom: 9px;
+      width: 3px;
+      border-radius: 9999px;
+      background: var(--row-acc);
+      opacity: 0.9;
+    }
+
+    .thread-row[data-row-style="dot"] .row-acc-pill {
+      display: none;
+    }
+
+    .unread-slot {
+      width: 8px;
+      padding-top: 14px;
+      display: flex;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .unread-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 9999px;
+      background: var(--accent);
+    }
+
+    .avatar-wrap {
+      position: relative;
+      width: 38px;
+      height: 38px;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .sender-avatar {
+      width: 38px;
+      height: 38px;
+      border-radius: 9999px;
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+      font-size: 12.5px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .avatar-acc-badge {
+      position: absolute;
+      right: -3px;
+      bottom: -3px;
+      border: 2px solid var(--bg-list);
+      border-radius: 9999px;
+    }
+
+    .thread-body {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .thread-line1 {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+
+    .sender-cluster {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      min-width: 0;
+    }
+
+    .sender-name {
+      font-size: 13.5px;
+      font-weight: 500;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .thread-row.unread .sender-name {
+      font-weight: 650;
+    }
+
+    .msg-count {
+      font-size: 12px;
+      color: var(--text-muted);
+      flex-shrink: 0;
+    }
+
+    .meta-cluster {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex-shrink: 0;
+    }
+
+    .ai-spark-tag {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2px 6px;
+      border-radius: 6px;
+      background: var(--amber-soft);
+      color: var(--amber-text);
+    }
+
+    .row-time {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+
+    .thread-subject {
+      font-size: 13px;
+      font-weight: 400;
+      color: var(--text-secondary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 1px;
+    }
+
+    .thread-row.unread .thread-subject {
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .thread-snippet {
+      font-size: 12px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 2px;
+    }
+
+    .code-copy-pill {
+      margin-top: 6px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      border-radius: 6px;
+      font-family: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+      font-size: 12px;
+      font-weight: 600;
+      background: var(--accent-soft);
+      color: var(--accent-text);
+      border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+      transition: background 150ms ease, color 150ms ease;
+    }
+
+    .code-copy-pill.copied {
+      background: var(--success-soft);
+      color: var(--success);
+      border-color: var(--success);
+    }
+
+    /* Single Primary FAB — Neutral elevation shadow (zero chromatic glow) */
+    .m3-fab {
+      position: absolute;
+      right: 14px;
+      bottom: 92px;
+      height: 52px;
+      padding: 0 18px 0 15px;
+      border-radius: 16px;
+      background: var(--accent-btn);
+      color: #ffffff;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13.5px;
+      font-weight: 600;
+      box-shadow: 0 8px 20px -4px rgba(0, 0, 0, 0.42), 0 2px 6px rgba(0, 0, 0, 0.24);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      z-index: 12;
+      transition: transform 150ms ease, bottom 200ms ease;
+    }
+
+    .m3-fab:hover {
+      transform: translateY(-1px);
+    }
+
+    .m3-fab.lifted {
+      bottom: 150px;
+    }
+
+    /* Undo Send Fuse Snackbar */
+    .undo-snackbar {
+      position: absolute;
+      left: 12px;
+      right: 12px;
+      bottom: 90px;
+      z-index: 20;
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 12px 10px 14px;
+      border-radius: 12px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-strong);
+      box-shadow: 0 14px 32px -8px rgba(0, 0, 0, 0.45);
+    }
+
+    .undo-snackbar.visible {
+      display: flex;
+    }
+
+    .undo-snackbar.reader-pos {
+      bottom: 92px;
+    }
+
+    .undo-msg {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .undo-fuse-btn {
+      position: relative;
+      padding: 6px 13px;
+      border-radius: 8px;
+      background: var(--accent-soft);
+      color: var(--accent-text);
+      font-size: 12.5px;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+
+    .undo-fuse-svg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      overflow: visible;
+    }
+
+    @keyframes fuse-burn {
+      from { stroke-dashoffset: 0; }
+      to { stroke-dashoffset: 100; }
+    }
+
+    .undo-fuse-stroke {
+      stroke-dasharray: 100;
+      stroke-dashoffset: 0;
+      animation: fuse-burn 5000ms linear forwards;
+    }
+
+    /* ============================================================
+       SCREEN 2: Thread Reader (with AI Draft Ready)
+       ============================================================ */
+    .reader-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 4px 16px 12px;
+      background: var(--bg-main);
+    }
+
+    .reader-subject-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 4px;
+    }
+
+    .reader-subject {
+      font-size: 18px;
+      font-weight: 600;
+      line-height: 1.28;
+      letter-spacing: -0.015em;
+      color: var(--text-primary);
+      padding-top: 6px;
+    }
+
+    .reader-meta-pills {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      margin-top: 6px;
+    }
+
+    .meta-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+    }
+
+    .meta-pill.shield {
+      background: var(--success-soft);
+      color: var(--success);
+    }
+
+    .collapsed-msg {
+      margin-top: 10px;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 12px;
+      background: var(--bg-elevated);
+      text-align: left;
+    }
+
+    .collapsed-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .mini-avatar {
+      width: 26px;
+      height: 26px;
+      border-radius: 9999px;
+      background: var(--bg-main);
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .expanded-msg {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border-subtle);
+    }
+
+    .msg-hdr {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .msg-hdr-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .msg-sender {
+      font-size: 13.5px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .msg-email {
+      font-size: 12px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .msg-prose {
+      margin-top: 7px;
+      font-size: 13.5px;
+      line-height: 1.48;
+      color: var(--text-primary);
+    }
+
+    .msg-prose p + p {
+      margin-top: 5px;
+    }
+
+    .att-chip {
+      margin-top: 8px;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 6px 10px;
+      border-radius: 8px;
+      background: var(--bg-elevated);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .att-size {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+
+    /* Inline AI Draft Ready Section — Flattened tonal band (zero nested card) */
+    .ai-draft-band {
+      margin-top: 12px;
+      padding: 10px 12px 12px;
+      border-radius: 12px;
+      background: var(--bg-elevated);
+    }
+
+    .ai-draft-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+
+    .ai-draft-title {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--accent-text);
+    }
+
+    .ai-draft-src {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+
+    .voice-pills {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 7px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .voice-pill {
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      background: var(--bg-main);
+    }
+
+    .voice-pill.active {
+      background: var(--accent-soft);
+      color: var(--accent-text);
+    }
+
+    .ai-draft-textarea {
+      width: 100%;
+      height: 58px;
+      margin-top: 8px;
+      padding: 2px 0;
+      background: transparent;
+      border: none;
+      color: var(--text-primary);
+      font-family: inherit;
+      font-size: 13px;
+      line-height: 1.46;
+      resize: none;
+    }
+
+    .ai-draft-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .btn-primary-sm {
+      height: 40px;
+      padding: 0 15px;
+      border-radius: 12px;
+      background: var(--accent-btn);
+      color: #ffffff;
+      font-size: 12.5px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-secondary-sm {
+      height: 40px;
+      padding: 0 12px;
+      border-radius: 12px;
+      background: var(--bg-main);
+      color: var(--text-primary);
+      font-size: 12.5px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* Sticky Quick Reply Bar */
+    .quick-reply-bar {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 6px 6px 6px 12px;
+      background: var(--bg-nav);
+      border-top: 1px solid var(--border-subtle);
+      flex-shrink: 0;
+    }
+
+    .quick-reply-pill {
+      flex: 1;
+      height: 44px;
+      padding: 0 14px;
+      border-radius: 9999px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      text-align: left;
+    }
+
+    /* ============================================================
+       SCREEN 3: Composer Sheet
+       ============================================================ */
+    .composer-hairline {
+      height: 3px;
+      width: 100%;
+      flex-shrink: 0;
+      transition: background 180ms ease;
+    }
+
+    .composer-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 10px 8px 4px;
+      border-bottom: 1px solid var(--border-subtle);
+      flex-shrink: 0;
+    }
+
+    .composer-mode-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .composer-saved {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-left: 6px;
+    }
+
+    .send-cta {
+      height: 40px;
+      padding: 0 16px;
+      border-radius: 9999px;
+      background: var(--accent-btn);
+      color: #ffffff;
+      font-size: 13px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .field-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 48px;
+      padding: 6px 14px;
+      border-bottom: 1px solid var(--border-subtle);
+      background: var(--bg-elevated);
+      flex-shrink: 0;
+    }
+
+    .field-label {
+      width: 38px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      flex-shrink: 0;
+    }
+
+    .from-picker-btn {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 5px 10px;
+      border-radius: 8px;
+      background: var(--bg-main);
+    }
+
+    .from-picker-left {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+    }
+
+    .from-name {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .from-email {
+      font-size: 12px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .recip-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      background: var(--bg-main);
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .cc-toggle {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      padding: 6px 8px;
+      border-radius: 6px;
+    }
+
+    .subject-row {
+      padding: 11px 14px;
+      border-bottom: 1px solid var(--border-subtle);
+      background: var(--bg-main);
+      font-size: 15.5px;
+      font-weight: 600;
+      color: var(--text-primary);
+      flex-shrink: 0;
+    }
+
+    .schedule-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 14px;
+      background: var(--accent-soft);
+      color: var(--accent-text);
+      font-size: 12px;
+      font-weight: 600;
+      border-bottom: 1px solid var(--border-subtle);
+      flex-shrink: 0;
+    }
+
+    .composer-body-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 14px;
+      background: var(--bg-main);
+      overflow-y: auto;
+    }
+
+    .composer-textarea {
+      width: 100%;
+      flex: 1;
+      min-height: 170px;
+      background: transparent;
+      border: none;
+      color: var(--text-primary);
+      font-family: inherit;
+      font-size: 14px;
+      line-height: 1.6;
+      resize: none;
+    }
+
+    .quoted-pill {
+      margin-top: 10px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      align-self: flex-start;
+      padding: 5px 10px;
+      border-radius: 8px;
+      background: var(--bg-elevated);
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .ai-tone-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 12px;
+      background: color-mix(in srgb, var(--accent) 5%, var(--bg-main));
+      border-top: 1px solid var(--border-subtle);
+      overflow-x: auto;
+      scrollbar-width: none;
+      flex-shrink: 0;
+    }
+
+    .tone-chip {
+      height: 32px;
+      padding: 0 11px;
+      border-radius: 9999px;
+      font-size: 12px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .tone-chip.active {
+      background: var(--accent-soft);
+      color: var(--accent-text);
+    }
+
+    .fmt-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 4px 8px;
+      background: var(--bg-nav);
+      border-top: 1px solid var(--border-subtle);
+      flex-shrink: 0;
+    }
+
+    .fmt-group {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+    }
+
+    .fmt-btn {
+      width: 44px;
+      height: 44px;
+      border-radius: 8px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-secondary);
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .fmt-btn:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
+    /* ============================================================
+       SCREEN 4: Combined Calendar (with Coupled Focus Strip)
+       ============================================================ */
+    .cal-controls-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 12px;
+      background: var(--bg-list);
+      border-bottom: 1px solid var(--border-subtle);
+      flex-shrink: 0;
+    }
+
+    .cal-mode-seg {
+      display: inline-flex;
+      padding: 2px;
+      border-radius: 8px;
+      background: var(--bg-elevated);
+    }
+
+    .cal-mode-btn {
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+
+    .cal-mode-btn.active {
+      background: var(--bg-main);
+      color: var(--text-primary);
+    }
+
+    .merge-pill {
+      height: 30px;
+      padding: 0 10px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      border: 1px solid var(--border-strong);
+      color: var(--text-secondary);
+      background: var(--bg-elevated);
+    }
+
+    .merge-pill.active {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      color: var(--accent-text);
+    }
+
+    .week-strip {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      padding: 6px 10px 5px;
+      background: var(--bg-list);
+      border-bottom: 1px solid var(--border-subtle);
+      flex-shrink: 0;
+    }
+
+    .day-cell {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+    }
+
+    .day-dow {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+    }
+
+    .day-num {
+      width: 26px;
+      height: 26px;
+      border-radius: 9999px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .day-cell.today .day-num {
+      background: var(--accent-btn);
+      color: #ffffff;
+    }
+
+    .day-dots {
+      display: flex;
+      gap: 3px;
+      height: 5px;
+    }
+
+    .day-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 9999px;
+    }
+
+    .allday-strip {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      background: var(--bg-main);
+      border-bottom: 1px solid var(--border-subtle);
+      flex-shrink: 0;
+    }
+
+    .allday-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+
+    .allday-chip {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 4px 9px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary);
+      background: color-mix(in srgb, #3b82f6 12%, var(--bg-elevated));
+    }
+
+    .cal-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 12px 8px;
+      background: var(--bg-main);
+      position: relative;
+    }
+
+    .now-line {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 2px 0 6px;
+    }
+
+    .now-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 9999px;
+      background: var(--accent);
+      flex-shrink: 0;
+    }
+
+    .now-rule {
+      height: 1.5px;
+      flex: 1;
+      background: var(--accent);
+      opacity: 0.7;
+    }
+
+    .now-time {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--accent-text);
+    }
+
+    .agenda-item {
+      display: flex;
+      align-items: stretch;
+      gap: 10px;
+      margin-bottom: 7px;
+    }
+
+    .agenda-time-col {
+      width: 58px;
+      padding-top: 6px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    .agenda-start {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .agenda-dur {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .agenda-row-block {
+      flex: 1;
+      min-width: 0;
+      padding: 7px 10px;
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--ev-color) 13%, var(--bg-elevated));
+      text-align: left;
+    }
+
+    .agenda-card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+
+    .agenda-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .occ-dots {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      flex-shrink: 0;
+    }
+
+    .occ-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 9999px;
+    }
+
+    .agenda-sub {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-top: 2px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* 3-Day Grid inside Calendar */
+    .threeday-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+
+    .threeday-col {
+      background: var(--bg-list);
+      border-radius: 8px;
+      padding: 6px;
+      min-height: 175px;
+    }
+
+    .threeday-col-hdr {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .mini-ev {
+      padding: 5px 6px;
+      border-radius: 6px;
+      margin-bottom: 5px;
+      background: color-mix(in srgb, var(--ev-color) 15%, var(--bg-elevated));
+    }
+
+    .mini-ev-t {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary);
+      line-height: 1.25;
+    }
+
+    .mini-ev-h {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    /* Docked Event Detail Sheet — Tonal surface + accent bar (no nested shadow card) */
+    .event-sheet {
+      background: var(--bg-elevated);
+      border-top: 3px solid #3B82F6;
+      flex-shrink: 0;
+    }
+
+    .sheet-handle-row {
+      display: flex;
+      justify-content: center;
+      padding: 6px 0 2px;
+    }
+
+    .sheet-handle {
+      width: 32px;
+      height: 4px;
+      border-radius: 9999px;
+      background: var(--text-muted);
+      opacity: 0.4;
+    }
+
+    .event-sheet-content {
+      padding: 4px 14px 10px;
+    }
+
+    .event-sheet-title {
+      font-size: 15.5px;
+      font-weight: 600;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .event-sheet-time {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-top: 2px;
+    }
+
+    .event-sheet-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .join-btn {
+      flex: 1;
+      height: 46px;
+      border-radius: 12px;
+      background: var(--accent-btn);
+      color: #ffffff;
+      font-size: 13.5px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+    }
+
+    .copy-link-btn {
+      width: 46px;
+      height: 46px;
+      border-radius: 12px;
+      background: var(--bg-main);
+      color: var(--text-primary);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .event-meta-list {
+      margin-top: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .event-meta-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .board-footer {
+      max-width: 1740px;
+      margin: 0 auto;
+      padding: 0 24px 36px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+  </style>
+</head>
+<body>
+  <header class="board-header">
+    <div class="board-brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="5" width="18" height="14" rx="2.5"></rect>
+          <path d="m3 7 9 6 9-6"></path>
+        </svg>
+      </div>
+      <div>
+        <h1 class="board-title">EveryBox Android — Interactive Design Board</h1>
+        <p class="board-subtitle">4 core screens at 390×844 dp · Material 3 Operate mode · Coupled Mail + Calendar focus pills, voice drafts, tones &amp; Send</p>
+      </div>
+    </div>
+
+    <div class="controls-cluster">
+      <div class="control-group">
+        <span class="control-label">Theme</span>
+        <div class="seg-group" id="themeControls" role="radiogroup" aria-label="EveryBox Theme">
+          <button type="button" class="seg-btn active" data-set-theme="dark">
+            <span class="theme-swatch" style="background:#181e29"></span>Dark
+          </button>
+          <button type="button" class="seg-btn" data-set-theme="black">
+            <span class="theme-swatch" style="background:#000000"></span>Black
+          </button>
+          <button type="button" class="seg-btn" data-set-theme="graphite">
+            <span class="theme-swatch" style="background:#1c222c"></span>Graphite
+          </button>
+          <button type="button" class="seg-btn" data-set-theme="light">
+            <span class="theme-swatch" style="background:#ffffff"></span>Light
+          </button>
+          <button type="button" class="seg-btn" data-set-theme="paper">
+            <span class="theme-swatch" style="background:#fbfaf7"></span>Paper
+          </button>
+        </div>
+      </div>
+
+      <div class="control-group">
+        <span class="control-label">Row Style</span>
+        <div class="seg-group" id="rowStyleControls" role="radiogroup" aria-label="Account Row Style">
+          <button type="button" class="seg-btn active" data-set-row-style="gradient">Gradient</button>
+          <button type="button" class="seg-btn" data-set-row-style="bar">Bar</button>
+          <button type="button" class="seg-btn" data-set-row-style="dot">Dot</button>
+        </div>
+      </div>
+
+      <button type="button" class="action-chip-btn" id="triggerUndoDemo">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"></path><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"></path></svg>
+        Preview Undo Fuse
+      </button>
+    </div>
+  </header>
+
+  <main class="board-canvas">
+    <div class="phones-grid">
+
+      <!-- FRAME 1: UNIFIED INBOX -->
+      <section class="screen-column" aria-label="Unified Inbox Screen">
+        <div class="screen-caption">
+          <h2>Unified Inbox</h2>
+          <span>Coupled Focus pills · Swipe-safe 36dp</span>
+        </div>
+        <figure class="phone-frame"><div class="phone-viewport">
+          <div class="status-bar">
+            <span class="tabular">9:41</span>
+            <span class="camera-punch" aria-hidden="true"></span>
+            <div class="status-icons" aria-hidden="true">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><circle cx="12" cy="19.5" r="1" fill="currentColor"></circle></svg>
+              <svg width="16" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="17" height="10" rx="2"></rect><rect x="4.5" y="9.5" width="10" height="5" rx="0.8" fill="currentColor" stroke="none"></rect><path d="M21 10v4"></path></svg>
+            </div>
+          </div>
+
+          <div class="top-app-bar">
+            <div class="top-bar-left">
+              <button type="button" class="icon-btn" aria-label="Open mailboxes">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"></path></svg>
+              </button>
+              <span class="app-bar-title">Inbox</span>
+              <span class="app-bar-count tabular" id="inboxUnreadCount">4 unread</span>
+            </div>
+            <div class="top-bar-right">
+              <button type="button" class="icon-btn" aria-label="Sync now">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path><path d="M16 16h5v5"></path></svg>
+              </button>
+              <button type="button" class="user-avatar-wrap" aria-label="Accounts and settings">
+                <span class="user-avatar-badge">AR</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="focus-strip" id="focusStrip" role="tablist" aria-label="Inbox account focus filter"></div>
+
+          <div class="inbox-filter-row">
+            <div class="cat-tabs" id="catTabs">
+              <button type="button" class="cat-tab active" data-cat="all">All</button>
+              <button type="button" class="cat-tab" data-cat="people">People <span class="cat-tab-num tabular" id="catPeopleCount">3</span></button>
+              <button type="button" class="cat-tab" data-cat="updates">Updates <span class="cat-tab-num tabular" id="catUpdatesCount">1</span></button>
+            </div>
+            <button type="button" class="sort-chip" aria-label="Sort by date">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 6h18M7 12h10M11 18h2"></path></svg>
+              Date
+            </button>
+          </div>
+
+          <div class="thread-scroll" id="threadListContainer"></div>
+
+          <div class="undo-snackbar" id="inboxUndoSnack" role="status" aria-live="polite">
+            <span class="undo-msg" id="inboxUndoMsg">Sending reply to Maya Okafor…</span>
+            <button type="button" class="undo-fuse-btn" id="inboxUndoBtn">
+              <svg class="undo-fuse-svg" viewBox="0 0 72 30" preserveAspectRatio="none" aria-hidden="true">
+                <rect x="1" y="1" width="70" height="28" rx="7" fill="none" stroke="var(--border-strong)" stroke-width="1.5" opacity="0.35"></rect>
+                <rect x="1" y="1" width="70" height="28" rx="7" pathLength="100" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" class="undo-fuse-stroke" id="inboxFuseRect"></rect>
+              </svg>
+              <span>Undo</span>
+            </button>
+          </div>
+
+          <button type="button" class="m3-fab" id="inboxFab" aria-label="Compose email">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
+            Compose
+          </button>
+
+          <nav class="m3-nav-bar" aria-label="Primary navigation">
+            <div class="m3-nav-row">
+              <div class="m3-nav-item active">
+                <div class="m3-nav-indicator"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg></div>
+                <span>Mail</span>
+              </div>
+              <div class="m3-nav-item">
+                <div class="m3-nav-indicator"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18"></path></svg></div>
+                <span>Calendar</span>
+              </div>
+              <div class="m3-nav-item">
+                <div class="m3-nav-indicator"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"></path></svg></div>
+                <span>Brief</span>
+              </div>
+              <div class="m3-nav-item">
+                <div class="m3-nav-indicator"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg></div>
+                <span>Search</span>
+              </div>
+            </div>
+            <div class="gesture-bar-wrap"><span class="gesture-pill"></span></div>
+          </nav>
+        </div></figure>
+      </section>
+
+      <!-- FRAME 2: THREAD READER (WITH AI DRAFT READY) -->
+      <section class="screen-column" aria-label="Thread Reader Screen">
+        <div class="screen-caption">
+          <h2>Thread Reader</h2>
+          <span>AI Draft Ready · Voice pills</span>
+        </div>
+        <figure class="phone-frame"><div class="phone-viewport">
+          <div class="status-bar">
+            <span class="tabular">9:41</span>
+            <span class="camera-punch" aria-hidden="true"></span>
+            <div class="status-icons" aria-hidden="true">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><circle cx="12" cy="19.5" r="1" fill="currentColor"></circle></svg>
+              <svg width="16" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="17" height="10" rx="2"></rect><rect x="4.5" y="9.5" width="10" height="5" rx="0.8" fill="currentColor" stroke="none"></rect><path d="M21 10v4"></path></svg>
+            </div>
+          </div>
+
+          <div class="top-app-bar" style="border-bottom: 1px solid var(--border-subtle);">
+            <div class="top-bar-left">
+              <button type="button" class="icon-btn" aria-label="Back to inbox">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg>
+              </button>
+            </div>
+            <div class="top-bar-right">
+              <button type="button" class="icon-btn" aria-label="Archive">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="5" x="2" y="3" rx="1"></rect><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path><path d="M10 12h4"></path></svg>
+              </button>
+              <button type="button" class="icon-btn" aria-label="Snooze">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
+              </button>
+              <button type="button" class="icon-btn" aria-label="Move to folder">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-1"></path><path d="M2 13h10"></path><path d="m9 16 3-3-3-3"></path></svg>
+              </button>
+              <button type="button" class="icon-btn" aria-label="Delete">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="reader-scroll">
+            <div style="padding-top:4px;">
+              <div class="reader-subject-row">
+                <h3 class="reader-subject">Q4 roadmap: final review before Thursday</h3>
+                <button type="button" class="icon-btn" aria-label="Starred">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="#f5b841" stroke="#f5b841" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+                </button>
+              </div>
+
+              <div class="reader-meta-pills">
+                <span class="meta-pill">
+                  <span class="acc-badge xs" style="background:#3B82F6;color:#fff;">
+                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="7" width="20" height="14" rx="2"></rect><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"></path></svg>
+                  </span>
+                  Work · alex@northwind.co
+                </span>
+                <span class="meta-pill shield">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"></path><path d="m9 12 2 2 4-4"></path></svg>
+                  3 trackers blocked
+                </span>
+              </div>
+            </div>
+
+            <button type="button" class="collapsed-msg" id="collapsedEarlierBtn">
+              <div class="collapsed-left">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2.2"><path d="m9 18 6-6-6-6"></path></svg>
+                <span class="mini-avatar">AR</span>
+                <div style="min-width:0;">
+                  <div style="font-size:12.5px;font-weight:600;color:var(--text-primary);">Alex Rivera</div>
+                  <div style="font-size:12px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Sharing the updated Q4 milestone table…</div>
+                </div>
+              </div>
+              <span class="tabular" style="font-size:12px;color:var(--text-muted);flex-shrink:0;">Nov 24</span>
+            </button>
+
+            <article class="expanded-msg">
+              <div class="msg-hdr">
+                <div class="msg-hdr-left">
+                  <div class="sender-avatar" style="width:34px;height:34px;font-size:12px;">MO</div>
+                  <div style="min-width:0;">
+                    <div class="msg-sender">Maya Okafor</div>
+                    <div class="msg-email">maya@northwind.co · to Alex</div>
+                  </div>
+                </div>
+                <span class="tabular" style="font-size:12px;color:var(--text-muted);">9:18 AM</span>
+              </div>
+
+              <div class="msg-prose">
+                <p>Hi Alex,</p>
+                <p>I folded in feedback from design and support. My recommendation is to ship the importer first and move the migration window two weeks later to stay clear of the release freeze.</p>
+                <p>Can you confirm section 3 before Thursday's 10:30 AM review?</p>
+              </div>
+
+              <div class="att-chip">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent-text)" stroke-width="2.1" stroke-linecap="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>
+                <span>Q4-roadmap-v7.pdf</span>
+                <span class="att-size">689 KB</span>
+              </div>
+            </article>
+
+            <!-- Inline AI Draft Ready Band -->
+            <section class="ai-draft-band" aria-label="AI Draft Ready">
+              <div class="ai-draft-top">
+                <span class="ai-draft-title">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"></path></svg>
+                  AI Draft Ready
+                  <span class="ai-draft-src">· Companion AI</span>
+                </span>
+              </div>
+              <div class="voice-pills" id="voicePills">
+                <button type="button" class="voice-pill active" data-voice="colleague">Colleague</button>
+                <button type="button" class="voice-pill" data-voice="executive">Executive</button>
+                <button type="button" class="voice-pill" data-voice="personal">Warm</button>
+              </div>
+              <textarea class="ai-draft-textarea" id="aiDraftText" aria-label="AI Draft Ready text">Hi Maya — splitting the importer and migration makes sense. I'll review section 3 today before our 10:30 Thursday review. — Alex</textarea>
+              <div class="ai-draft-actions">
+                <button type="button" class="btn-primary-sm" id="aiDraftSendBtn">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"></path><path d="M22 2 11 13"></path></svg>
+                  Send
+                </button>
+                <button type="button" class="btn-secondary-sm" id="aiDraftEditBtn">
+                  Edit in Composer
+                </button>
+              </div>
+            </section>
+          </div>
+
+          <div class="undo-snackbar reader-pos" id="readerUndoSnack" role="status" aria-live="polite">
+            <span class="undo-msg">Sending reply to Maya Okafor…</span>
+            <button type="button" class="undo-fuse-btn" id="readerUndoBtn">
+              <svg class="undo-fuse-svg" viewBox="0 0 72 30" preserveAspectRatio="none" aria-hidden="true">
+                <rect x="1" y="1" width="70" height="28" rx="7" fill="none" stroke="var(--border-strong)" stroke-width="1.5" opacity="0.35"></rect>
+                <rect x="1" y="1" width="70" height="28" rx="7" pathLength="100" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" class="undo-fuse-stroke" id="readerFuseRect"></rect>
+              </svg>
+              <span>Undo</span>
+            </button>
+          </div>
+
+          <div class="quick-reply-bar">
+            <button type="button" class="quick-reply-pill">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"></polyline><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg>
+              Quick reply to Maya…
+            </button>
+            <button type="button" class="icon-btn" aria-label="Reply all">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 17 2 12 7 7"></polyline><polyline points="12 17 7 12 12 7"></polyline><path d="M22 18v-2a4 4 0 0 0-4-4H7"></path></svg>
+            </button>
+            <button type="button" class="icon-btn" aria-label="Forward">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 17 20 12 15 7"></polyline><path d="M4 18v-2a4 4 0 0 1 4-4h12"></path></svg>
+            </button>
+          </div>
+          <div class="gesture-bar-wrap" style="background:var(--bg-nav);"><span class="gesture-pill"></span></div>
+        </div></figure>
+      </section>
+
+      <!-- FRAME 3: COMPOSER SHEET -->
+      <section class="screen-column" aria-label="Composer Sheet Screen">
+        <div class="screen-caption">
+          <h2>Composer Sheet</h2>
+          <span>From accent · AI tone chips</span>
+        </div>
+        <figure class="phone-frame"><div class="phone-viewport">
+          <div class="status-bar" id="composerStatusBar">
+            <span class="tabular">9:41</span>
+            <span class="camera-punch" aria-hidden="true"></span>
+            <div class="status-icons" aria-hidden="true">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><circle cx="12" cy="19.5" r="1" fill="currentColor"></circle></svg>
+              <svg width="16" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="17" height="10" rx="2"></rect><rect x="4.5" y="9.5" width="10" height="5" rx="0.8" fill="currentColor" stroke="none"></rect><path d="M21 10v4"></path></svg>
+            </div>
+          </div>
+
+          <div class="composer-hairline" id="composerHairline" style="background:#3B82F6;"></div>
+
+          <div class="composer-top" id="composerHeaderTint" style="background:linear-gradient(90deg, color-mix(in srgb, #3B82F6 11%, var(--bg-elevated)) 0%, var(--bg-elevated) 60%);">
+            <div class="top-bar-left">
+              <button type="button" class="icon-btn" aria-label="Close composer">
+                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"></path></svg>
+              </button>
+              <span class="composer-mode-title">Reply</span>
+              <span class="composer-saved">Saved</span>
+            </div>
+            <div class="top-bar-right" style="gap:4px;">
+              <button type="button" class="icon-btn" id="scheduleToggleBtn" aria-label="Schedule send" title="Toggle Schedule Send">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
+              </button>
+              <button type="button" class="send-cta" id="composerSendBtn">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"></path><path d="M22 2 11 13"></path></svg>
+                <span id="composerSendLabel">Send</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="field-row">
+            <span class="field-label">From</span>
+            <button type="button" class="from-picker-btn" id="fromSwitcherBtn" title="Tap to switch sending account">
+              <span class="from-picker-left">
+                <span class="acc-badge sm" id="fromBadge" style="background:#3B82F6;color:#fff;">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="7" width="20" height="14" rx="2"></rect><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"></path></svg>
+                </span>
+                <span class="from-name" id="fromName">Work</span>
+                <span class="from-email" id="fromEmail">alex@northwind.co</span>
+              </span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2.2"><path d="m6 9 6 6 6-6"></path></svg>
+            </button>
+          </div>
+
+          <div class="field-row">
+            <span class="field-label">To</span>
+            <div style="flex:1;display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
+              <span class="recip-chip">
+                Maya Okafor
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2.3"><path d="M18 6 6 18M6 6l12 12"></path></svg>
+              </span>
+            </div>
+            <button type="button" class="cc-toggle">Cc/Bcc</button>
+          </div>
+
+          <div class="subject-row">Re: Q4 roadmap: final review before Thursday</div>
+
+          <div class="schedule-banner" id="scheduleBanner">
+            <span style="display:inline-flex;align-items:center;gap:6px;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
+              Scheduled · Tomorrow, 8:00 AM
+            </span>
+            <button type="button" id="clearScheduleBtn" style="font-size:12px;font-weight:600;text-decoration:underline;">Clear</button>
+          </div>
+
+          <div class="composer-body-area">
+            <textarea class="composer-textarea" id="composerBody" aria-label="Message body">Hi Maya,
+
+Splitting the importer and the migration window makes complete sense — keeping the release freeze clean is the right call.
+
+I'll review section 3 this afternoon and leave inline comments before Thursday's 10:30 AM walkthrough.
+
+Thanks,
+Alex</textarea>
+
+            <div class="quoted-pill">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="5" cy="12" r="1.2" fill="currentColor"></circle><circle cx="12" cy="12" r="1.2" fill="currentColor"></circle><circle cx="19" cy="12" r="1.2" fill="currentColor"></circle></svg>
+              Quoted message from Maya Okafor
+            </div>
+          </div>
+
+          <div class="ai-tone-bar" id="aiToneBar">
+            <span style="display:inline-flex;align-items:center;color:var(--accent-text);padding-left:2px;" aria-hidden="true">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"></path></svg>
+            </span>
+            <button type="button" class="tone-chip" data-tone="shorter">Shorter</button>
+            <button type="button" class="tone-chip" data-tone="warmer">Warmer</button>
+            <button type="button" class="tone-chip active" data-tone="polish">Polish</button>
+            <button type="button" class="tone-chip" data-tone="executive">Executive</button>
+          </div>
+
+          <div class="fmt-toolbar">
+            <div class="fmt-group">
+              <button type="button" class="fmt-btn" aria-label="Bold">B</button>
+              <button type="button" class="fmt-btn" style="font-style:italic;" aria-label="Italic">I</button>
+              <button type="button" class="fmt-btn" aria-label="Bulleted list">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"></path></svg>
+              </button>
+              <button type="button" class="fmt-btn" aria-label="Insert link">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
+              </button>
+            </div>
+            <div class="fmt-group">
+              <button type="button" class="fmt-btn" aria-label="Attach file">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>
+              </button>
+              <button type="button" class="fmt-btn" aria-label="Insert snippet">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+              </button>
+            </div>
+          </div>
+          <div class="gesture-bar-wrap" style="background:var(--bg-nav);"><span class="gesture-pill"></span></div>
+        </div></figure>
+      </section>
+
+      <!-- FRAME 4: COMBINED CALENDAR (COUPLED WITH FOCUS PILLS) -->
+      <section class="screen-column" aria-label="Combined Calendar Screen">
+        <div class="screen-caption">
+          <h2>Combined Calendar</h2>
+          <span>Coupled Focus · Merged toggle</span>
+        </div>
+        <figure class="phone-frame"><div class="phone-viewport">
+          <div class="status-bar">
+            <span class="tabular">9:41</span>
+            <span class="camera-punch" aria-hidden="true"></span>
+            <div class="status-icons" aria-hidden="true">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><circle cx="12" cy="19.5" r="1" fill="currentColor"></circle></svg>
+              <svg width="16" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="17" height="10" rx="2"></rect><rect x="4.5" y="9.5" width="10" height="5" rx="0.8" fill="currentColor" stroke="none"></rect><path d="M21 10v4"></path></svg>
+            </div>
+          </div>
+
+          <div class="top-app-bar">
+            <div class="top-bar-left" style="padding-left:10px;">
+              <span class="app-bar-title">Nov 2026</span>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2.2" style="margin-left:3px;"><path d="m6 9 6 6 6-6"></path></svg>
+            </div>
+            <div class="top-bar-right" style="gap:2px;">
+              <button type="button" class="sort-chip" style="border:1px solid var(--border-strong);color:var(--text-primary);">Today</button>
+              <button type="button" class="icon-btn" aria-label="New event">
+                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Synchronized Multi-Account Focus Pill Strip -->
+          <div class="focus-strip" id="calFocusStrip" role="tablist" aria-label="Calendar account focus filter"></div>
+
+          <div class="cal-controls-bar">
+            <div class="cal-mode-seg" id="calModeSeg">
+              <button type="button" class="cal-mode-btn active" data-cal-mode="agenda">Agenda</button>
+              <button type="button" class="cal-mode-btn" data-cal-mode="3day">3-Day</button>
+            </div>
+            <button type="button" class="merge-pill active" id="mergeToggleBtn" aria-pressed="true" title="Toggle duplicate event merging across accounts">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+              <span id="mergeToggleLabel">Merged</span>
+            </button>
+          </div>
+
+          <div class="week-strip">
+            <div class="day-cell"><span class="day-dow">M</span><span class="day-num tabular">23</span><div class="day-dots"><span class="day-dot" style="background:#3B82F6"></span></div></div>
+            <div class="day-cell"><span class="day-dow">T</span><span class="day-num tabular">24</span><div class="day-dots"><span class="day-dot" style="background:#3B82F6"></span><span class="day-dot" style="background:#34C77B"></span></div></div>
+            <div class="day-cell"><span class="day-dow">W</span><span class="day-num tabular">25</span><div class="day-dots"><span class="day-dot" style="background:#E87A48"></span></div></div>
+            <div class="day-cell today"><span class="day-dow" style="color:var(--accent-text);">T</span><span class="day-num tabular">26</span><div class="day-dots"><span class="day-dot" style="background:#3B82F6"></span><span class="day-dot" style="background:#34C77B"></span><span class="day-dot" style="background:#E87A48"></span></div></div>
+            <div class="day-cell"><span class="day-dow">F</span><span class="day-num tabular">27</span><div class="day-dots"><span class="day-dot" style="background:#3B82F6"></span></div></div>
+            <div class="day-cell"><span class="day-dow">S</span><span class="day-num tabular">28</span><div class="day-dots"><span class="day-dot" style="background:#E87A48"></span></div></div>
+            <div class="day-cell"><span class="day-dow">S</span><span class="day-num tabular">29</span><div class="day-dots"></div></div>
+          </div>
+
+          <div class="allday-strip" id="allDayStrip">
+            <span class="allday-label">ALL DAY</span>
+            <div class="allday-chip">
+              <span class="acc-badge xs" style="background:#3B82F6;color:#fff;width:14px;height:14px;">
+                <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><rect x="2" y="7" width="20" height="14" rx="2"></rect></svg>
+              </span>
+              <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Q4 Design Freeze</span>
+            </div>
+          </div>
+
+          <div class="cal-body" id="calBodyContainer"></div>
+
+          <section class="event-sheet" aria-label="Event detail bottom sheet">
+            <div class="sheet-handle-row"><span class="sheet-handle"></span></div>
+            <div class="event-sheet-content">
+              <div class="event-sheet-title">
+                <span style="width:9px;height:9px;border-radius:9999px;background:#3B82F6;flex-shrink:0;"></span>
+                <span>Q4 Roadmap Final Review</span>
+              </div>
+              <div class="event-sheet-time tabular">Thu, Nov 26 · 10:30 – 11:15 AM (45 min)</div>
+              <div class="event-sheet-actions">
+                <button type="button" class="join-btn">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"></path><rect x="2" y="6" width="14" height="12" rx="2"></rect></svg>
+                  Join Meeting
+                </button>
+                <button type="button" class="copy-link-btn" aria-label="Copy meeting link">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1"><rect width="14" height="14" x="8" y="8" rx="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>
+                </button>
+              </div>
+              <div class="event-meta-list">
+                <div class="event-meta-row">
+                  <span class="occ-dots"><span class="occ-dot" style="background:#3B82F6"></span><span class="occ-dot" style="background:#34C77B"></span></span>
+                  <span>Merged · Work &amp; Studio calendars</span>
+                </div>
+                <div class="event-meta-row">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2.1"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                  <span>Maya Okafor, Devon Park, Alex Rivera (3)</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <nav class="m3-nav-bar" aria-label="Primary navigation">
+            <div class="m3-nav-row">
+              <div class="m3-nav-item">
+                <div class="m3-nav-indicator"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg></div>
+                <span>Mail</span>
+              </div>
+              <div class="m3-nav-item active">
+                <div class="m3-nav-indicator"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18"></path></svg></div>
+                <span>Calendar</span>
+              </div>
+              <div class="m3-nav-item">
+                <div class="m3-nav-indicator"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"></path></svg></div>
+                <span>Brief</span>
+              </div>
+              <div class="m3-nav-item">
+                <div class="m3-nav-indicator"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg></div>
+                <span>Search</span>
+              </div>
+            </div>
+            <div class="gesture-bar-wrap"><span class="gesture-pill"></span></div>
+          </nav>
+        </div></figure>
+      </section>
+    </div>
+  </main>
+
+  <footer class="board-footer">
+    <span>EveryBox Android Design Preview · Synthetic demo data (Alex Rivera) · WCAG AA contrast verified across all 5 themes</span>
+    <span>Touch targets >= 48dp · Edge-safe swipe zone (36dp inset) · Material 3 Operate mode</span>
+  </footer>
+
+  <script>
+    const ACCOUNTS = [
+      {
+        id: 'work',
+        name: 'Work',
+        email: 'alex@northwind.co',
+        color: '#3B82F6',
+        ink: '#ffffff',
+        iconSvg: '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="7" width="20" height="14" rx="2"></rect><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"></path></svg>'
+      },
+      {
+        id: 'studio',
+        name: 'Studio',
+        email: 'alex@foundry.studio',
+        color: '#34C77B',
+        ink: '#0b1220',
+        iconSvg: '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"></path><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"></path></svg>'
+      },
+      {
+        id: 'personal',
+        name: 'Personal',
+        email: 'alex.rivera@gmail.com',
+        color: '#E87A48',
+        ink: '#ffffff',
+        iconSvg: '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>'
+      }
+    ];
+
+    const THREADS = [
+      {
+        id: 't1',
+        group: 'Today',
+        accountId: 'work',
+        sender: 'Maya Okafor',
+        initials: 'MO',
+        subject: 'Q4 roadmap: final review before Thursday',
+        snippet: 'My recommendation is to ship the importer first and move migration two weeks later…',
+        time: '9:18 AM',
+        unread: true,
+        category: 'people',
+        count: 2,
+        hasAiDraft: true,
+        hasAttachment: true,
+        replied: false
+      },
+      {
+        id: 't2',
+        group: 'Today',
+        accountId: 'personal',
+        sender: 'CloudVault Security',
+        initials: 'CV',
+        subject: 'Your sign-in verification code',
+        snippet: 'Enter this one-time code to finish signing in on your Android device.',
+        time: '8:54 AM',
+        unread: true,
+        category: 'updates',
+        count: 1,
+        signInCode: '482 917',
+        replied: false
+      },
+      {
+        id: 't3',
+        group: 'Today',
+        accountId: 'studio',
+        sender: 'Devon Park',
+        initials: 'DP',
+        subject: 'Brand guidelines PDF & Android icon grid',
+        snippet: 'You: Looks crisp — let’s lock the 48dp adaptive mask before Friday.',
+        time: '8:12 AM',
+        unread: false,
+        category: 'people',
+        count: 4,
+        hasAttachment: true,
+        replied: true
+      },
+      {
+        id: 't4',
+        group: 'Today',
+        accountId: 'work',
+        sender: 'Priya Nair',
+        initials: 'PN',
+        subject: 'Customer onboarding checklist updates',
+        snippet: 'Added the IMAP preset auto-detection flow for Fastmail and iCloud accounts.',
+        time: '7:40 AM',
+        unread: true,
+        category: 'people',
+        count: 3,
+        hasAiDraft: true,
+        replied: false
+      },
+      {
+        id: 't5',
+        group: 'Yesterday',
+        accountId: 'personal',
+        sender: 'Jordan Morales',
+        initials: 'JM',
+        subject: 'Weekend dinner & airport pickup timing',
+        snippet: 'Flight lands at 4:25 PM Terminal B — text me when you head over!',
+        time: 'Nov 25',
+        unread: true,
+        category: 'people',
+        count: 2,
+        replied: false
+      },
+      {
+        id: 't6',
+        group: 'Yesterday',
+        accountId: 'studio',
+        sender: 'Stripe Payouts',
+        initials: 'SP',
+        subject: 'Monthly payout summary — November',
+        snippet: 'Your transfer of $4,820.00 is scheduled to arrive in your checking account.',
+        time: 'Nov 25',
+        unread: false,
+        category: 'updates',
+        count: 1,
+        replied: false
+      }
+    ];
+
+    const VOICE_DRAFTS = {
+      colleague: "Hi Maya — splitting the importer and migration makes sense. I'll review section 3 today before our 10:30 Thursday review. — Alex",
+      executive: "Maya — agreed on splitting importer and migration to protect the freeze. I'll sign off on section 3 today ahead of Thursday 10:30. — Alex",
+      personal: "Hey Maya! Splitting the importer first sounds super smart — I'll read section 3 this afternoon so we're ready for Thursday! — Alex"
+    };
+
+    const COMPOSER_TONES = {
+      polish: "Hi Maya,\n\nSplitting the importer and the migration window makes complete sense — keeping the release freeze clean is the right call.\n\nI'll review section 3 this afternoon and leave inline comments before Thursday's 10:30 AM walkthrough.\n\nThanks,\nAlex",
+      shorter: "Hi Maya,\n\nAgreed on splitting the importer and migration. I'll review section 3 today and share notes before Thursday at 10:30.\n\nThanks,\nAlex",
+      warmer: "Hi Maya,\n\nReally appreciate you folding in the design and support feedback so quickly! Splitting the importer first feels like the calmest path.\n\nI'll take a careful look at section 3 this afternoon and come ready for Thursday's 10:30 walkthrough.\n\nWarmly,\nAlex",
+      executive: "Maya,\n\nApproved: ship importer first, defer migration two weeks past freeze. Section 3 feedback incoming today before Thursday 10:30.\n\nAlex"
+    };
+
+    const CAL_EVENTS = [
+      {
+        id: 'e1',
+        day: 'thu',
+        title: 'Q4 Roadmap Final Review',
+        start: '10:30 AM',
+        dur: '45 min',
+        location: 'Google Meet · 3 guests',
+        accounts: ['work', 'studio']
+      },
+      {
+        id: 'e2',
+        day: 'thu',
+        title: 'Android Icon & Contrast Pass',
+        start: '1:00 PM',
+        dur: '30 min',
+        location: 'Studio Huddle',
+        accounts: ['studio']
+      },
+      {
+        id: 'e3',
+        day: 'thu',
+        title: 'Dentist Checkup',
+        start: '4:15 PM',
+        dur: '45 min',
+        location: '214 Cedar St',
+        accounts: ['personal']
+      }
+    ];
+
+    const FUTURE_3DAY = [
+      { day: 'Fri 27', title: 'Sprint Demo', start: '11:00 AM', accountId: 'work' },
+      { day: 'Fri 27', title: 'Client Sync', start: '2:30 PM', accountId: 'studio' },
+      { day: 'Sat 28', title: 'Airport Pickup', start: '4:25 PM', accountId: 'personal' }
+    ];
+
+    let state = {
+      theme: 'dark',
+      rowStyle: 'gradient',
+      focusAccount: 'all',
+      category: 'all',
+      composerAccountIdx: 0,
+      calMode: 'agenda',
+      calMerged: true
+    };
+
+    const accById = (id) => ACCOUNTS.find((a) => a.id === id) || ACCOUNTS[0];
+
+    function setFocusAccount(id) {
+      state.focusAccount = state.focusAccount === id && id !== 'all' ? 'all' : id;
+      renderAllFocusStrips();
+      renderThreads();
+      renderCalendar();
+    }
+
+    function renderFocusStripInto(el, showCounts) {
+      const totalUnread = THREADS.filter((t) => t.unread).length;
+      const pills = [
+        `<button type="button" class="focus-pill ${state.focusAccount === 'all' ? 'active' : ''}" data-focus="all" role="tab" aria-selected="${state.focusAccount === 'all'}">
+          <span>All</span>
+          ${showCounts ? `<span class="focus-pill-count tabular">${totalUnread}</span>` : ''}
+        </button>`
+      ];
+
+      for (const acc of ACCOUNTS) {
+        const unread = THREADS.filter((t) => t.accountId === acc.id && t.unread).length;
+        const active = state.focusAccount === acc.id;
+        pills.push(
+          `<button type="button" class="focus-pill ${active ? 'active' : ''}" data-focus="${acc.id}" style="--pill-color:${acc.color};" role="tab" aria-selected="${active}">
+            <span class="acc-badge xs" style="background:${acc.color};color:${acc.ink};">${acc.iconSvg}</span>
+            <span>${acc.name}</span>
+            ${showCounts && unread > 0 ? `<span class="focus-pill-count tabular">${unread}</span>` : ''}
+          </button>`
+        );
+      }
+
+      el.innerHTML = pills.join('');
+      el.querySelectorAll('.focus-pill').forEach((btn) => {
+        btn.addEventListener('click', () => setFocusAccount(btn.getAttribute('data-focus')));
+      });
+    }
+
+    function renderAllFocusStrips() {
+      renderFocusStripInto(document.getElementById('focusStrip'), true);
+      renderFocusStripInto(document.getElementById('calFocusStrip'), false);
+    }
+
+    function renderThreads() {
+      const container = document.getElementById('threadListContainer');
+      const scoped = THREADS.filter((t) => state.focusAccount === 'all' || t.accountId === state.focusAccount);
+      const peopleUnread = scoped.filter((t) => t.category === 'people' && t.unread).length;
+      const updatesUnread = scoped.filter((t) => t.category === 'updates' && t.unread).length;
+      const totalUnread = scoped.filter((t) => t.unread).length;
+
+      document.getElementById('inboxUnreadCount').textContent = `${totalUnread} unread`;
+      document.getElementById('catPeopleCount').textContent = peopleUnread;
+      document.getElementById('catUpdatesCount').textContent = updatesUnread;
+
+      const filtered = scoped.filter((t) => state.category === 'all' || t.category === state.category);
+      if (filtered.length === 0) {
+        container.innerHTML = `
+          <div style="padding:48px 20px;text-align:center;">
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary);">All clear here</div>
+            <div style="font-size:12.5px;color:var(--text-muted);margin-top:4px;">No conversations match this account and filter.</div>
+            <button type="button" id="resetFiltersBtn" style="margin-top:12px;padding:7px 14px;border-radius:9999px;background:var(--accent-soft);color:var(--accent-text);font-size:12.5px;font-weight:600;">Show all accounts</button>
+          </div>`;
+        const resetBtn = document.getElementById('resetFiltersBtn');
+        if (resetBtn) {
+          resetBtn.addEventListener('click', () => {
+            state.focusAccount = 'all';
+            state.category = 'all';
+            updateCatTabs();
+            renderAllFocusStrips();
+            renderThreads();
+            renderCalendar();
+          });
+        }
+        return;
+      }
+
+      const groups = {};
+      for (const t of filtered) {
+        if (!groups[t.group]) groups[t.group] = [];
+        groups[t.group].push(t);
+      }
+
+      const showTint = state.focusAccount === 'all';
+      const effectiveStyle = showTint ? state.rowStyle : 'dot';
+
+      let html = '';
+      for (const [label, list] of Object.entries(groups)) {
+        html += `
+          <div class="date-group-hdr">
+            <span class="date-group-hdr-left">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m6 9 6 6 6-6"></path></svg>
+              ${label}
+            </span>
+            <span class="tabular" style="font-size:12px;color:var(--text-muted);">${list.length}</span>
+          </div>`;
+
+        for (const t of list) {
+          const acc = accById(t.accountId);
+          html += `
+            <div class="thread-row ${t.unread ? 'unread' : ''}" data-row-style="${effectiveStyle}" style="--row-acc:${acc.color};">
+              ${showTint ? '<span class="row-acc-pill" aria-hidden="true"></span>' : ''}
+              <div class="unread-slot">${t.unread ? '<span class="unread-dot" aria-label="Unread"></span>' : ''}</div>
+              <div class="avatar-wrap">
+                <div class="sender-avatar">${t.initials}</div>
+                ${showTint ? `<span class="acc-badge xs avatar-acc-badge" style="background:${acc.color};color:${acc.ink};" title="${acc.email}">${acc.iconSvg}</span>` : ''}
+              </div>
+              <div class="thread-body">
+                <div class="thread-line1">
+                  <div class="sender-cluster">
+                    ${t.replied ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent-text)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;" aria-label="Replied"><polyline points="9 17 4 12 9 7"></polyline><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg>' : ''}
+                    <span class="sender-name">${t.sender}</span>
+                    ${t.count > 1 ? `<span class="msg-count tabular">${t.count}</span>` : ''}
+                  </div>
+                  <div class="meta-cluster">
+                    ${t.hasAiDraft ? '<span class="ai-spark-tag" title="AI Draft Ready"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"></path></svg></span>' : ''}
+                    ${t.hasAttachment ? '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2.2"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>' : ''}
+                    <span class="row-time tabular">${t.time}</span>
+                  </div>
+                </div>
+                <div class="thread-subject">${t.subject}</div>
+                <div class="thread-snippet">${t.snippet}</div>
+                ${t.signInCode ? `
+                  <button type="button" class="code-copy-pill" data-code="${t.signInCode}">
+                    <span>${t.signInCode}</span>
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><rect width="14" height="14" x="8" y="8" rx="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>
+                  </button>` : ''}
+              </div>
+            </div>`;
+        }
+      }
+      container.innerHTML = html;
+
+      container.querySelectorAll('.code-copy-pill').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const code = btn.getAttribute('data-code');
+          btn.classList.add('copied');
+          btn.querySelector('span').textContent = 'Copied ' + code;
+          setTimeout(() => {
+            btn.classList.remove('copied');
+            btn.querySelector('span').textContent = code;
+          }, 1600);
+        });
+      });
+    }
+
+    function renderCalendar() {
+      const container = document.getElementById('calBodyContainer');
+      const allDayStrip = document.getElementById('allDayStrip');
+      // All-day event belongs to Work; obeys coupled Focus Strip
+      allDayStrip.style.display = (state.focusAccount === 'all' || state.focusAccount === 'work') ? 'flex' : 'none';
+
+      const expanded = [];
+      for (const ev of CAL_EVENTS) {
+        const matchingAccs = state.focusAccount === 'all'
+          ? ev.accounts
+          : ev.accounts.filter((a) => a === state.focusAccount);
+        if (matchingAccs.length === 0) continue;
+
+        if (state.calMerged || matchingAccs.length === 1) {
+          expanded.push({ ...ev, displayAccs: matchingAccs });
+        } else {
+          for (const aId of matchingAccs) {
+            expanded.push({ ...ev, displayAccs: [aId], splitLabel: accById(aId).name });
+          }
+        }
+      }
+
+      if (state.calMode === '3day') {
+        const fri = FUTURE_3DAY.filter((e) => e.day === 'Fri 27' && (state.focusAccount === 'all' || e.accountId === state.focusAccount));
+        const sat = FUTURE_3DAY.filter((e) => e.day === 'Sat 28' && (state.focusAccount === 'all' || e.accountId === state.focusAccount));
+        container.innerHTML = `
+          <div class="threeday-grid">
+            <div class="threeday-col">
+              <div class="threeday-col-hdr"><span style="color:var(--accent-text);">Thu 26</span></div>
+              ${expanded.map((ev) => {
+                const lead = accById(ev.displayAccs[0]);
+                return `<div class="mini-ev" style="--ev-color:${lead.color};">
+                  <div class="mini-ev-t">${ev.title}</div>
+                  <div class="mini-ev-h tabular">${ev.start}${ev.splitLabel ? ' · ' + ev.splitLabel : ''}</div>
+                </div>`;
+              }).join('')}
+            </div>
+            <div class="threeday-col">
+              <div class="threeday-col-hdr"><span>Fri 27</span></div>
+              ${fri.map((ev) => `<div class="mini-ev" style="--ev-color:${accById(ev.accountId).color};"><div class="mini-ev-t">${ev.title}</div><div class="mini-ev-h tabular">${ev.start}</div></div>`).join('')}
+            </div>
+            <div class="threeday-col">
+              <div class="threeday-col-hdr"><span>Sat 28</span></div>
+              ${sat.map((ev) => `<div class="mini-ev" style="--ev-color:${accById(ev.accountId).color};"><div class="mini-ev-t">${ev.title}</div><div class="mini-ev-h tabular">${ev.start}</div></div>`).join('')}
+            </div>
+          </div>`;
+        return;
+      }
+
+      let html = `
+        <div class="now-line">
+          <span class="now-dot"></span>
+          <span class="now-rule"></span>
+          <span class="now-time tabular">9:41 AM</span>
+        </div>`;
+
+      for (const ev of expanded) {
+        const lead = accById(ev.displayAccs[0]);
+        html += `
+          <div class="agenda-item">
+            <div class="agenda-time-col">
+              <div class="agenda-start tabular">${ev.start}</div>
+              <div class="agenda-dur tabular">${ev.dur}</div>
+            </div>
+            <div class="agenda-row-block" style="--ev-color:${lead.color};">
+              <div class="agenda-card-top">
+                <div class="agenda-title">${ev.title}</div>
+                <span class="occ-dots">
+                  ${ev.displayAccs.map((id) => `<span class="occ-dot" style="background:${accById(id).color};"></span>`).join('')}
+                </span>
+              </div>
+              <div class="agenda-sub">
+                <span>${ev.location}${ev.splitLabel ? ' · ' + ev.splitLabel : ''}</span>
+              </div>
+            </div>
+          </div>`;
+      }
+      container.innerHTML = html;
+    }
+
+    let undoTimer = null;
+    function showUndoFuse(snackId, fuseId, liftFab) {
+      const snack = document.getElementById(snackId);
+      const fuse = document.getElementById(fuseId);
+      const fab = document.getElementById('inboxFab');
+      fuse.classList.remove('undo-fuse-stroke');
+      void fuse.offsetWidth;
+      fuse.classList.add('undo-fuse-stroke');
+      snack.classList.add('visible');
+      if (liftFab) fab.classList.add('lifted');
+
+      clearTimeout(undoTimer);
+      undoTimer = setTimeout(() => {
+        snack.classList.remove('visible');
+        if (liftFab) fab.classList.remove('lifted');
+      }, 5000);
+    }
+
+    function updateCatTabs() {
+      document.querySelectorAll('#catTabs .cat-tab').forEach((b) => {
+        b.classList.toggle('active', b.getAttribute('data-cat') === state.category);
+      });
+    }
+
+    document.querySelectorAll('[data-set-theme]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        state.theme = btn.getAttribute('data-set-theme');
+        document.documentElement.setAttribute('data-theme', state.theme);
+        document.querySelectorAll('[data-set-theme]').forEach((b) => b.classList.toggle('active', b === btn));
+      });
+    });
+
+    document.querySelectorAll('[data-set-row-style]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        state.rowStyle = btn.getAttribute('data-set-row-style');
+        document.querySelectorAll('[data-set-row-style]').forEach((b) => b.classList.toggle('active', b === btn));
+        renderThreads();
+      });
+    });
+
+    document.querySelectorAll('#catTabs .cat-tab').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        state.category = btn.getAttribute('data-cat');
+        updateCatTabs();
+        renderThreads();
+      });
+    });
+
+    document.getElementById('triggerUndoDemo').addEventListener('click', () => {
+      showUndoFuse('inboxUndoSnack', 'inboxFuseRect', true);
+    });
+
+    document.getElementById('inboxUndoBtn').addEventListener('click', () => {
+      document.getElementById('inboxUndoSnack').classList.remove('visible');
+      document.getElementById('inboxFab').classList.remove('lifted');
+    });
+
+    document.querySelectorAll('#voicePills .voice-pill').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const v = btn.getAttribute('data-voice');
+        document.querySelectorAll('#voicePills .voice-pill').forEach((b) => b.classList.toggle('active', b === btn));
+        document.getElementById('aiDraftText').value = VOICE_DRAFTS[v];
+      });
+    });
+
+    document.getElementById('aiDraftSendBtn').addEventListener('click', () => {
+      showUndoFuse('readerUndoSnack', 'readerFuseRect', false);
+    });
+
+    document.getElementById('readerUndoBtn').addEventListener('click', () => {
+      document.getElementById('readerUndoSnack').classList.remove('visible');
+    });
+
+    document.getElementById('fromSwitcherBtn').addEventListener('click', () => {
+      state.composerAccountIdx = (state.composerAccountIdx + 1) % ACCOUNTS.length;
+      const acc = ACCOUNTS[state.composerAccountIdx];
+      document.getElementById('composerHairline').style.background = acc.color;
+      document.getElementById('composerHeaderTint').style.background =
+        `linear-gradient(90deg, color-mix(in srgb, ${acc.color} 11%, var(--bg-elevated)) 0%, var(--bg-elevated) 60%)`;
+      const badge = document.getElementById('fromBadge');
+      badge.style.background = acc.color;
+      badge.style.color = acc.ink;
+      badge.innerHTML = acc.iconSvg;
+      document.getElementById('fromName').textContent = acc.name;
+      document.getElementById('fromEmail').textContent = acc.email;
+    });
+
+    document.querySelectorAll('#aiToneBar .tone-chip').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const tone = btn.getAttribute('data-tone');
+        document.querySelectorAll('#aiToneBar .tone-chip').forEach((b) => b.classList.toggle('active', b === btn));
+        document.getElementById('composerBody').value = COMPOSER_TONES[tone];
+      });
+    });
+
+    let scheduleActive = true;
+    function syncScheduleUI() {
+      document.getElementById('scheduleBanner').style.display = scheduleActive ? 'flex' : 'none';
+      document.getElementById('composerSendLabel').textContent = scheduleActive ? 'Schedule' : 'Send';
+    }
+    document.getElementById('scheduleToggleBtn').addEventListener('click', () => {
+      scheduleActive = !scheduleActive;
+      syncScheduleUI();
+    });
+    document.getElementById('clearScheduleBtn').addEventListener('click', () => {
+      scheduleActive = false;
+      syncScheduleUI();
+    });
+    syncScheduleUI();
+
+    document.querySelectorAll('#calModeSeg .cal-mode-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        state.calMode = btn.getAttribute('data-cal-mode');
+        document.querySelectorAll('#calModeSeg .cal-mode-btn').forEach((b) => b.classList.toggle('active', b === btn));
+        renderCalendar();
+      });
+    });
+
+    document.getElementById('mergeToggleBtn').addEventListener('click', () => {
+      state.calMerged = !state.calMerged;
+      const btn = document.getElementById('mergeToggleBtn');
+      btn.classList.toggle('active', state.calMerged);
+      btn.setAttribute('aria-pressed', String(state.calMerged));
+      document.getElementById('mergeToggleLabel').textContent = state.calMerged ? 'Merged' : 'Raw';
+      renderCalendar();
+    });
+
+    renderAllFocusStrips();
+    renderThreads();
+    renderCalendar();
+  </script>
+</body>
+</html>

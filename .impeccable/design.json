@@ -1,0 +1,370 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-26T07:43:30Z",
+  "title": "Design System: EveryBox",
+  "extensions": {
+    "colorMeta": {
+      "nordic-cobalt": {
+        "role": "primary",
+        "displayName": "Nordic Cobalt",
+        "canonical": "#3b82f6",
+        "tonalRamp": [
+          "oklch(24% 0.08 258)",
+          "oklch(34% 0.13 258)",
+          "oklch(45% 0.18 258)",
+          "oklch(55% 0.21 258)",
+          "oklch(62% 0.20 258)",
+          "oklch(72% 0.15 256)",
+          "oklch(84% 0.08 254)",
+          "oklch(94% 0.03 252)"
+        ]
+      },
+      "nordic-cobalt-light": {
+        "role": "primary",
+        "displayName": "Nordic Cobalt (Light Theme)",
+        "canonical": "#2563eb",
+        "tonalRamp": [
+          "oklch(22% 0.09 260)",
+          "oklch(32% 0.15 260)",
+          "oklch(43% 0.20 260)",
+          "oklch(54% 0.23 260)",
+          "oklch(63% 0.19 258)",
+          "oklch(74% 0.13 256)",
+          "oklch(86% 0.07 254)",
+          "oklch(95% 0.025 252)"
+        ]
+      },
+      "prism-mint": {
+        "role": "secondary",
+        "displayName": "Prism Mint",
+        "canonical": "#2dd4bf",
+        "tonalRamp": [
+          "oklch(24% 0.06 178)",
+          "oklch(35% 0.09 178)",
+          "oklch(48% 0.11 178)",
+          "oklch(61% 0.13 178)",
+          "oklch(74% 0.14 178)",
+          "oklch(82% 0.11 178)",
+          "oklch(90% 0.06 178)",
+          "oklch(96% 0.02 178)"
+        ]
+      },
+      "prism-lavender": {
+        "role": "tertiary",
+        "displayName": "Prism Lavender",
+        "canonical": "#a78bfa",
+        "tonalRamp": [
+          "oklch(24% 0.08 292)",
+          "oklch(36% 0.12 292)",
+          "oklch(48% 0.16 292)",
+          "oklch(60% 0.18 292)",
+          "oklch(70% 0.16 292)",
+          "oklch(79% 0.12 292)",
+          "oklch(88% 0.06 292)",
+          "oklch(95% 0.02 292)"
+        ]
+      },
+      "autopilot-amber": {
+        "role": "tertiary",
+        "displayName": "Autopilot Amber",
+        "canonical": "#f5b841",
+        "tonalRamp": [
+          "oklch(28% 0.06 80)",
+          "oklch(40% 0.09 80)",
+          "oklch(52% 0.12 80)",
+          "oklch(66% 0.14 80)",
+          "oklch(80% 0.15 80)",
+          "oklch(86% 0.11 82)",
+          "oklch(92% 0.06 84)",
+          "oklch(96% 0.025 85)"
+        ]
+      },
+      "signal-coral": {
+        "role": "error",
+        "displayName": "Signal Coral",
+        "canonical": "#f06060",
+        "tonalRamp": [
+          "oklch(24% 0.08 24)",
+          "oklch(35% 0.13 24)",
+          "oklch(47% 0.18 24)",
+          "oklch(58% 0.20 24)",
+          "oklch(68% 0.18 24)",
+          "oklch(78% 0.13 24)",
+          "oklch(88% 0.07 24)",
+          "oklch(95% 0.025 24)"
+        ]
+      },
+      "dark-main": {
+        "role": "neutral",
+        "displayName": "Midnight Slate (Dark Canvas)",
+        "canonical": "#181e29",
+        "tonalRamp": [
+          "#000000",
+          "#0b0d11",
+          "#11151d",
+          "#151a24",
+          "#181e29",
+          "#202837",
+          "#263042",
+          "#9aa7bc"
+        ]
+      },
+      "light-main": {
+        "role": "neutral",
+        "displayName": "Nordic Daylight (Light Canvas)",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "#0f172a",
+          "#475569",
+          "#7c8aa0",
+          "#e7ecf4",
+          "#f1f4f9",
+          "#f4f6fa",
+          "#fafbfd",
+          "#ffffff"
+        ]
+      },
+      "paper-main": {
+        "role": "neutral",
+        "displayName": "Warm Paper Stone",
+        "canonical": "#fbfaf7",
+        "tonalRamp": [
+          "#1c222b",
+          "#525d6d",
+          "#828d9c",
+          "#e4e1d8",
+          "#eceae3",
+          "#f0eee9",
+          "#f6f5f0",
+          "#fbfaf7"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Today Brief greeting heading; at most once per screen."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Mailbox header, Thread Reader subject, and top-level view headings."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Calendar month header, Composer subject input, section and modal titles."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Base UI text (13.5px), email prose (14px), and composer writing canvas (14.5px)."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Section kickers, date groups, tabular counts, folder pills, and timestamps."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Inline 2FA sign-in codes and keyboard shortcut keycaps."
+      }
+    },
+    "shadows": [
+      {
+        "name": "badge-lift",
+        "value": "0 1px 2px rgba(0, 0, 0, 0.12)",
+        "purpose": "Subtle lift on primary CTA buttons, AccountBadge circles, and inline AI Draft Ready cards."
+      },
+      {
+        "name": "floating-bar",
+        "value": "0 10px 25px -5px rgba(0, 0, 0, 0.28)",
+        "purpose": "Thread-row hover quick-action capsule, inline popovers, and bottom-left Undo Toast."
+      },
+      {
+        "name": "modal-surface",
+        "value": "0 25px 50px -12px rgba(0, 0, 0, 0.45)",
+        "purpose": "Context menus, Command Palette, Settings modal, Calendar Event detail modal, and Triage pill bar."
+      },
+      {
+        "name": "composer-resting",
+        "value": "0 24px 70px -12px rgba(0, 0, 0, 0.28), 0 4px 18px rgba(0, 0, 0, 0.12)",
+        "purpose": "Floating draggable Composer sheet at rest over unblurred 14% scrim."
+      },
+      {
+        "name": "composer-dragging",
+        "value": "0 30px 80px -10px rgba(0, 0, 0, 0.34), 0 8px 24px rgba(0, 0, 0, 0.16)",
+        "purpose": "Elevated shadow while the user actively drags the Composer sheet."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-standard",
+        "value": "cubic-bezier(0.2, 0, 0, 1)",
+        "purpose": "Default 150ms transitions for hovers, toggles, focus rings, and sheet motion."
+      },
+      {
+        "name": "undo-fuse-burn",
+        "value": "linear 5000ms forwards (stroke-dashoffset 0 -> 100)",
+        "purpose": "Linear SVG perimeter countdown around the Undo button during Undo Send or reversible actions."
+      },
+      {
+        "name": "android-shared-axis-x",
+        "value": "cubic-bezier(0.05, 0.7, 0.1, 1) 280ms",
+        "purpose": "Android Material 3 list-to-thread push transition (falls back to instant/100ms fade under Remove animations)."
+      },
+      {
+        "name": "android-fade-through",
+        "value": "cubic-bezier(0.2, 0, 0, 1) 200ms",
+        "purpose": "Android bottom NavigationBar destination switches."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "android-compact",
+        "value": "< 600dp (Phone — single-pane stack + 4-tab Mail/Calendar/Brief/Search NavigationBar)"
+      },
+      {
+        "name": "android-medium",
+        "value": "600dp – 839dp (Foldable / small tablet — NavigationRail + adaptive pane)"
+      },
+      {
+        "name": "android-expanded",
+        "value": ">= 840dp (Tablet — NavigationRail + 2-pane ThreadList & ThreadReader)"
+      },
+      {
+        "name": "desktop-sidebar",
+        "value": "244px default (resizable 190px – 480px)"
+      },
+      {
+        "name": "desktop-list",
+        "value": "340px default (resizable 250px – 960px)"
+      },
+      {
+        "name": "desktop-reader-comfortable",
+        "value": "880px max-width (640px narrow / unconstrained wide)"
+      },
+      {
+        "name": "desktop-assistant",
+        "value": "390px default (resizable 300px – 640px)"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button (New Message)",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Primary Cobalt CTA anchored in the sidebar and composer send controls.",
+      "html": "<button class=\"ds-btn-primary\" type=\"button\"><span class=\"ds-btn-primary-label\"><svg width=\"15\" height=\"15\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7\"/><path d=\"M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z\"/></svg><span>New message</span></span><kbd class=\"ds-kbd\">C</kbd></button>",
+      "css": ".ds-btn-primary { display: inline-flex; width: 220px; align-items: center; justify-content: space-between; gap: 8px; border: none; border-radius: 12px; padding: 8px 14px; background: var(--accent, #3b82f6); color: #ffffff; font-family: 'Segoe UI Variable', 'Segoe UI', sans-serif; font-size: 13px; font-weight: 600; cursor: pointer; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); transition: filter 150ms ease, transform 150ms ease; } .ds-btn-primary:hover { filter: brightness(1.1); } .ds-btn-primary:active { transform: scale(0.99); } .ds-btn-primary:focus-visible { outline: 2px solid var(--accent, #3b82f6); outline-offset: 2px; } .ds-btn-primary-label { display: inline-flex; align-items: center; gap: 8px; } .ds-kbd { border-radius: 4px; background: rgba(255, 255, 255, 0.16); padding: 2px 6px; font-family: ui-monospace, Consolas, monospace; font-size: 10px; font-weight: 600; color: rgba(255, 255, 255, 0.92); }"
+    },
+    {
+      "name": "Secondary Pill Button",
+      "kind": "button",
+      "refersTo": "button-secondary-pill",
+      "description": "Elevated pill action used on Today Brief and AI Assistant quick prompts.",
+      "html": "<button class=\"ds-btn-pill\" type=\"button\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"var(--accent, #3b82f6)\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z\"/></svg><span>Ask about my mail</span></button>",
+      "css": ".ds-btn-pill { display: inline-flex; align-items: center; gap: 8px; border-radius: 9999px; border: 1px solid var(--border-strong, rgba(210, 225, 255, 0.14)); background: var(--bg-elevated, #202837); color: var(--text-primary, #eef2f9); padding: 8px 16px; font-family: 'Segoe UI Variable', 'Segoe UI', sans-serif; font-size: 13px; font-weight: 500; cursor: pointer; transition: background 150ms ease; } .ds-btn-pill:hover { background: var(--bg-hover, #263042); } .ds-btn-pill:focus-visible { outline: 2px solid var(--accent, #3b82f6); outline-offset: 2px; }"
+    },
+    {
+      "name": "Universal Search Pill",
+      "kind": "input",
+      "refersTo": "input-search-pill",
+      "description": "Centered pill search bar with embedded Account Scope selector.",
+      "html": "<div class=\"ds-search-pill\"><button class=\"ds-scope-pill\" type=\"button\"><span class=\"ds-dot\"></span><span>All accounts</span></button><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"var(--text-muted, #6b7890)\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"11\" cy=\"11\" r=\"8\"/><path d=\"m21 21-4.3-4.3\"/></svg><input class=\"ds-search-input\" type=\"text\" placeholder=\"Search all accounts, e.g. &quot;pdf from maya last week&quot;\" /></div>",
+      "css": ".ds-search-pill { display: flex; width: 100%; max-width: 460px; align-items: center; gap: 8px; border-radius: 9999px; border: 1px solid var(--border-strong, rgba(210, 225, 255, 0.14)); background: var(--bg-elevated, #202837); padding: 4px 12px 4px 6px; transition: border-color 150ms ease; } .ds-search-pill:focus-within { border-color: var(--accent, #3b82f6); } .ds-scope-pill { display: inline-flex; align-items: center; gap: 6px; border-radius: 9999px; border: 1px solid var(--border-subtle, rgba(210, 225, 255, 0.08)); background: transparent; color: var(--text-primary, #eef2f9); padding: 4px 10px; font-size: 11.5px; font-weight: 500; cursor: pointer; } .ds-scope-pill:hover { background: var(--bg-hover, #263042); } .ds-dot { width: 7px; height: 7px; border-radius: 9999px; background: var(--accent, #3b82f6); } .ds-search-input { flex: 1; min-width: 0; border: none; background: transparent; color: var(--text-primary, #eef2f9); font-size: 13px; outline: none; } .ds-search-input::placeholder { color: var(--text-muted, #6b7890); }"
+    },
+    {
+      "name": "Account Identity Thread Row",
+      "kind": "custom",
+      "refersTo": "card-surface",
+      "description": "Signature multi-account thread row with 3px left rail, soft 12% horizontal wash, unread dot, and AccountBadge.",
+      "html": "<div class=\"ds-thread-row\" tabindex=\"0\"><span class=\"ds-account-rail\"></span><span class=\"ds-unread-dot\"></span><div class=\"ds-avatar-wrap\"><span class=\"ds-avatar\">AL</span><span class=\"ds-account-badge\"><svg width=\"9\" height=\"9\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect width=\"20\" height=\"14\" x=\"2\" y=\"7\" rx=\"2\"/><path d=\"M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16\"/></svg></span></div><div class=\"ds-row-body\"><div class=\"ds-row-top\"><span class=\"ds-sender\">Alex Lin</span><span class=\"ds-time\">10:42 AM</span></div><div class=\"ds-subject\">Q3 roadmap &amp; mobile launch checklist</div><div class=\"ds-snippet\">Shared the updated timeline for review before Thursday…</div></div></div>",
+      "css": ".ds-thread-row { position: relative; display: flex; align-items: flex-start; gap: 10px; max-width: 360px; border-radius: 12px; padding: 10px 10px 10px 12px; background: linear-gradient(90deg, color-mix(in srgb, #2dd4bf 12%, var(--bg-list, #151a24)) 0%, color-mix(in srgb, #2dd4bf 4%, var(--bg-list, #151a24)) 38%, var(--bg-list, #151a24) 72%); cursor: pointer; transition: background 150ms ease; } .ds-thread-row:hover { background: var(--bg-hover, #263042); } .ds-thread-row:focus-visible { outline: 2px solid var(--accent, #3b82f6); outline-offset: 2px; } .ds-account-rail { position: absolute; left: 2px; top: 6px; bottom: 6px; width: 3px; border-radius: 9999px; background: #2dd4bf; opacity: 0.85; } .ds-unread-dot { margin-top: 10px; width: 8px; height: 8px; flex-shrink: 0; border-radius: 9999px; background: var(--accent, #3b82f6); } .ds-avatar-wrap { position: relative; margin-top: 2px; flex-shrink: 0; } .ds-avatar { display: flex; width: 32px; height: 32px; align-items: center; justify-content: center; border-radius: 9999px; background: var(--bg-elevated, #202837); color: var(--text-secondary, #9aa7bc); font-size: 11px; font-weight: 600; } .ds-account-badge { position: absolute; right: -4px; bottom: -4px; display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; border-radius: 9999px; background: #2dd4bf; border: 1.5px solid var(--bg-list, #151a24); } .ds-row-body { min-width: 0; flex: 1; } .ds-row-top { display: flex; justify-content: space-between; gap: 8px; } .ds-sender { color: var(--text-primary, #eef2f9); font-size: 13px; font-weight: 650; } .ds-time { color: var(--text-muted, #6b7890); font-size: 11px; font-variant-numeric: tabular-nums; } .ds-subject { color: var(--text-primary, #eef2f9); font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .ds-snippet { color: var(--text-muted, #6b7890); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }"
+    },
+    {
+      "name": "Inline 2FA Sign-In Code Pill",
+      "kind": "chip",
+      "refersTo": "badge-2fa-code",
+      "description": "1-click verification code copy pill surfaced inline in thread rows and Today Brief.",
+      "html": "<button class=\"ds-2fa-pill\" type=\"button\"><span>482 910</span><svg width=\"11\" height=\"11\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect width=\"14\" height=\"14\" x=\"8\" y=\"8\" rx=\"2\"/><path d=\"M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2\"/></svg></button>",
+      "css": ".ds-2fa-pill { display: inline-flex; align-items: center; gap: 6px; border-radius: 6px; border: 1px solid var(--accent, #3b82f6); background: var(--accent-soft, rgba(59, 130, 246, 0.18)); color: var(--accent-text, #60a5fa); padding: 2px 8px; font-family: ui-monospace, 'Cascadia Code', Consolas, monospace; font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; cursor: pointer; transition: opacity 150ms ease; } .ds-2fa-pill:hover { opacity: 0.88; } .ds-2fa-pill:focus-visible { outline: 2px solid var(--accent, #3b82f6); outline-offset: 2px; }"
+    },
+    {
+      "name": "Undo-Fuse Toast",
+      "kind": "custom",
+      "refersTo": "card-surface",
+      "description": "Translucent bottom-left toast with signature linear SVG fuse border around the Undo action.",
+      "html": "<div class=\"ds-toast\" role=\"status\"><span>Archived conversation</span><button class=\"ds-undo-btn\" type=\"button\"><svg class=\"ds-fuse\" preserveAspectRatio=\"none\"><rect x=\"1\" y=\"1\" width=\"calc(100% - 2px)\" height=\"calc(100% - 2px)\" rx=\"7\" ry=\"7\" pathLength=\"100\" fill=\"none\" stroke=\"var(--accent, #3b82f6)\" stroke-width=\"2\" stroke-linecap=\"round\" class=\"ds-fuse-path\"/></svg><span>Undo</span></button></div>",
+      "css": ".ds-toast { display: inline-flex; align-items: center; gap: 14px; border-radius: 12px; border: 1px solid var(--border-strong, rgba(210, 225, 255, 0.14)); background: color-mix(in srgb, var(--bg-elevated, #202837) 92%, transparent); color: var(--text-primary, #eef2f9); padding: 10px 16px; font-size: 13.5px; font-weight: 500; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.28); backdrop-filter: blur(12px); } .ds-undo-btn { position: relative; border: none; border-radius: 8px; background: var(--accent-soft, rgba(59, 130, 246, 0.18)); color: var(--accent-text, #60a5fa); padding: 4px 14px; font-size: 13px; font-weight: 600; cursor: pointer; } .ds-undo-btn:focus-visible { outline: 2px solid var(--accent, #3b82f6); outline-offset: 2px; } .ds-fuse { pointer-events: none; position: absolute; inset: 0; width: 100%; height: 100%; } .ds-fuse-path { stroke-dasharray: 100; stroke-dashoffset: 35; }"
+    },
+    {
+      "name": "AI Draft Ready Card",
+      "kind": "card",
+      "refersTo": "card-surface",
+      "description": "Inline editable AI reply card with tinted header, voice profile pills, and Send CTA.",
+      "html": "<div class=\"ds-ai-card\"><div class=\"ds-ai-header\"><span class=\"ds-ai-title\">AI Draft Ready · Local Ollama</span><span class=\"ds-voice-pill\">Business</span></div><div class=\"ds-ai-body\"><p class=\"ds-ai-text\">Thanks for sending this over — Thursday at 2 PM works well on my end. I'll review the checklist beforehand.</p><div class=\"ds-ai-actions\"><button class=\"ds-ai-send\" type=\"button\">Send</button><button class=\"ds-ai-open\" type=\"button\">Open in Composer</button></div></div></div>",
+      "css": ".ds-ai-card { max-width: 440px; overflow: hidden; border-radius: 16px; border: 1px solid color-mix(in srgb, var(--accent, #3b82f6) 34%, var(--border-subtle, rgba(210, 225, 255, 0.08))); background: var(--bg-elevated, #202837); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); } .ds-ai-header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-subtle, rgba(210, 225, 255, 0.08)); background: linear-gradient(90deg, color-mix(in srgb, var(--accent, #3b82f6) 10%, var(--bg-elevated, #202837)) 0%, var(--bg-elevated, #202837) 70%); padding: 10px 16px; } .ds-ai-title { color: var(--accent-text, #60a5fa); font-size: 12.5px; font-weight: 600; } .ds-voice-pill { border-radius: 9999px; background: var(--accent-soft, rgba(59, 130, 246, 0.18)); color: var(--accent-text, #60a5fa); padding: 2px 10px; font-size: 10.5px; font-weight: 500; } .ds-ai-body { padding: 14px 16px; } .ds-ai-text { margin: 0 0 12px; border-radius: 12px; border: 1px solid var(--border-subtle, rgba(210, 225, 255, 0.08)); background: var(--bg-main, #181e29); color: var(--text-primary, #eef2f9); padding: 10px 12px; font-size: 13px; line-height: 1.6; } .ds-ai-actions { display: flex; gap: 8px; } .ds-ai-send { border: none; border-radius: 12px; background: var(--accent, #3b82f6); color: #ffffff; padding: 6px 14px; font-size: 12.5px; font-weight: 600; cursor: pointer; } .ds-ai-send:hover { filter: brightness(1.1); } .ds-ai-open { border-radius: 12px; border: 1px solid var(--border-subtle, rgba(210, 225, 255, 0.08)); background: var(--bg-main, #181e29); color: var(--text-primary, #eef2f9); padding: 6px 12px; font-size: 12px; font-weight: 500; cursor: pointer; } .ds-ai-open:hover { background: var(--bg-hover, #263042); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Calm Nordic Tray",
+    "overview": "EveryBox is an Operate-mode instrument designed to feel like a quiet, precision-machined tray holding multiple lively mail streams without visual noise. Inspired directly by the Nordic Prism app mark (build/icon.png) — three fanned color-coded cards (lavender, mint teal, and cobalt blue) resting cleanly inside a frosted midnight-slate vessel — EveryBox keeps its own chrome calm, tonal, and low-glare so that only two things ever command immediate eye movement: the user's actual message/calendar content and the subtle color identity telling them which account it belongs to.\n\nThe system rejects heavy borders, saturated full-bleed headers, drop-shadow soup, and decorative AI neon gradients. Instead, spatial hierarchy comes from subtle, stepped tonal planes (--bg-sidebar -> --bg-list -> --bg-main -> --bg-elevated), whisper-thin translucent hairlines (--border-subtle), crisp tabular numerals for unread/total counts, and purposeful bursts of semantic color — Nordic Cobalt for primary action and unread state, Autopilot Amber for stars and ready AI drafts, Prism Mint for synced/verified safety states, and user-chosen per-account colors rendered as delicate 3px rails and soft horizontal washes.\n\nAcross platforms, this identity stays unmistakable while obeying each OS's structural grammar: resizable 3-pane calm on Windows (and later macOS), and crisp Material Design 3 touch ergonomics, edge-to-edge system bars, and true-black OLED craft on Android (and later iOS HIG).",
+    "keyCharacteristics": [
+      "Stepped tonal layering over heavy chrome: Four distinct background planes separate navigation, list, reading canvas, and elevated cards using subtle luminance shifts rather than thick dividers.",
+      "Nordic Prism brand restrained to functional focal points: Cobalt blue anchors primary CTAs, focus rings, unread indicators, and active states; lavender and mint live harmoniously inside the brand icon and account palette.",
+      "Peripheral multi-account legibility: Every account carries a color from a curated 10-swatch palette and an optional symbol from 12 Lucide icons, expressed in three user-selectable row styles (gradient, bar, dot).",
+      "Five first-class themes: Curated light (light, paper) and dark (dark, black, graphite) palettes designed individually — never lazy CSS inversions — including a genuine #000000 OLED black theme.",
+      "Forgiving, linear motion: Quiet state transitions (150ms), zero gratuitous bounce, and a signature linear SVG Undo Fuse border that visibly burns down around the Undo button before a queued send fires."
+    ],
+    "rules": [
+      {
+        "name": "The Tonal Ladder Rule",
+        "body": "Never jump directly from --bg-sidebar to a harsh white/black card or paint full-width saturated headers. Every surface sits on one of the four stepped neutral tokens (sidebar, list, main, elevated).",
+        "section": "colors"
+      },
+      {
+        "name": "The Whispered Account Tint Rule",
+        "body": "Per-account color washes never exceed 18% mix on focused/selected rows (12%-13% at rest) and always fade smoothly to transparent by 72%-82% row width so message text stays on pure neutral ground.",
+        "section": "colors"
+      },
+      {
+        "name": "The Single-Focus Suppression Rule",
+        "body": "When only one account is connected or solo-focused in the thread list, suppress row-level account washes and accent bars (showAccountTint = accounts.length > 1 && activeAccountIds.length !== 1); color signals difference, never decoration.",
+        "section": "colors"
+      },
+      {
+        "name": "The Weight-Over-Size Unread Rule",
+        "body": "Unread conversations assert themselves through a 2px-aligned 8px cobalt dot plus weight contrast (650/600 vs. 500/400) and primary text luminance — never by inflating font size and shifting row height.",
+        "section": "typography"
+      },
+      {
+        "name": "The Tabular Count Rule",
+        "body": "All unread counts, total counts, reminder counts, and time ranges use tabular-nums so numbers align vertically down the sidebar and list without jitter during sync.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat-At-Rest Rule",
+        "body": "Resting workspace panes, inbox cards, and calendar blocks never carry drop shadows. Use tonal stepping and 1px --border-subtle hairlines instead.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Crisp Dark-Edge Rule",
+        "body": "Every floating surface on dark, black, and graphite themes must pair its shadow with a 1px --border-strong stroke so edges never dissolve into dark canvases.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do separate workspace surfaces with the 4-step neutral ladder (--bg-sidebar, --bg-list, --bg-main, --bg-elevated) and 1px --border-subtle hairlines rather than drop shadows.",
+      "Do keep per-account gradient washes subtle (<=18% mix, fading to transparent by 72%-82% width) and suppress them automatically when viewing a single soloed account.",
+      "Do preserve tabular-nums on every count, timestamp, and schedule range, and keep unread differentiation in weight + dot rather than enlarged font sizes.",
+      "Do pair every floating dark-mode surface (dark, black, graphite) with a 1px --border-strong outline so dialogs and menus stay crisp against deep backgrounds.",
+      "Do wire destructive or outbound actions (Send, Archive, Delete, Mute Sender) to a reversible Undo Toast / Snackbar with linear fuse progress feedback.",
+      "Do keep all copy, empty states, and defaults 100% public and generic — zero hardcoded personal names, hardware names, email addresses, or credentials."
+    ],
+    "donts": [
+      "Don't paint full-width saturated brand headers, neon AI gradients, or glassmorphic blur over core reading/list panes — blur is reserved exclusively for transient overlays like the Undo Toast.",
+      "Don't invent a sixth theme or apply lazy CSS inversion for dark mode; all 5 themes (dark, black, graphite, light, paper) are hand-tuned token sets.",
+      "Don't use raw hex values inside components for neutral surfaces or semantic text; always bind to semantic tokens (CSS vars on desktop, Material 3 ColorScheme / theme tokens on Android).",
+      "Don't force desktop 3-pane layouts, hover-only actions, or 28px click targets onto Android; translate them to native touch gestures, bottom sheets, and >=48dp targets.",
+      "Don't trap users in irreversible states when closing a dirty draft or swiping a thread — autosave drafts silently and provide immediate Undo."
+    ]
+  }
+}

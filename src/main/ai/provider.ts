@@ -1,10 +1,12 @@
 import { execFile, spawn } from 'child_process'
-import { existsSync, readFileSync } from 'fs'
-import { homedir } from 'os'
+import { randomUUID } from 'crypto'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { homedir, tmpdir } from 'os'
 import { join } from 'path'
 import { promisify } from 'util'
 import type { AISettings, DiscoveredModel, LocalAIStatus } from '../../shared/types'
 import type { SecretStore } from '../security/secrets'
+import type { AIImageInput } from './images'
 
 const execFileAsync = promisify(execFile)
 
@@ -60,8 +62,43 @@ function stripThinkingTags(raw: string): string {
 export interface AICompletionRequest {
   system: string
   prompt: string
+  images?: AIImageInput[]
   jsonMode?: boolean
   maxTokens?: number
+}
+
+function writeTempVisionImages(images: AIImageInput[]): { dir: string; paths: string[]; cleanup: () => void } {
+  const dir = join(tmpdir(), `everybox-vision-${randomUUID().slice(0, 8)}`)
+  mkdirSync(dir, { recursive: true })
+  const paths: string[] = []
+  images.forEach((img, idx) => {
+    const ext = img.mimeType === 'image/jpeg' ? 'jpg' : img.mimeType === 'image/webp' ? 'webp' : img.mimeType === 'image/gif' ? 'gif' : 'png'
+    const p = join(dir, `email-image-${idx + 1}.${ext}`)
+    writeFileSync(p, Buffer.from(img.base64, 'base64'))
+    paths.push(p)
+  })
+  return {
+    dir,
+    paths,
+    cleanup: () => {
+      try {
+        rmSync(dir, { recursive: true, force: true })
+      } catch {
+        // ignore
+      }
+    }
+  }
+}
+
+function buildOpenAiUserContent(prompt: string, images?: AIImageInput[]): string | unknown[] {
+  if (!images || images.length === 0) return prompt
+  return [
+    { type: 'text', text: prompt },
+    ...images.map((img) => ({
+      type: 'image_url',
+      image_url: { url: `data:${img.mimeType};base64,${img.base64}` }
+    }))
+  ]
 }
 
 export interface AICompletionResult {
@@ -509,21 +546,27 @@ export async function completeAI(
     if (!model) {
       throw new Error('No model reported by the local server. Open Settings › AI Providers and click Refresh.')
     }
-    const res = await fetch(`${probed.urlUsed}/v1/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        temperature: 0.3,
-        max_tokens: req.maxTokens || 4096,
-        response_format: req.jsonMode ? { type: 'json_object' } : undefined,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: req.prompt }
-        ]
-      }),
-      signal: AbortSignal.timeout(90_000)
-    })
+    const callLocalOpenAi = async (withImages: boolean) =>
+      fetch(`${probed.urlUsed}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          temperature: 0.3,
+          max_tokens: req.maxTokens || 4096,
+          response_format: req.jsonMode ? { type: 'json_object' } : undefined,
+          messages: [
+            { role: 'system', content: system },
+            { role: 'user', content: withImages ? buildOpenAiUserContent(req.prompt, req.images) : req.prompt }
+          ]
+        }),
+        signal: AbortSignal.timeout(90_000)
+      })
+    let res = await callLocalOpenAi(Boolean(req.images?.length))
+    if (!res.ok && req.images?.length) {
+      // Graceful fallback if the loaded local model is text-only
+      res = await callLocalOpenAi(false)
+    }
     if (!res.ok) throw new Error(`Local server error (${res.status}): ${await res.text()}`)
     const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }
     const gpu = await detectGpuName()
@@ -546,20 +589,27 @@ export async function completeAI(
     if (!model) {
       throw new Error('No Ollama model selected. Open Settings › AI and choose a discovered model.')
     }
-    const res = await fetch(`${base}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        stream: false,
-        format: req.jsonMode ? 'json' : undefined,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: req.prompt }
-        ]
-      }),
-      signal: AbortSignal.timeout(90_000)
-    })
+    const callOllama = async (withImages: boolean) =>
+      fetch(`${base}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          stream: false,
+          format: req.jsonMode ? 'json' : undefined,
+          messages: [
+            { role: 'system', content: system },
+            withImages && req.images?.length
+              ? { role: 'user', content: req.prompt, images: req.images.map((i) => i.base64) }
+              : { role: 'user', content: req.prompt }
+          ]
+        }),
+        signal: AbortSignal.timeout(90_000)
+      })
+    let res = await callOllama(Boolean(req.images?.length))
+    if (!res.ok && req.images?.length) {
+      res = await callOllama(false)
+    }
     if (!res.ok) throw new Error(`Ollama error (${res.status}): ${await res.text()}`)
     const data = (await res.json()) as { message?: { content?: string } }
     const gpu = await detectGpuName()
@@ -582,20 +632,25 @@ export async function completeAI(
     if (!model) {
       throw new Error('No LM Studio model loaded. Load a model in LM Studio and select it in Settings › AI.')
     }
-    const res = await fetch(`${base}/v1/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        temperature: 0.3,
-        max_tokens: req.maxTokens || 1200,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: req.prompt }
-        ]
-      }),
-      signal: AbortSignal.timeout(90_000)
-    })
+    const callLmStudio = async (withImages: boolean) =>
+      fetch(`${base}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          temperature: 0.3,
+          max_tokens: req.maxTokens || 1200,
+          messages: [
+            { role: 'system', content: system },
+            { role: 'user', content: withImages ? buildOpenAiUserContent(req.prompt, req.images) : req.prompt }
+          ]
+        }),
+        signal: AbortSignal.timeout(90_000)
+      })
+    let res = await callLmStudio(Boolean(req.images?.length))
+    if (!res.ok && req.images?.length) {
+      res = await callLmStudio(false)
+    }
     if (!res.ok) throw new Error(`LM Studio error (${res.status}): ${await res.text()}`)
     const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }
     const gpu = await detectGpuName()
@@ -606,38 +661,70 @@ export async function completeAI(
   }
 
   if (settings.provider === 'claude-cli') {
-    const fullPrompt = `${system}\n\n---\n\n${req.prompt}`
     const model = settings.claudeCliModel || 'sonnet'
-    const args = model && model !== 'default' ? ['-p', '-', '--model', model] : ['-p', '-']
-    const stdout = await spawnWithStdin('claude', args, fullPrompt, 90_000)
-    return {
-      text: stripThinkingTags(stdout),
-      providerLabel: `Claude CLI (${model}) · Subscription`
+    const vision = req.images?.length ? writeTempVisionImages(req.images) : null
+    try {
+      const imageNote = vision
+        ? `\n\nEmbedded email images saved locally (read/inspect these image files directly before responding):\n${vision.paths.map((p) => `- ${p}`).join('\n')}`
+        : ''
+      const fullPrompt = `${system}\n\n---\n\n${req.prompt}${imageNote}`
+      const args = ['-p', '-']
+      if (model && model !== 'default') args.push('--model', model)
+      if (vision) args.push('--add-dir', vision.dir)
+      const stdout = await spawnWithStdin('claude', args, fullPrompt, 90_000)
+      return {
+        text: stripThinkingTags(stdout),
+        providerLabel: `Claude CLI (${model}) · Subscription`
+      }
+    } finally {
+      vision?.cleanup()
     }
   }
 
   if (settings.provider === 'codex-cli') {
-    const fullPrompt = `${system}\n\n---\n\n${req.prompt}`
     const model = settings.codexCliModel?.trim() || 'default'
-    const args = model && model !== 'default' ? ['exec', '-', '--model', model] : ['exec', '-']
-    const stdout = await spawnWithStdin('codex', args, fullPrompt, 90_000)
-    return {
-      text: stripThinkingTags(stdout),
-      providerLabel: `Codex CLI${model !== 'default' ? ` (${model})` : ''} · Subscription`
+    const vision = req.images?.length ? writeTempVisionImages(req.images) : null
+    try {
+      const fullPrompt = `${system}\n\n---\n\n${req.prompt}`
+      const args = ['exec', '-']
+      if (model && model !== 'default') args.push('--model', model)
+      if (vision) {
+        for (const p of vision.paths) args.push('-i', p)
+      }
+      const stdout = await spawnWithStdin('codex', args, fullPrompt, 90_000)
+      return {
+        text: stripThinkingTags(stdout),
+        providerLabel: `Codex CLI${model !== 'default' ? ` (${model})` : ''} · Subscription`
+      }
+    } finally {
+      vision?.cleanup()
     }
   }
 
   if (settings.provider === 'antigravity-cli') {
-    const fullPrompt = `${system}\n\n---\n\n${req.prompt}`
     const model = settings.antigravityCliModel?.trim() || 'default'
-    const args =
-      model && model !== 'default'
-        ? ['-p', '--disable-slash-commands', '--model', model]
-        : ['-p', '--disable-slash-commands']
-    const stdout = await spawnWithStdin('agy', args, fullPrompt, 90_000)
-    return {
-      text: stripThinkingTags(stdout),
-      providerLabel: `Antigravity CLI${model !== 'default' ? ` (${model})` : ''} · Subscription`
+    const vision = req.images?.length ? writeTempVisionImages(req.images) : null
+    try {
+      const imageNote = vision
+        ? `\n\nEmbedded email images saved locally (inspect these image files directly before responding):\n${vision.paths.map((p) => `- ${p}`).join('\n')}`
+        : ''
+      const fullPrompt = `${system}\n\n---\n\n${req.prompt}${imageNote}`.slice(0, 24_000)
+      const args: string[] = ['--disable-slash-commands']
+      if (model && model !== 'default') args.push('--model', model)
+      if (vision) args.push('--add-dir', vision.dir)
+      args.push('-p', fullPrompt)
+      const { stdout } = await execFileAsync('agy', args, {
+        cwd: vision ? vision.dir : tmpdir(),
+        timeout: 90_000,
+        windowsHide: true,
+        maxBuffer: 10 * 1024 * 1024
+      })
+      return {
+        text: stripThinkingTags(stdout),
+        providerLabel: `Antigravity CLI${model !== 'default' ? ` (${model})` : ''} · Subscription`
+      }
+    } finally {
+      vision?.cleanup()
     }
   }
 
@@ -656,7 +743,7 @@ export async function completeAI(
         response_format: req.jsonMode ? { type: 'json_object' } : undefined,
         messages: [
           { role: 'system', content: system },
-          { role: 'user', content: req.prompt }
+          { role: 'user', content: buildOpenAiUserContent(req.prompt, req.images) }
         ]
       }),
       signal: AbortSignal.timeout(60_000)
@@ -672,6 +759,15 @@ export async function completeAI(
   if (settings.provider === 'anthropic') {
     const key = secrets.get('ai_key:anthropic')
     if (!key) throw new Error('Anthropic API key not set in Settings > AI.')
+    const anthropicContent = req.images?.length
+      ? [
+          ...req.images.map((img) => ({
+            type: 'image',
+            source: { type: 'base64', media_type: img.mimeType, data: img.base64 }
+          })),
+          { type: 'text', text: req.prompt }
+        ]
+      : req.prompt
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -683,7 +779,7 @@ export async function completeAI(
         model: settings.anthropicModel || 'claude-sonnet-4-5',
         max_tokens: req.maxTokens || 1200,
         system,
-        messages: [{ role: 'user', content: req.prompt }]
+        messages: [{ role: 'user', content: anthropicContent }]
       }),
       signal: AbortSignal.timeout(60_000)
     })
@@ -699,6 +795,14 @@ export async function completeAI(
     const key = secrets.get('ai_key:gemini')
     if (!key) throw new Error('Gemini API key not set in Settings > AI.')
     const model = settings.geminiModel || 'gemini-2.5-flash'
+    const geminiParts = req.images?.length
+      ? [
+          ...req.images.map((img) => ({
+            inline_data: { mime_type: img.mimeType, data: img.base64 }
+          })),
+          { text: req.prompt }
+        ]
+      : [{ text: req.prompt }]
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`,
       {
@@ -706,7 +810,7 @@ export async function completeAI(
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: system }] },
-          contents: [{ role: 'user', parts: [{ text: req.prompt }] }],
+          contents: [{ role: 'user', parts: geminiParts }],
           generationConfig: req.jsonMode ? { responseMimeType: 'application/json' } : undefined
         }),
         signal: AbortSignal.timeout(60_000)
@@ -734,7 +838,7 @@ export async function completeAI(
       response_format: req.jsonMode ? { type: 'json_object' } : undefined,
       messages: [
         { role: 'system', content: system },
-        { role: 'user', content: req.prompt }
+        { role: 'user', content: buildOpenAiUserContent(req.prompt, req.images) }
       ]
     }),
     signal: AbortSignal.timeout(60_000)

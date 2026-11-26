@@ -1,6 +1,7 @@
 import type { GlassmailDB } from '../db/database'
 import type { SecretStore } from '../security/secrets'
 import type { ThreadAISummary } from '../../shared/types'
+import { extractEmailImages } from './images'
 import { completeAI, extractJsonBlock } from './provider'
 
 export async function summarizeThread(
@@ -19,13 +20,16 @@ export async function summarizeThread(
     )
     .join('\n\n---\n\n')
 
+  const images = await extractEmailImages(detail.messages, 3)
+
   let aiError: string | null = null
   try {
     const res = await completeAI(
       {
         jsonMode: true,
         maxTokens: 2048,
-        system: `You summarize email threads for EveryBox.
+        images,
+        system: `You summarize email threads for EveryBox. If embedded images (charts, receipts, tables, screenshots) are included, read their contents and include the key facts in the summary.
 Return STRICT JSON:
 {
   "gist": "2 concise sentences explaining what this thread is about.",

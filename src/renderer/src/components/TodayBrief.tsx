@@ -1,8 +1,11 @@
-import React from 'react'
-import { Calendar, Copy, Inbox, Sparkles, Video } from 'lucide-react'
+import React, { useEffect, useState } from 'react'
+import { Archive, Ban, Calendar, Copy, Inbox, MailOpen, RefreshCw, Sparkles, Video, X } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { usePaneZoom } from '../hooks/usePaneZoom'
 import { modKeyPrefix } from '../utils/platform'
+import { ContextMenu, type ContextMenuState } from './ContextMenu'
+import { AccountBadge } from './AccountIcon'
+import type { WaitingOnYouItem } from '../../../shared/types'
 
 export const TodayBrief: React.FC = () => {
   const {
@@ -16,6 +19,11 @@ export const TodayBrief: React.FC = () => {
     setAssistantOpen,
     setActiveMailbox,
     selectThread,
+    requestDraftReply,
+    archiveThreads,
+    setReadThreads,
+    saveSettings,
+    refreshAll,
     showToast
   } = useAppStore()
 
@@ -24,13 +32,94 @@ export const TodayBrief: React.FC = () => {
     readerWidthMode === 'narrow' ? '600px' : readerWidthMode === 'wide' ? 'none' : '820px'
   const { ref: zoomRef, zoom, zoomBadge } = usePaneZoom<HTMLDivElement>('reader')
 
+  const [waitingItems, setWaitingItems] = useState<WaitingOnYouItem[]>([])
+  const [aiCheckingWaiting, setAiCheckingWaiting] = useState(false)
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
   const dateLabel = new Date()
     .toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long' })
     .toUpperCase()
 
-  const peopleUnread = threads.filter((t) => t.category === 'people' && !t.isRead).slice(0, 5)
+  // Tier 1 instant load + Tier 2 cached AI verification
+  useEffect(() => {
+    let cancelled = false
+    const filterIds = activeAccountIds.length > 0 ? activeAccountIds : undefined
+    void (async () => {
+      const fast = await window.glassmail.getWaitingOnYou(filterIds, false)
+      if (!cancelled) setWaitingItems(fast)
+      if (fast.length > 0 && fast.some((x) => !x.aiVerified)) {
+        if (!cancelled) setAiCheckingWaiting(true)
+        try {
+          const verified = await window.glassmail.getWaitingOnYou(filterIds, true)
+          if (!cancelled) setWaitingItems(verified)
+        } finally {
+          if (!cancelled) setAiCheckingWaiting(false)
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    activeAccountIds.join(','),
+    threads.length,
+    counts.inbox,
+    settings?.autopilot?.preDraftExcludedSenders?.length,
+    settings?.autopilot?.waitingDismissedThreadIds?.length
+  ])
+
+  const dismissWaitingThread = async (threadId: string) => {
+    if (!settings) return
+    const prevSettings = settings
+    const prevIds = settings.autopilot?.waitingDismissedThreadIds || []
+    const nextIds = Array.from(new Set([...prevIds, threadId])).slice(-200)
+    setWaitingItems((prev) => prev.filter((x) => x.thread.id !== threadId))
+    await saveSettings({
+      ...settings,
+      autopilot: {
+        ...settings.autopilot,
+        autoPreDraftPeople: Boolean(settings.autopilot?.autoPreDraftPeople),
+        preDraftDisabledAccountIds: settings.autopilot?.preDraftDisabledAccountIds || [],
+        preDraftAlwaysSenders: settings.autopilot?.preDraftAlwaysSenders || [],
+        preDraftExcludedSenders: settings.autopilot?.preDraftExcludedSenders || [],
+        waitingDismissedThreadIds: nextIds,
+        autoClean2FAHours: settings.autopilot?.autoClean2FAHours ?? null
+      }
+    })
+    showToast('Removed from "Waiting on you"', async () => {
+      await saveSettings(prevSettings)
+      await refreshAll()
+    })
+  }
+
+  const muteWaitingSender = async (email: string) => {
+    if (!settings || !email) return
+    const lower = email.toLowerCase()
+    const prevSettings = settings
+    const prevList = settings.autopilot?.preDraftExcludedSenders || []
+    const nextList = Array.from(new Set([...prevList, lower]))
+    const nextAlways = (settings.autopilot?.preDraftAlwaysSenders || []).filter((s) => s.toLowerCase() !== lower)
+    setWaitingItems((prev) => prev.filter((x) => (x.thread.latestFrom.email || '').toLowerCase() !== lower))
+    await saveSettings({
+      ...settings,
+      autopilot: {
+        ...settings.autopilot,
+        autoPreDraftPeople: Boolean(settings.autopilot?.autoPreDraftPeople),
+        preDraftDisabledAccountIds: settings.autopilot?.preDraftDisabledAccountIds || [],
+        preDraftAlwaysSenders: nextAlways,
+        preDraftExcludedSenders: nextList,
+        waitingDismissedThreadIds: settings.autopilot?.waitingDismissedThreadIds || [],
+        autoClean2FAHours: settings.autopilot?.autoClean2FAHours ?? null
+      }
+    })
+    showToast(`Won't show ${email} in "Waiting on you" or pre-drafts`, async () => {
+      await saveSettings(prevSettings)
+      await refreshAll()
+    })
+  }
+
   const signInThreads = threads.filter((t) => t.signInCode).slice(0, 2)
   const hasDemo = accounts.some((a) => a.isDemo)
   const firstAccountName = accounts.find((a) => !a.isDemo)?.name?.trim().split(/\s+/)[0]
@@ -182,35 +271,113 @@ export const TodayBrief: React.FC = () => {
         {/* Waiting on you */}
         <div className="mt-8">
           <div className="mb-2.5 flex items-center justify-between">
-            <span className="text-[12px] font-medium" style={{ color: 'var(--text-muted)' }}>
-              Waiting on you ({peopleUnread.length})
+            <span className="inline-flex items-center gap-1.5 text-[12px] font-medium" style={{ color: 'var(--text-muted)' }}>
+              <span>Waiting on you ({waitingItems.length})</span>
+              {aiCheckingWaiting && (
+                <RefreshCw size={11} className="animate-spin" style={{ color: 'var(--accent)' }} />
+              )}
             </span>
           </div>
-          <div className="space-y-1">
-            {peopleUnread.map((t) => (
-              <button
-                key={t.id}
-                onClick={() => void selectThread(t.id)}
-                className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left transition hover:bg-[var(--bg-hover)]"
-              >
-                <div className="flex min-w-0 items-center gap-3">
-                  <span
-                    className="h-2 w-2 shrink-0 rounded-full"
-                    style={{ background: t.accountColor }}
-                  />
-                  <div className="min-w-0">
-                    <div className="truncate text-[13px] font-medium">{t.latestFrom.name}</div>
-                    <div className="truncate text-[12px]" style={{ color: 'var(--text-secondary)' }}>
-                      {t.subject}
+          {waitingItems.length === 0 ? (
+            <p className="text-[12.5px]" style={{ color: 'var(--text-muted)' }}>
+              Nobody is waiting on a reply right now.
+            </p>
+          ) : (
+            <div className="space-y-1">
+              {waitingItems.map(({ thread: t, reason, aiVerified }) => (
+                <div
+                  key={t.id}
+                  onClick={() => void selectThread(t.id)}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    const senderEmail = t.latestFrom.email
+                    const senderName = t.latestFrom.name || senderEmail
+                    setContextMenu({
+                      x: e.clientX,
+                      y: e.clientY,
+                      items: [
+                        {
+                          label: 'Not waiting on me',
+                          icon: <X size={13} />,
+                          onClick: () => void dismissWaitingThread(t.id)
+                        },
+                        ...(senderEmail
+                          ? [
+                              {
+                                label: `Never show ${senderName} here`,
+                                icon: <Ban size={13} />,
+                                onClick: () => void muteWaitingSender(senderEmail)
+                              }
+                            ]
+                          : []),
+                        { type: 'separator' as const },
+                        {
+                          label: 'Draft reply with AI',
+                          icon: <Sparkles size={13} />,
+                          onClick: () => void requestDraftReply(t.id)
+                        },
+                        {
+                          label: 'Mark as read',
+                          icon: <MailOpen size={13} />,
+                          onClick: () => void setReadThreads([t.id], true)
+                        },
+                        {
+                          label: 'Archive',
+                          icon: <Archive size={13} />,
+                          onClick: () => void archiveThreads([t.id])
+                        }
+                      ]
+                    })
+                  }}
+                  className="group flex w-full cursor-pointer items-center justify-between gap-3 rounded-xl px-3 py-2 text-left transition hover:bg-[var(--bg-hover)]"
+                >
+                  <div className="flex min-w-0 items-center gap-3">
+                    <AccountBadge icon={t.accountIcon} color={t.accountColor} size="xs" />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate text-[13px] font-medium">
+                          {t.latestFrom.name || t.latestFrom.email}
+                        </span>
+                        {reason && (
+                          <span
+                            className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-medium"
+                            style={{
+                              background: aiVerified ? 'var(--accent-soft)' : 'var(--bg-elevated)',
+                              color: aiVerified ? 'var(--accent-text)' : 'var(--text-muted)'
+                            }}
+                          >
+                            {aiVerified && <Sparkles size={9} />}
+                            {reason}
+                          </span>
+                        )}
+                      </div>
+                      <div className="truncate text-[12px]" style={{ color: 'var(--text-secondary)' }}>
+                        {t.subject}
+                      </div>
                     </div>
                   </div>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <span className="text-[11.5px] group-hover:hidden" style={{ color: 'var(--text-muted)' }}>
+                      {new Date(t.lastMessageAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        void dismissWaitingThread(t.id)
+                      }}
+                      className="hidden rounded-lg p-1.5 transition hover:bg-[var(--bg-selected)] group-hover:inline-flex"
+                      style={{ color: 'var(--text-muted)' }}
+                      title="Not waiting on me (dismiss)"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
                 </div>
-                <span className="ml-3 shrink-0 text-[11.5px]" style={{ color: 'var(--text-muted)' }}>
-                  {new Date(t.lastMessageAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                </span>
-              </button>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Waiting on others */}
@@ -270,6 +437,7 @@ export const TodayBrief: React.FC = () => {
           </span>
         </div>
       </div>
+      <ContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} />
     </div>
   )
 }

@@ -20,6 +20,11 @@ EveryBox is a **public / commercial Windows desktop email and combined-calendar 
 - `npm run mcp` — run the built-in read-only local MCP server (`out/main/mcp-server.js`)
 - `launch-everybox.bat` — launch the built Electron app on Windows
 
-## Git & Remote
+## Git, PRs & CI Workflow
 - Private development remote: `origin` → `https://github.com/SmelterLabs/EveryBox.git` (branch `main`).
+- **Every change ships via a GitHub PR and syncs live to `origin/main`:**
+  1. Create a feature/fix branch from latest `main` (`feat/...` or `fix/...`), commit cleanly, and push to `origin`.
+  2. Run `npm run typecheck && npm run build` locally and verify the live app before merging.
+  3. Open a GitHub PR with `gh pr create` and squash-merge immediately once local checks pass (do not block waiting on long CI jobs — GitHub Actions `ci` and `security` run asynchronously on `main` after merge).
+  4. Bring local `main` to the tip (`git checkout main && git pull --ff-only origin main`) and restart the local Electron build so local and GitHub stay in lockstep.
 - Never commit `%APPDATA%\everybox\`, SQLite files, `.env*`, or OAuth client secrets.

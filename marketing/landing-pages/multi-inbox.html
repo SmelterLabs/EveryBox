@@ -1,0 +1,676 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EveryBox — One Calm Windows Workspace for Running 5+ Inboxes</title>
+  <meta name="description" content="Built for fractional executives, holding-company owners, and agency principals juggling 4 to 10 email accounts and calendars. Instant Ctrl+1..3 Workspaces, merged deduplicated calendars, per-company Voice Profiles, and wrong-account send guards." />
+  <link rel="icon" type="image/png" href="./assets/icon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #f2f4f7;
+      --paper: #ffffff;
+      --deck: #131924;
+      --deck-elev: #1b2434;
+      --deck-border: rgba(210, 225, 255, 0.12);
+      --ink: #111827;
+      --ink-secondary: #4b5563;
+      --ink-muted: #6b7280;
+      --border: #dfe4ec;
+      --navy: #1e3a8a;
+      --blue: #3b82f6;
+      --emerald: #10b981;
+      --violet: #8b5cf6;
+      --amber: #d97706;
+      --red: #dc2626;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "DM Sans", "Segoe UI", system-ui, sans-serif;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    .container {
+      max-width: 1150px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      background: rgba(242, 244, 247, 0.9);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav {
+      height: 68px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: var(--ink);
+      font-weight: 700;
+      font-size: 18px;
+      letter-spacing: -0.02em;
+    }
+    .logo img { width: 30px; height: 30px; border-radius: 7px; }
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      font-size: 14px;
+    }
+    .nav-links a {
+      color: var(--ink-secondary);
+      text-decoration: none;
+      font-weight: 500;
+    }
+    .nav-links a:hover { color: var(--ink); }
+    @media (max-width: 780px) {
+      .nav-links a:not(.keep-mobile) { display: none; }
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 20px;
+      border-radius: 10px;
+      font-family: inherit;
+      font-weight: 700;
+      font-size: 14px;
+      cursor: pointer;
+      text-decoration: none;
+      border: 1px solid transparent;
+      transition: all 0.15s ease;
+    }
+    .btn-dark { background: var(--deck); color: #ffffff; }
+    .btn-dark:hover { background: #1e293b; }
+    .btn-light { background: var(--paper); color: var(--ink); border-color: #cbd5e1; }
+    .btn-light:hover { border-color: var(--ink); }
+
+    /* Hero */
+    .hero {
+      padding: 68px 0 64px;
+    }
+    .hero-head {
+      max-width: 820px;
+      margin: 0 auto 44px;
+      text-align: center;
+    }
+    .eyebrow {
+      display: inline-block;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 12px;
+      color: var(--navy);
+      background: #e0e7ff;
+      padding: 5px 13px;
+      border-radius: 999px;
+      margin-bottom: 18px;
+      font-weight: 500;
+    }
+    h1 {
+      font-family: "Fraunces", Georgia, serif;
+      font-size: clamp(36px, 5vw, 58px);
+      line-height: 1.07;
+      letter-spacing: -0.025em;
+      font-weight: 600;
+      margin: 0 0 18px;
+      color: var(--ink);
+    }
+    .hero-sub {
+      font-size: 18px;
+      color: var(--ink-secondary);
+      max-width: 670px;
+      margin: 0 auto 28px;
+    }
+    .hero-ctas {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    /* Interactive Multi-Account Workspace Command Deck */
+    .deck {
+      background: var(--deck);
+      color: #eef2f9;
+      border-radius: 18px;
+      overflow: hidden;
+      border: 1px solid #263248;
+      box-shadow: 0 28px 70px rgba(15, 23, 42, 0.24);
+    }
+    .deck-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 14px 20px;
+      background: #0d121b;
+      border-bottom: 1px solid var(--deck-border);
+      flex-wrap: wrap;
+    }
+    .ws-pills {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .ws-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 13px;
+      border-radius: 9px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--deck-border);
+      color: #cbd5e1;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .ws-pill kbd {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 10.5px;
+      background: rgba(255, 255, 255, 0.1);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: #94a3b8;
+    }
+    .ws-pill.active {
+      background: rgba(59, 130, 246, 0.22);
+      border-color: rgba(96, 165, 250, 0.6);
+      color: #ffffff;
+    }
+    .ws-pill.active kbd { background: rgba(96, 165, 250, 0.25); color: #dbeafe; }
+
+    .deck-status {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11.5px;
+      color: #94a3b8;
+    }
+    .deck-grid {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      min-height: 340px;
+    }
+    @media (max-width: 860px) {
+      .deck-grid { grid-template-columns: 1fr; }
+    }
+    .deck-pane {
+      padding: 20px 22px;
+    }
+    .deck-pane + .deck-pane {
+      border-left: 1px solid var(--deck-border);
+      background: rgba(9, 13, 21, 0.45);
+    }
+    @media (max-width: 860px) {
+      .deck-pane + .deck-pane { border-left: none; border-top: 1px solid var(--deck-border); }
+    }
+    .pane-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+      font-size: 12px;
+      font-family: "JetBrains Mono", monospace;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .thread-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 11px;
+      padding: 12px;
+      border-radius: 10px;
+      background: var(--deck-elev);
+      border: 1px solid var(--deck-border);
+      margin-bottom: 10px;
+    }
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      margin-top: 5px;
+      flex-shrink: 0;
+    }
+    .thread-row strong { display: block; font-size: 14px; color: #f8fafc; }
+    .thread-meta {
+      font-size: 12px;
+      color: #94a3b8;
+      margin-top: 2px;
+    }
+    .voice-chip {
+      display: inline-block;
+      margin-top: 6px;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px;
+      color: #93c5fd;
+      background: rgba(59, 130, 246, 0.14);
+      padding: 2px 8px;
+      border-radius: 5px;
+    }
+
+    .cal-slot {
+      padding: 11px 13px;
+      border-radius: 10px;
+      background: var(--deck-elev);
+      border-left: 3px solid var(--blue);
+      margin-bottom: 10px;
+    }
+    .cal-time {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px;
+      color: #94a3b8;
+    }
+    .cal-title { font-weight: 700; font-size: 13.5px; color: #f8fafc; }
+    .cal-dots {
+      display: inline-flex;
+      gap: 5px;
+      margin-top: 4px;
+      font-size: 11.5px;
+      color: #cbd5e1;
+      align-items: center;
+    }
+    .guard-banner {
+      margin-top: 14px;
+      padding: 12px 14px;
+      border-radius: 10px;
+      background: rgba(220, 38, 38, 0.15);
+      border: 1px solid rgba(248, 113, 113, 0.42);
+      font-size: 12.5px;
+      color: #fecaca;
+    }
+
+    /* Sections */
+    .section {
+      padding: 72px 0;
+      border-top: 1px solid var(--border);
+    }
+    .sec-white { background: var(--paper); }
+    .sec-head { max-width: 700px; margin-bottom: 40px; }
+    .sec-label {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--navy);
+      margin-bottom: 8px;
+    }
+    h2 {
+      font-family: "Fraunces", Georgia, serif;
+      font-size: clamp(28px, 3.6vw, 40px);
+      font-weight: 600;
+      line-height: 1.12;
+      letter-spacing: -0.02em;
+      margin: 0 0 12px;
+    }
+    .sec-desc { font-size: 16px; color: var(--ink-secondary); margin: 0; }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+    @media (max-width: 900px) {
+      .grid-3 { grid-template-columns: 1fr; }
+    }
+    .card {
+      background: var(--paper);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 24px;
+    }
+    .sec-white .card { background: var(--bg); }
+    .card h3 { font-size: 17px; margin: 0 0 8px; }
+    .card p { font-size: 14px; color: var(--ink-secondary); margin: 0; }
+    .pill-mini {
+      display: inline-block;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px;
+      color: var(--navy);
+      background: #e0e7ff;
+      padding: 3px 8px;
+      border-radius: 5px;
+      margin-bottom: 12px;
+    }
+
+    /* Pricing */
+    .price-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 24px;
+      max-width: 860px;
+    }
+    @media (max-width: 780px) {
+      .price-grid { grid-template-columns: 1fr; }
+    }
+    .price-card {
+      background: var(--paper);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 30px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .price-card.featured {
+      border: 2px solid var(--deck);
+      box-shadow: 0 16px 40px rgba(17, 24, 39, 0.1);
+    }
+    .price-amt {
+      font-family: "Fraunces", Georgia, serif;
+      font-size: 42px;
+      font-weight: 700;
+      line-height: 1.1;
+      margin: 6px 0;
+    }
+    .price-amt span { font-family: "DM Sans", sans-serif; font-size: 15px; font-weight: 500; color: var(--ink-muted); }
+    .plist {
+      list-style: none;
+      padding: 0;
+      margin: 18px 0 26px;
+      display: grid;
+      gap: 10px;
+      font-size: 14px;
+      color: var(--ink-secondary);
+    }
+    .plist li::before { content: "✓ "; color: var(--emerald); font-weight: 700; }
+
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 32px 0 48px;
+      font-size: 13px;
+      color: var(--ink-muted);
+    }
+    .foot-row { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+    footer a { color: var(--ink-secondary); text-decoration: none; }
+
+    /* Modal */
+    .modal-bg {
+      position: fixed;
+      inset: 0;
+      background: rgba(17, 24, 39, 0.65);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      z-index: 100;
+    }
+    .modal-bg.open { display: flex; }
+    .modal {
+      width: 100%;
+      max-width: 440px;
+      background: var(--paper);
+      border-radius: 14px;
+      padding: 26px;
+    }
+    .modal h3 { font-family: "Fraunces", Georgia, serif; margin: 0 0 8px; font-size: 24px; }
+    .modal p { margin: 0 0 16px; font-size: 14px; color: var(--ink-secondary); }
+    .field {
+      width: 100%;
+      padding: 11px 13px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 14px;
+      margin-bottom: 10px;
+    }
+    .feedback { margin-top: 10px; font-size: 13px; color: var(--emerald); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="container nav">
+      <a class="logo" href="#">
+        <img src="./assets/icon.png" alt="EveryBox" />
+        <span>EveryBox</span>
+      </a>
+      <nav class="nav-links">
+        <a href="#workspaces">Workspaces</a>
+        <a href="#guardrails">Identity Airlock</a>
+        <a href="#pricing">Pricing</a>
+        <a href="./index.html" style="font-size:12px;opacity:.65">All 3 Tests</a>
+        <button class="btn btn-dark keep-mobile" style="padding:9px 15px;font-size:13.5px" onclick="openModal('Founding Solo Operator ($149/yr)')">Reserve Access</button>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="container">
+        <div class="hero-head">
+          <div class="eyebrow">For Fractional CxOs · Agency Owners · Holding-Company Operators</div>
+          <h1>Stop running five companies out of six browser tabs.</h1>
+          <p class="hero-sub">
+            EveryBox unites all your Gmail, Microsoft 365, and legacy IMAP accounts into one calm Windows desktop workspace. Hit <strong>Ctrl+1, Ctrl+2, Ctrl+3</strong> to filter both Email and your deduplicated Combined Calendar together—with a distinct Voice Profile per company.
+          </p>
+          <div class="hero-ctas">
+            <button class="btn btn-dark" onclick="openModal('Founding Operator ($149/yr — normally $249/yr)')">Claim Founding Rate — $149/yr</button>
+            <a class="btn btn-light" href="#workspaces">Try the Workspace Switcher &darr;</a>
+          </div>
+        </div>
+
+        <!-- Interactive Multi-Account Workspace Switcher -->
+        <div id="workspaces" class="deck">
+          <div class="deck-top">
+            <div class="ws-pills">
+              <button class="ws-pill active" data-ws="all" onclick="switchWs('all', this)">All Entities (5) <kbd>Ctrl+1</kbd></button>
+              <button class="ws-pill" data-ws="clients" onclick="switchWs('clients', this)">Client Work (3) <kbd>Ctrl+2</kbd></button>
+              <button class="ws-pill" data-ws="holdings" onclick="switchWs('holdings', this)">Holdings &amp; Personal (2) <kbd>Ctrl+3</kbd></button>
+            </div>
+            <div class="deck-status" id="wsStatus">Viewing 5 accounts · Calendar &amp; Mail synced</div>
+          </div>
+
+          <div class="deck-grid">
+            <div class="deck-pane">
+              <div class="pane-head">
+                <span>Unified Inbox · Active Focus</span>
+                <span id="mailCount">4 priority threads</span>
+              </div>
+              <div id="threadList"></div>
+            </div>
+            <div class="deck-pane">
+              <div class="pane-head">
+                <span>Combined Calendar · Merged View</span>
+                <span>Duplicates collapsed</span>
+              </div>
+              <div id="calList"></div>
+              <div class="guard-banner">
+                <strong>Identity Airlock Active:</strong> Warns before send if a draft from <em>alex@harborcfo.com</em> mentions a client or recipient belonging to <em>Northstar Advisory</em>.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="guardrails" class="section sec-white">
+      <div class="container">
+        <div class="sec-head">
+          <div class="sec-label">Built for People Wearing Multiple Hats</div>
+          <h2>Every detail designed around multi-entity sanity.</h2>
+          <p class="sec-desc">Gmail and Outlook assume you have one employer and one calendar. EveryBox assumes you run a portfolio.</p>
+        </div>
+        <div class="grid-3">
+          <div class="card">
+            <span class="pill-mini">FOCUS TOGGLES</span>
+            <h3>Mail &amp; Calendar Obey One Switch</h3>
+            <p>Solo a single client account, Ctrl+click any subset, or jump between saved Workspaces. Both your inbox and combined schedule immediately refocus together.</p>
+          </div>
+          <div class="card">
+            <span class="pill-mini">MERGED CALENDAR</span>
+            <h3>Cross-Account Conflict Detection</h3>
+            <p>See invitations across Gmail, M365, and local IMAP calendars on one clean grid. Duplicate invites sent to two of your addresses automatically merge into one multi-dot card.</p>
+          </div>
+          <div class="card">
+            <span class="pill-mini">PER-IDENTITY AI</span>
+            <h3>Voice Profiles Per Company</h3>
+            <p>EveryBox analyzes your sent history separately for each domain—drafting crisp board-level replies for your advisory seat and warm casual notes for your own team, using local AI or your own API key.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="pricing" class="section">
+      <div class="container">
+        <div class="sec-head">
+          <div class="sec-label">Operator Pricing</div>
+          <h2>Less than one double-booked consulting hour.</h2>
+          <p class="sec-desc">Zero AI token markup—run local models or plug in your own API key.</p>
+        </div>
+        <div class="price-grid">
+          <div class="price-card featured">
+            <div>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--navy);font-weight:600;">SOLO OPERATOR · FOUNDING OFFER</div>
+              <div class="price-amt">$29 <span>/ month</span></div>
+              <div style="font-size:13.5px;color:var(--navy);font-weight:600;">Founding Annual: $149/year (save 57%)</div>
+              <ul class="plist">
+                <li>Unlimited Gmail, Microsoft 365 &amp; IMAP accounts</li>
+                <li>Unlimited saved Workspaces (Ctrl+1..9)</li>
+                <li>Merged deduplicated Combined Calendar</li>
+                <li>Per-account learned Voice Profiles &amp; background Pre-Drafting</li>
+                <li>Waiting-On-You tracker &amp; only-if-no-reply reminders</li>
+                <li>Local AI (Ollama / LM Studio) + BYOK API support</li>
+              </ul>
+            </div>
+            <button class="btn btn-dark" onclick="openModal('Solo Operator Founding ($149/yr)')">Lock In Founding Rate</button>
+          </div>
+
+          <div class="price-card">
+            <div>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-muted);font-weight:600;">EXECUTIVE + EA PAIR</div>
+              <div class="price-amt">$79 <span>/ month</span></div>
+              <div style="font-size:13.5px;color:var(--ink-muted);">For principals working with an Executive Assistant</div>
+              <ul class="plist">
+                <li>Everything in Solo Operator (2 linked seats)</li>
+                <li>Shared delegated Triage &amp; Pre-Draft Approval Queue</li>
+                <li>Identity Airlock cross-account send protection</li>
+                <li>Automated anonymous Busy-block calendar syncing</li>
+                <li>Priority onboarding &amp; multi-account migration help</li>
+              </ul>
+            </div>
+            <button class="btn btn-light" onclick="openModal('Exec + EA Pair ($79/mo)')">Request Exec + EA Access</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container foot-row">
+      <div>&copy; 2026 EveryBox · Multi-Entity Focus for Windows Operators</div>
+      <div style="display:flex;gap:18px;">
+        <a href="./index.html">Positioning Lab</a>
+        <a href="./ai-firewall.html">AI Firewall Variant</a>
+        <a href="./outlook-escape.html">Outlook Variant</a>
+      </div>
+    </div>
+  </footer>
+
+  <div class="modal-bg" id="modal">
+    <div class="modal">
+      <h3 id="modalTitle">Lock In Founding Rate</h3>
+      <p>Tell us how many accounts you juggle and claim Founding early access for Windows.</p>
+      <form onsubmit="submitForm(event)">
+        <input class="field" type="email" id="uEmail" required placeholder="you@domain.com" />
+        <input class="field" type="text" id="uCount" placeholder="How many email accounts do you manage? (e.g. 6 across Gmail + M365)" />
+        <div style="display:flex;gap:10px;margin-top:6px;">
+          <button type="submit" class="btn btn-dark" style="flex:1">Reserve Founding Rate</button>
+          <button type="button" class="btn btn-light" onclick="closeModal()">Cancel</button>
+        </div>
+        <div class="feedback" id="formMsg"></div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    const THREADS = [
+      { ws: ['all', 'clients'], color: '#3b82f6', acct: 'Harbor CFO (M365)', subj: 'Q4 Board Deck — Cash Runway Numbers', from: 'Elena Vance', voice: 'Voice: Board / Executive' },
+      { ws: ['all', 'clients'], color: '#8b5cf6', acct: 'Redwood Agency (Gmail)', subj: 'Client Retainer Renewal + Scope Questions', from: 'Devon Brooks', voice: 'Voice: Client Partner' },
+      { ws: ['all', 'clients'], color: '#10b981', acct: 'Summit Ops (IMAP)', subj: 'Warehouse Lease Amendment Redlines', from: 'Marcus Patel', voice: 'Voice: Direct / Ops' },
+      { ws: ['all', 'holdings'], color: '#d97706', acct: 'Oakridge Holdings (IMAP)', subj: 'Property Tax Protest Hearing Notice', from: 'County Appraisal Office', voice: 'Voice: Formal / Legal' }
+    ];
+
+    const EVENTS = [
+      { ws: ['all', 'clients'], color: '#3b82f6', time: '10:00 – 10:45 AM', title: 'Harbor Weekly Finance Review', meta: 'Merged across 2 calendars (Harbor + Personal)' },
+      { ws: ['all', 'clients'], color: '#8b5cf6', time: '1:30 – 2:15 PM', title: 'Redwood Pitch Dry-Run', meta: 'Redwood Agency (Gmail)' },
+      { ws: ['all', 'holdings'], color: '#d97706', time: '4:00 – 4:30 PM', title: 'CPA Year-End Tax Planning Call', meta: 'Oakridge Holdings (Local IMAP Cal)' }
+    ];
+
+    function switchWs(ws, btn) {
+      document.querySelectorAll('.ws-pill').forEach(p => p.classList.remove('active'));
+      if (btn) btn.classList.add('active');
+      const filteredT = THREADS.filter(t => t.ws.includes(ws));
+      const filteredE = EVENTS.filter(e => e.ws.includes(ws));
+
+      document.getElementById('mailCount').textContent = `${filteredT.length} priority threads`;
+      document.getElementById('wsStatus').textContent =
+        ws === 'all' ? 'Viewing 5 accounts · Calendar & Mail synced' :
+        ws === 'clients' ? 'Focused: Client Work (3 accounts) · Personal muted' :
+        'Focused: Holdings & Personal (2 accounts) · Client noise hidden';
+
+      document.getElementById('threadList').innerHTML = filteredT.map(t => `
+        <div class="thread-row">
+          <span class="dot" style="background:${t.color}"></span>
+          <div>
+            <strong>${t.subj}</strong>
+            <div class="thread-meta">${t.from} &middot; ${t.acct}</div>
+            <span class="voice-chip">${t.voice}</span>
+          </div>
+        </div>
+      `).join('');
+
+      document.getElementById('calList').innerHTML = filteredE.map(e => `
+        <div class="cal-slot" style="border-left-color:${e.color}">
+          <div class="cal-time">${e.time}</div>
+          <div class="cal-title">${e.title}</div>
+          <div class="cal-dots"><span class="dot" style="background:${e.color};margin:0;width:7px;height:7px;"></span> ${e.meta}</div>
+        </div>
+      `).join('');
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.target.tagName === 'INPUT') return;
+      if (e.key === '1') switchWs('all', document.querySelector('[data-ws="all"]'));
+      if (e.key === '2') switchWs('clients', document.querySelector('[data-ws="clients"]'));
+      if (e.key === '3') switchWs('holdings', document.querySelector('[data-ws="holdings"]'));
+    });
+
+    let chosenPlan = '';
+    function openModal(plan) {
+      chosenPlan = plan;
+      document.getElementById('modalTitle').textContent = plan;
+      document.getElementById('formMsg').textContent = '';
+      document.getElementById('modal').classList.add('open');
+    }
+    function closeModal() { document.getElementById('modal').classList.remove('open'); }
+    function submitForm(e) {
+      e.preventDefault();
+      const email = document.getElementById('uEmail').value;
+      document.getElementById('formMsg').textContent = `Test capture recorded for ${email} (${chosenPlan}). Connect Stripe/Lemon Squeezy checkout here.`;
+    }
+
+    switchWs('all', document.querySelector('[data-ws="all"]'));
+  </script>
+</body>
+</html>

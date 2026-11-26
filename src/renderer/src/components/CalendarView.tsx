@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { usePaneZoom } from '../hooks/usePaneZoom'
+import { ContextMenu, type ContextMenuItem, type ContextMenuState } from './ContextMenu'
 import type { CalendarEvent, OutlookCalendarInfo } from '../../../shared/types'
 
 type CalMode = 'day' | 'week' | 'month'
@@ -134,12 +135,21 @@ function addDays(d: Date, n: number): Date {
 }
 
 export const CalendarView: React.FC = () => {
-  const { accounts, activeAccountIds, selectAllAccounts, showToast, refreshTodayEvents } = useAppStore()
+  const {
+    accounts,
+    activeAccountIds,
+    pendingCalendarDraft,
+    clearCalendarDraft,
+    selectAllAccounts,
+    showToast,
+    refreshTodayEvents
+  } = useAppStore()
   const [mode, setMode] = useState<CalMode>('week')
   const [anchor, setAnchor] = useState<Date>(() => startOfDay(new Date()))
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [syncing, setSyncing] = useState(false)
   const [selectedEvent, setSelectedEvent] = useState<MergedCalendarEvent | null>(null)
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [mergeDuplicates, setMergeDuplicates] = useState(true)
   const [createOpen, setCreateOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
@@ -175,6 +185,115 @@ export const CalendarView: React.FC = () => {
       setImportAccountId(importTargetAccounts[0].id)
     }
   }, [accounts, activeAccountIds, accountId, importAccountId, importTargetAccounts])
+
+  useEffect(() => {
+    if (!pendingCalendarDraft) return
+    if (pendingCalendarDraft.title !== undefined) setTitle(pendingCalendarDraft.title)
+    if (pendingCalendarDraft.description !== undefined) setDescription(pendingCalendarDraft.description)
+    if (pendingCalendarDraft.location !== undefined) setLocation(pendingCalendarDraft.location)
+    if (pendingCalendarDraft.accountId) setAccountId(pendingCalendarDraft.accountId)
+    if (pendingCalendarDraft.dateStr) setDateStr(pendingCalendarDraft.dateStr)
+    if (pendingCalendarDraft.startTime) setStartTime(pendingCalendarDraft.startTime)
+    if (pendingCalendarDraft.endTime) setEndTime(pendingCalendarDraft.endTime)
+    setCreateOpen(true)
+    clearCalendarDraft()
+  }, [pendingCalendarDraft, clearCalendarDraft])
+
+  const openEventContextMenu = (e: React.MouseEvent, item: MergedCalendarEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const ev = item.primary
+    const items: ContextMenuItem[] = []
+
+    if (ev.meetingUrl) {
+      items.push(
+        {
+          label: 'Join meeting',
+          icon: <Video size={13} />,
+          onClick: () => void window.glassmail.openExternal(ev.meetingUrl!)
+        },
+        {
+          label: 'Copy meeting link',
+          icon: <Copy size={13} />,
+          onClick: async () => {
+            await window.glassmail.copyText(ev.meetingUrl!, 'Copied meeting link')
+            showToast('Copied meeting link', undefined, 2500)
+          }
+        },
+        { type: 'separator' }
+      )
+    }
+
+    items.push(
+      {
+        label: 'View details',
+        icon: <CalendarIcon size={13} />,
+        onClick: () => setSelectedEvent(item)
+      },
+      {
+        label: 'Duplicate event…',
+        icon: <Plus size={13} />,
+        onClick: () => {
+          const s = new Date(ev.startAt)
+          const en = new Date(ev.endAt)
+          const pad2 = (n: number) => String(n).padStart(2, '0')
+          setTitle(ev.title)
+          setAccountId(ev.accountId || activeAccountIds[0] || accounts[0]?.id || '')
+          setDateStr(`${s.getFullYear()}-${pad2(s.getMonth() + 1)}-${pad2(s.getDate())}`)
+          setStartTime(`${pad2(s.getHours())}:${pad2(s.getMinutes())}`)
+          setEndTime(`${pad2(en.getHours())}:${pad2(en.getMinutes())}`)
+          setLocation(ev.location || '')
+          setDescription(ev.description ? formatAgendaText(ev.description) : '')
+          setCreateOpen(true)
+        }
+      },
+      {
+        label: 'Copy title',
+        icon: <Copy size={13} />,
+        onClick: async () => {
+          await window.glassmail.copyText(ev.title, 'Copied event title')
+          showToast('Copied event title', undefined, 2500)
+        }
+      }
+    )
+
+    if (ev.location) {
+      items.push({
+        label: 'Copy location',
+        icon: <MapPin size={13} />,
+        onClick: async () => {
+          await window.glassmail.copyText(ev.location!, 'Copied location')
+          showToast('Copied location', undefined, 2500)
+        }
+      })
+    }
+
+    if (!ev.readOnly) {
+      items.push(
+        { type: 'separator' },
+        {
+          label: 'Delete event',
+          icon: <Trash2 size={13} />,
+          danger: true,
+          onClick: async () => {
+            const ok = window.confirm(`Delete "${ev.title}"?`)
+            if (!ok) return
+            const res = await window.glassmail.deleteCalendarEvent(ev.id)
+            if (res.ok) {
+              if (selectedEvent?.primary.id === ev.id) setSelectedEvent(null)
+              await loadEvents()
+              await refreshTodayEvents()
+              showToast('Deleted event')
+            } else {
+              showToast(res.error || 'Could not delete event')
+            }
+          }
+        }
+      )
+    }
+
+    setContextMenu({ x: e.clientX, y: e.clientY, items })
+  }
 
   const getRange = (): { start: Date; end: Date; days: Date[] } => {
     if (mode === 'day') {
@@ -566,6 +685,7 @@ export const CalendarView: React.FC = () => {
                         <button
                           key={ev.id}
                           onClick={() => setSelectedEvent(item)}
+                          onContextMenu={(e) => openEventContextMenu(e, item)}
                           className="inline-flex max-w-full items-center gap-1 rounded-md border-l-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium transition hover:brightness-110"
                           style={{
                             background: 'var(--bg-main)',
@@ -604,6 +724,7 @@ export const CalendarView: React.FC = () => {
                       <button
                         key={ev.id}
                         onClick={() => setSelectedEvent(item)}
+                        onContextMenu={(e) => openEventContextMenu(e, item)}
                         className="block w-full rounded-lg border-l-[3px] px-2 py-1.5 text-left transition hover:brightness-110"
                         style={{
                           background: 'var(--bg-main)',
@@ -1231,6 +1352,7 @@ export const CalendarView: React.FC = () => {
         </div>
       )}
       </div>
+      <ContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} />
     </div>
   )
 }
