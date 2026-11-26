@@ -43,13 +43,17 @@
     "appId": "app.everybox.desktop",
     "productName": "EveryBox",
     "directories": {
+      "buildResources": "build",
       "output": "dist"
     },
     "files": [
       "out/**/*",
+      "build/icon.ico",
+      "build/icon.png",
       "package.json"
     ],
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         "nsis",
         "portable"

@@ -7,40 +7,53 @@ import { createCalDavEvent, exportEventsToIcs, ingestIcsText, syncImapAccountCal
 import { importOutlookCalendar, listOutlookCalendars } from './outlook-import'
 
 export class CalendarManager {
+  private syncing = false
+
   constructor(
     private db: GlassmailDB,
     private secrets: SecretStore
   ) {}
 
   async syncAllCalendars(): Promise<{ synced: number }> {
-    const accounts = this.db.listAccounts().filter((a) => a.isEnabled && a.calendarEnabled && !a.isDemo)
-    const settings = this.db.getSettings()
-    let total = 0
+    if (this.syncing) return { synced: 0 }
+    this.syncing = true
+    try {
+      const accounts = this.db.listAccounts().filter((a) => a.isEnabled && a.calendarEnabled && !a.isDemo)
+      const settings = this.db.getSettings()
+      let total = 0
 
-    await Promise.all(
-      accounts.map(async (account) => {
-        try {
-          if (account.provider === 'gmail') {
-            if (!settings.googleOAuthClientId || !settings.googleOAuthClientSecret) return
-            const auth = getAuthorizedGoogleClient(
-              account.id,
-              settings.googleOAuthClientId,
-              settings.googleOAuthClientSecret,
-              this.secrets
-            )
-            if (!auth) return
-            const res = await syncGoogleCalendar(account, auth, this.db)
-            total += res.synced
-          } else {
-            const res = await syncImapAccountCalendars(account, this.secrets, this.db)
-            total += res.synced
+      await Promise.all(
+        accounts.map(async (account) => {
+          try {
+            if (account.provider === 'gmail') {
+              if (!settings.googleOAuthClientId || !settings.googleOAuthClientSecret) return
+              const auth = getAuthorizedGoogleClient(
+                account.id,
+                settings.googleOAuthClientId,
+                settings.googleOAuthClientSecret,
+                this.secrets
+              )
+              if (!auth) return
+              const res = await syncGoogleCalendar(account, auth, this.db)
+              total += res.synced
+            } else if (account.provider === 'outlook-local') {
+              if (account.caldavUrl) {
+                const res = await importOutlookCalendar(account.caldavUrl, account, this.db)
+                if (res.ok) total += res.imported
+              }
+            } else {
+              const res = await syncImapAccountCalendars(account, this.secrets, this.db)
+              total += res.synced
+            }
+          } catch {
+            // Non-fatal per-account calendar sync error
           }
-        } catch {
-          // Non-fatal per-account calendar sync error
-        }
-      })
-    )
-    return { synced: total }
+        })
+      )
+      return { synced: total }
+    } finally {
+      this.syncing = false
+    }
   }
 
   listEvents(startAt: number, endAt: number, accountIds?: string[]): CalendarEvent[] {
@@ -51,7 +64,7 @@ export class CalendarManager {
     const account = this.db.getAccount(payload.accountId)
     if (!account) return { ok: false, error: 'Account not found.' }
 
-    if (account.isDemo || (account.provider === 'imap' && !account.caldavUrl)) {
+    if (account.isDemo || account.provider === 'outlook-local' || (account.provider === 'imap' && !account.caldavUrl)) {
       const id = `${account.id}|local|primary|${Date.now()}`
       this.db.upsertCalendarEvent({
         id,
