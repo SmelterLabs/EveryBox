@@ -11,6 +11,7 @@ import type {
   ComposerAttachment,
   CreateReminderPayload,
   Folder,
+  HabitSuggestion,
   ImplicitCalendarEvent,
   InboxCategory,
   MailboxId,
@@ -18,6 +19,8 @@ import type {
   Reminder,
   ScheduledEmail,
   SendEmailPayload,
+  SenderPreference,
+  SenderProfile,
   Snippet,
   SubscriptionGroup,
   ThreadAIMeta,
@@ -104,6 +107,9 @@ interface AppState {
   threadAiMeta: Record<string, ThreadAIMeta>
   autopilotRules: AutopilotRule[]
   autopilotLogs: AutopilotLogEntry[]
+  habitSuggestions: HabitSuggestion[]
+  senderProfiles: SenderProfile[]
+  activeHabitToast: HabitSuggestion | null
   voiceProfiles: VoiceProfile[]
 
   // UI Overlays
@@ -189,6 +195,14 @@ interface AppState {
     threadId: string
   ) => Promise<{ ok: boolean; id?: string; error?: string }>
 
+  // Habit Learning & Autopilot Undo
+  refreshHabits: () => Promise<void>
+  acceptHabitSuggestion: (id: string) => Promise<void>
+  dismissHabitSuggestion: (id: string) => Promise<void>
+  setSenderPreference: (senderEmail: string, preference: SenderPreference) => Promise<void>
+  undoAutopilotLog: (logId: string, pauseRule?: boolean) => Promise<void>
+  setActiveHabitToast: (suggestion: HabitSuggestion | null) => void
+
   // Overlays
   setSidebarVisible: (v: boolean) => void
   setAssistantOpen: (v: boolean) => void
@@ -262,6 +276,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   threadAiMeta: {},
   autopilotRules: [],
   autopilotLogs: [],
+  habitSuggestions: [],
+  senderProfiles: [],
+  activeHabitToast: null,
   voiceProfiles: [],
 
   sidebarVisible: true,
@@ -318,6 +335,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       preDrafts,
       autopilotRules,
       autopilotLogs,
+      habitSuggestions,
+      senderProfiles,
       voiceProfiles
     ] = await Promise.all([
       window.glassmail.listAccounts(),
@@ -329,6 +348,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       window.glassmail.listPreDrafts(),
       window.glassmail.listAutopilotRules(),
       window.glassmail.listAutopilotLogs(50),
+      window.glassmail.listHabitSuggestions('pending'),
+      window.glassmail.listSenderProfiles(40),
       window.glassmail.listVoiceProfiles()
     ])
     set({
@@ -341,6 +362,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       preDrafts,
       autopilotRules,
       autopilotLogs,
+      habitSuggestions,
+      senderProfiles,
       voiceProfiles
     })
     await Promise.all([get().refreshThreads(), get().refreshTodayEvents()])
@@ -840,6 +863,56 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     return res
   },
+
+  refreshHabits: async () => {
+    const [habitSuggestions, senderProfiles] = await Promise.all([
+      window.glassmail.listHabitSuggestions('pending'),
+      window.glassmail.listSenderProfiles(40)
+    ])
+    set({ habitSuggestions, senderProfiles })
+  },
+
+  acceptHabitSuggestion: async (id) => {
+    const res = await window.glassmail.acceptHabitSuggestion(id)
+    if (get().activeHabitToast?.id === id) {
+      set({ activeHabitToast: null })
+    }
+    const [autopilotRules] = await Promise.all([
+      window.glassmail.listAutopilotRules(),
+      get().refreshHabits()
+    ])
+    set({ autopilotRules })
+    if (res.ok) {
+      get().showToast('Rule enabled in Autopilot', undefined, 3500)
+    } else if (res.error) {
+      get().showToast(res.error, undefined, 4000)
+    }
+  },
+
+  dismissHabitSuggestion: async (id) => {
+    await window.glassmail.dismissHabitSuggestion(id)
+    if (get().activeHabitToast?.id === id) {
+      set({ activeHabitToast: null })
+    }
+    await get().refreshHabits()
+  },
+
+  setSenderPreference: async (senderEmail, preference) => {
+    await window.glassmail.setSenderPreference(senderEmail, preference, true)
+    await get().refreshHabits()
+  },
+
+  undoAutopilotLog: async (logId, pauseRule = false) => {
+    const res = await window.glassmail.undoAutopilotLog(logId, pauseRule)
+    await get().refreshAll()
+    if (res.ok) {
+      get().showToast(pauseRule ? 'Restored to Inbox — rule paused' : 'Restored to Inbox', undefined, 3500)
+    } else if (res.error) {
+      get().showToast(res.error, undefined, 4000)
+    }
+  },
+
+  setActiveHabitToast: (suggestion) => set({ activeHabitToast: suggestion }),
 
   setSidebarVisible: (v) => set({ sidebarVisible: v }),
   setAssistantOpen: (v) => set({ assistantOpen: v }),

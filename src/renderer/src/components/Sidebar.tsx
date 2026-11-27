@@ -61,6 +61,7 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
     counts,
     reminders,
     autopilotRules,
+    habitSuggestions,
     activeAccountIds,
     activeWorkspaceId,
     activeView,
@@ -604,19 +605,31 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
 
           <button
             onClick={() => setActiveView('autopilot')}
-            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition hover:bg-[var(--bg-hover)]"
+            className="flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition hover:bg-[var(--bg-hover)]"
             style={{
               background: activeView === 'autopilot' ? 'var(--bg-selected)' : 'transparent',
               color: activeView === 'autopilot' ? 'var(--accent-text)' : 'var(--text-primary)'
             }}
             title={
-              activeAutopilotCount > 0
-                ? `Autopilot · ${activeAutopilotCount} active rule${activeAutopilotCount === 1 ? '' : 's'}`
-                : 'AI Rules, Pre-Drafts, and Voice Profiles'
+              habitSuggestions.length > 0
+                ? `Autopilot · ${habitSuggestions.length} learned suggestion${habitSuggestions.length === 1 ? '' : 's'}`
+                : activeAutopilotCount > 0
+                  ? `Autopilot · ${activeAutopilotCount} active rule${activeAutopilotCount === 1 ? '' : 's'}`
+                  : 'AI Rules, Pre-Drafts, and Voice Profiles'
             }
           >
-            <Zap size={15} fill="#f5b841" style={{ color: '#e5a424' }} />
-            <span>Autopilot</span>
+            <span className="flex items-center gap-2.5">
+              <Zap size={15} fill="#f5b841" style={{ color: '#e5a424' }} />
+              <span>Autopilot</span>
+            </span>
+            {habitSuggestions.length > 0 && (
+              <span
+                className="rounded-full px-1.5 py-0.5 text-[10.5px] font-semibold leading-none tabular-nums"
+                style={{ background: 'var(--accent-soft)', color: 'var(--accent-text)' }}
+              >
+                {habitSuggestions.length}
+              </span>
+            )}
           </button>
 
           {/* Side-Panel Toggle (visually distinct from full-view tabs) */}
