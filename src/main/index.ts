@@ -219,15 +219,21 @@ function openThreadWindow(threadId: string): void {
   }
 }
 
+let broadcastTimer: NodeJS.Timeout | null = null
+
 function broadcastDataUpdated(): void {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('glassmail:data-updated')
-  }
-  for (const win of threadWindows.values()) {
-    if (!win.isDestroyed()) {
-      win.webContents.send('glassmail:data-updated')
+  if (broadcastTimer) return
+  broadcastTimer = setTimeout(() => {
+    broadcastTimer = null
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('glassmail:data-updated')
     }
-  }
+    for (const win of threadWindows.values()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send('glassmail:data-updated')
+      }
+    }
+  }, 150)
 }
 
 function recordHabitForThread(
