@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { CheckCircle2, Sparkles } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
+import { EmailHtmlBody } from './EmailHtmlBody'
 import { buildReplyComposerState } from '../utils/replyHelper'
 import type { ThreadDetail } from '../../../shared/types'
 
@@ -119,11 +120,9 @@ export const TriageView: React.FC = () => {
                     <span className="font-semibold">{m.from.name}</span>
                     <span style={{ color: 'var(--text-muted)' }}>{new Date(m.date).toLocaleString()}</span>
                   </div>
-                  <div
-                    className="email-prose mt-3 select-text"
-                    dangerouslySetInnerHTML={{
-                      __html: m.bodyHtml || `<p>${m.bodyText.replace(/\n/g, '<br/>')}</p>`
-                    }}
+                  <EmailHtmlBody
+                    html={m.bodyHtml || `<p>${m.bodyText.replace(/\n/g, '<br/>')}</p>`}
+                    className="mt-3"
                   />
                 </div>
               ))}
