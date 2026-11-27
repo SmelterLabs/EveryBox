@@ -2,9 +2,11 @@
   <img src="build/icon.png" alt="EveryBox Logo" width="96" height="96" />
   <h1>EveryBox</h1>
   <p><strong>Every inbox and calendar in one calm Windows desktop app — with multi-account focus toggles, private local AI, and a built-in MCP server.</strong></p>
+  <p><em>Android &amp; iOS companion mobile app coming soon.</em></p>
 
   <p>
     <img src="https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D6?style=flat-square&logo=windows" alt="Windows" />
+    <img src="https://img.shields.io/badge/Mobile%20App-Android%20%26%20iOS%20Coming%20Soon-059669?style=flat-square" alt="Mobile Coming Soon" />
     <img src="https://img.shields.io/badge/Stack-Electron%20%2B%20React%2019%20%2B%20TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="Tech Stack" />
     <img src="https://img.shields.io/badge/Storage-Local%20SQLite%20%2B%20DPAPI-0F766E?style=flat-square" alt="Local-First" />
     <img src="https://img.shields.io/badge/AI-Local%20%2F%20CLI%20Subscriptions%20%2F%20BYOK-6D28D9?style=flat-square" alt="Private AI" />
