@@ -295,7 +295,8 @@ export async function syncImapAccount(
                   )
                 }
 
-                const subject = parsed.subject || '(No subject)'
+                const rawSubject = (parsed.subject || '').trim()
+                const subject = rawSubject || '(No subject)'
                 const rawHtml = typeof parsed.html === 'string' ? parsed.html : ''
                 const text =
                   parsed.text ||
@@ -331,8 +332,13 @@ export async function syncImapAccount(
 
                 // Keep inbox msgId backwards-compatible; namespace non-inbox UIDs (including per-custom-folder) so UIDs never collide
                 const msgId = makeMsgId(msg.uid)
-                const normalizedSubj = subject.replace(/^(re|fwd|fw):\s*/gi, '').trim().toLowerCase()
-                const remoteThreadId = parsed.inReplyTo || normalizedSubj || `${target.role}-${msg.uid}`
+                const strippedSubj = rawSubject.replace(/^(re|fwd|fw):\s*/gi, '').trim().toLowerCase()
+                const normalizedSubj =
+                  strippedSubj && strippedSubj !== '(no subject)' && strippedSubj !== 'no subject'
+                    ? strippedSubj
+                    : ''
+                const remoteThreadId =
+                  parsed.inReplyTo || normalizedSubj || parsed.messageId || `${target.role}-${msg.uid}`
                 const threadId = `${account.id}|${Buffer.from(remoteThreadId).toString('base64url').slice(0, 32)}`
 
                 let icsRaw: string | undefined

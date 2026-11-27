@@ -651,6 +651,129 @@ export class GlassmailDB {
     this.cleanupDraftWaitingState()
     // Repair UTF-8-as-Latin1 mojibake in cached subjects (e.g. `â€”`, `âš ï¸`)
     this.cleanupMojibakeSubjects()
+    // Split any legacy IMAP mega-threads where unrelated "(No subject)" emails were merged together
+    this.cleanupSubjectlessMergedThreads()
+  }
+
+  private cleanupSubjectlessMergedThreads(): void {
+    try {
+      const mergedThreads = this.db
+        .prepare(
+          `SELECT id, account_id FROM threads
+           WHERE LOWER(TRIM(COALESCE(remote_thread_id, ''))) IN ('', '(no subject)', 'no subject')`
+        )
+        .all() as { id: string; account_id: string }[]
+      if (mergedThreads.length === 0) return
+
+      const getMsgs = this.db.prepare(
+        `SELECT id, account_id, remote_id, message_id_header, subject, snippet, date,
+                is_read, is_starred, has_attachments, category, folder_role, folder_name,
+                labels_json, from_json, to_json, sign_in_code, trackers_blocked,
+                scam_warning, unsubscribe_url, unsubscribe_mailto
+         FROM messages
+         WHERE thread_id = ?
+         ORDER BY date ASC`
+      )
+      const insertThread = this.db.prepare(
+        `INSERT OR IGNORE INTO threads (
+           id, account_id, remote_thread_id, subject, snippet, last_message_at,
+           message_count, is_read, is_starred, has_attachments, category, folder_role,
+           folder_name, labels_json, participants_json, latest_from_json, sign_in_code,
+           trackers_blocked, scam_warning, unsubscribe_url, unsubscribe_mailto
+         ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      const moveMsg = this.db.prepare('UPDATE messages SET thread_id = ? WHERE id = ?')
+      const moveFts = this.db.prepare('UPDATE messages_fts SET thread_id = ? WHERE message_id = ?')
+      const delThread = this.db.prepare('DELETE FROM threads WHERE id = ?')
+      const delAiMeta = this.db.prepare('DELETE FROM thread_ai_meta WHERE thread_id = ?')
+      const delPredraft = this.db.prepare('DELETE FROM thread_predrafts WHERE thread_id = ?')
+
+      const touchedNewThreadIds = new Set<string>()
+      this.db.exec('BEGIN')
+      try {
+        for (const oldThread of mergedThreads) {
+          const msgs = getMsgs.all(oldThread.id) as {
+            id: string
+            account_id: string
+            remote_id: string
+            message_id_header: string | null
+            subject: string
+            snippet: string
+            date: number
+            is_read: number
+            is_starred: number
+            has_attachments: number
+            category: string
+            folder_role: string
+            folder_name: string | null
+            labels_json: string | null
+            from_json: string
+            to_json: string | null
+            sign_in_code: string | null
+            trackers_blocked: number
+            scam_warning: string | null
+            unsubscribe_url: string | null
+            unsubscribe_mailto: string | null
+          }[]
+
+          for (const m of msgs) {
+            const msgIdHdr = (m.message_id_header || '').trim()
+            const newRemoteThreadId = msgIdHdr || `${m.folder_role}-${m.remote_id}`
+            const newThreadId = `${m.account_id}|${Buffer.from(newRemoteThreadId).toString('base64url').slice(0, 32)}`
+            if (newThreadId === oldThread.id) continue
+
+            let participantsJson = '[]'
+            try {
+              const fromObj = JSON.parse(m.from_json || '{}')
+              const toArr = JSON.parse(m.to_json || '[]')
+              participantsJson = JSON.stringify([fromObj, ...(Array.isArray(toArr) ? toArr : [])].slice(0, 6))
+            } catch {
+              participantsJson = '[]'
+            }
+
+            insertThread.run(
+              newThreadId,
+              m.account_id,
+              newRemoteThreadId,
+              m.subject || '(No subject)',
+              m.snippet || '',
+              m.date,
+              m.is_read ? 1 : 0,
+              m.is_starred ? 1 : 0,
+              m.has_attachments ? 1 : 0,
+              m.category || 'people',
+              m.folder_role || 'inbox',
+              m.folder_name || 'Inbox',
+              m.labels_json || '[]',
+              participantsJson,
+              m.from_json || '{}',
+              m.sign_in_code ?? null,
+              m.trackers_blocked || 0,
+              m.scam_warning ?? null,
+              m.unsubscribe_url ?? null,
+              m.unsubscribe_mailto ?? null
+            )
+            moveMsg.run(newThreadId, m.id)
+            moveFts.run(newThreadId, m.id)
+            touchedNewThreadIds.add(newThreadId)
+          }
+
+          delThread.run(oldThread.id)
+          delAiMeta.run(oldThread.id)
+          delPredraft.run(oldThread.id)
+        }
+
+        for (const tid of touchedNewThreadIds) {
+          this.recomputeThreadFromMessages(tid)
+        }
+        this.db.exec('COMMIT')
+      } catch (err) {
+        this.db.exec('ROLLBACK')
+        throw err
+      }
+    } catch {
+      // Non-fatal startup cleanup
+    }
   }
 
   private cleanupDraftWaitingState(): void {
@@ -2246,11 +2369,7 @@ export class GlassmailDB {
             AND m2.is_draft = 0
             AND (
               m2.is_sent = 0
-              OR (
-                m2.folder_role = 'inbox'
-                AND COALESCE(json_extract(m2.from_json, '$.email'), '') != ''
-                AND LOWER(json_extract(m2.from_json, '$.email')) != LOWER(a.email)
-              )
+              OR m2.folder_role = 'inbox'
             )
           ORDER BY m2.date DESC
           LIMIT 1
