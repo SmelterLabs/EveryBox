@@ -123,6 +123,11 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
   } = useAppStore()
 
   const [showMore, setShowMore] = useState(false)
+  useEffect(() => {
+    if (['snoozed', 'waiting', 'subscriptions', 'scheduled'].includes(activeMailbox)) {
+      setShowMore(true)
+    }
+  }, [activeMailbox])
   const { ref: zoomRef, zoom, zoomBadge } = usePaneZoom<HTMLElement>('sidebar')
   const [addingReminder, setAddingReminder] = useState(false)
   const [newReminderTitle, setNewReminderTitle] = useState('')
@@ -1047,7 +1052,13 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
         {/* Primary Views: Email, Calendar, Autopilot + Distinct Side-Panel Assistant Toggle */}
         <div className="space-y-0.5">
           <button
-            onClick={() => setActiveView('mail')}
+            onClick={() => {
+              if (activeView === 'mail' && (activeMailbox !== 'inbox' || Boolean(activeFolderName))) {
+                void setActiveMailbox('inbox')
+              } else {
+                setActiveView('mail')
+              }
+            }}
             className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition hover:bg-[var(--bg-hover)]"
             style={{
               background: activeView === 'mail' ? 'var(--bg-selected)' : 'transparent',

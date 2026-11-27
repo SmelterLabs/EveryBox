@@ -12,6 +12,7 @@ export const TodayBrief: React.FC = () => {
     settings,
     accounts,
     activeAccountIds,
+    activeMailbox,
     counts,
     threads,
     todayEvents,
@@ -387,11 +388,11 @@ export const TodayBrief: React.FC = () => {
               You&apos;re waiting on {counts.waiting} thread{counts.waiting === 1 ? '' : 's'}
             </span>
             <button
-              onClick={() => void setActiveMailbox('waiting')}
+              onClick={() => void setActiveMailbox(activeMailbox === 'waiting' ? 'inbox' : 'waiting')}
               className="text-[12px] font-medium hover:underline"
               style={{ color: 'var(--accent-text)' }}
             >
-              See all
+              {activeMailbox === 'waiting' ? 'Back to Inbox' : 'See all'}
             </button>
           </div>
         ) : null}

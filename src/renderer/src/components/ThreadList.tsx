@@ -3,6 +3,7 @@ import {
   AlignJustify,
   Archive,
   ArrowDown,
+  ArrowLeft,
   ArrowUp,
   Bell,
   Check,
@@ -81,6 +82,7 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
     searchIncludeTrash,
     searchScopeAccountId,
     scheduledEmails,
+    setActiveMailbox,
     setActiveCategory,
     selectThread,
     selectAllAccounts,
@@ -719,6 +721,19 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
       <div className="border-b px-4 pb-3 pt-4" style={{ borderColor: 'var(--border-subtle)' }}>
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
+            {!parsedSearch &&
+              !activeFolderName &&
+              ['waiting', 'snoozed', 'scheduled'].includes(activeMailbox) && (
+                <button
+                  type="button"
+                  onClick={() => void setActiveMailbox('inbox')}
+                  className="mb-1 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11.5px] font-medium transition hover:bg-[var(--bg-hover)]"
+                  style={{ color: 'var(--accent-text)' }}
+                >
+                  <ArrowLeft size={12} />
+                  <span>Back to Inbox</span>
+                </button>
+              )}
             <h2 className="truncate text-[20px] font-semibold leading-tight tracking-tight">
               {parsedSearch ? 'Search' : mailboxTitle}
             </h2>
