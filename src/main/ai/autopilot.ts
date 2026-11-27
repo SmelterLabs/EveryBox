@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto'
 import { BrowserWindow, Notification } from 'electron'
 import type { GlassmailDB } from '../db/database'
 import type { SecretStore } from '../security/secrets'
+import type { SyncManager, ThreadMutationSnapshot } from '../mail/sync-manager'
 import type {
   AutopilotAction,
   AutopilotCondition,
@@ -239,7 +240,8 @@ async function threadMatchesRule(
 export async function runAutopilotPass(
   db: GlassmailDB,
   secrets: SecretStore,
-  broadcast: () => void
+  broadcast: () => void,
+  syncManager?: Pick<SyncManager, 'syncThreadMutationToRemote'>
 ): Promise<{ actionsTaken: number }> {
   if (autopilotRunning) return { actionsTaken: 0 }
   autopilotRunning = true
@@ -291,29 +293,73 @@ export async function runAutopilotPass(
         let actionType: string | undefined
         let undoAction: 'restoreInbox' | 'markUnread' | 'unstar' | null = null
 
+        const buildMutationSnapshot = (): ThreadMutationSnapshot | undefined => {
+          if (!syncManager) return undefined
+          const detail = db.getThreadDetail(t.id)
+          if (!detail) return undefined
+          return {
+            threadId: detail.id,
+            accountId: detail.accountId,
+            folderRole: detail.folderRole,
+            folderName: detail.folderName,
+            messageRemoteIds: detail.messages.map((m) => m.remoteId),
+            messageFolders: detail.messages.map((m) => ({
+              remoteId: m.remoteId,
+              folderRole: m.folderRole,
+              folderName: m.folderName
+            }))
+          }
+        }
+
         for (const act of rule.actions) {
           if (act.type === 'archive') {
+            const snap = buildMutationSnapshot()
             db.moveThreads([t.id], 'archive', 'Archive')
+            if (syncManager) {
+              void syncManager.syncThreadMutationToRemote([t.id], 'archive', 'archive', snap ? [snap] : undefined)
+            }
             summaries.push('Archived')
             actionType = 'archive'
             undoAction = 'restoreInbox'
           } else if (act.type === 'trash') {
+            const snap = buildMutationSnapshot()
             db.moveThreads([t.id], 'trash', 'Trash')
+            if (syncManager) {
+              void syncManager.syncThreadMutationToRemote([t.id], 'trash', 'trash', snap ? [snap] : undefined)
+            }
             summaries.push('Moved to Trash')
             actionType = 'trash'
             undoAction = 'restoreInbox'
           } else if (act.type === 'moveToFolder' && act.folderName) {
+            const snap = buildMutationSnapshot()
             db.moveThreads([t.id], 'custom', act.folderName)
+            if (syncManager) {
+              void syncManager.syncThreadMutationToRemote(
+                [t.id],
+                'move',
+                'custom',
+                snap ? [snap] : undefined,
+                act.folderName
+              )
+            }
             summaries.push(`Moved to ${act.folderName}`)
             actionType = 'moveToFolder'
             undoAction = 'restoreInbox'
           } else if (act.type === 'markRead') {
+            const snap = buildMutationSnapshot()
             db.setThreadRead([t.id], true)
+            if (syncManager) {
+              void syncManager.syncThreadMutationToRemote([t.id], 'read', undefined, snap ? [snap] : undefined)
+            }
             summaries.push('Marked read')
             if (!actionType) actionType = 'markRead'
             if (!undoAction) undoAction = 'markUnread'
           } else if (act.type === 'star') {
+            const snap = buildMutationSnapshot()
             db.setThreadStarred([t.id], true)
+            if (syncManager) {
+              void syncManager.syncThreadMutationToRemote([t.id], 'star', undefined, snap ? [snap] : undefined)
+            }
             summaries.push('Starred')
             if (!actionType) actionType = 'star'
             if (!undoAction) undoAction = 'unstar'

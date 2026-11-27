@@ -1,20 +1,44 @@
 import { randomUUID } from 'crypto'
 import type { GlassmailDB } from '../db/database'
 import type { SecretStore } from '../security/secrets'
-import type { Account, Folder, SendEmailPayload } from '../../shared/types'
+import type {
+  Account,
+  Folder,
+  FolderCreateInput,
+  FolderDeleteInput,
+  FolderDeletePreview,
+  FolderMutationResult,
+  FolderPrefsInput,
+  FolderRenameInput,
+  SendEmailPayload
+} from '../../shared/types'
 import { getAuthorizedGoogleClient } from './gmail-oauth'
 import { computeGenericErrorBackoffMs, formatRetryTime, parseGmailRateLimit } from './gmail-rate-limit'
 import {
+  createGmailLabel,
   deleteGmailDraftByMessageId,
+  deleteGmailLabel,
   modifyGmailThread,
+  renameGmailLabel,
   sendGmailMessage,
   syncGmailAccount,
   syncGmailLabel,
-  trashGmailThread
+  trashGmailThread,
+  updateGmailLabelColor
 } from './gmail-sync'
-import { mutateImapMessages, sendImapSmtpMessage, syncImapAccount } from './imap-sync'
 import {
+  createImapFolder,
+  deleteImapFolder,
+  mutateImapMessages,
+  renameImapFolder,
+  sendImapSmtpMessage,
+  syncImapAccount
+} from './imap-sync'
+import {
+  createOutlookFolder,
+  deleteOutlookFolder,
   mutateOutlookComMessages,
+  renameOutlookFolder,
   sendOrSaveOutlookComMessage,
   syncOutlookComAccount
 } from './outlook-com-sync'
@@ -32,7 +56,38 @@ export class SyncManager {
   private timer: NodeJS.Timeout | null = null
   private inFlight = new Set<string>()
   private pendingRemoteMutations = new Map<string, number>()
+  private recentFolderMutations = new Map<
+    string,
+    { accountId: string; remoteId: string; action: 'create' | 'rename-old' | 'delete'; expiresAt: number }
+  >()
   private processingScheduled = false
+
+  private recordFolderMutation(
+    accountId: string,
+    remoteId: string,
+    action: 'create' | 'rename-old' | 'delete',
+    ttlMs = 90_000
+  ): void {
+    const key = `${accountId}|${remoteId.toLowerCase()}`
+    this.recentFolderMutations.set(key, {
+      accountId,
+      remoteId,
+      action,
+      expiresAt: Date.now() + ttlMs
+    })
+    this.db.recordFolderGuard(accountId, remoteId, action, ttlMs)
+  }
+
+  isFolderMutationActive(accountId: string, remoteId: string): boolean {
+    const key = `${accountId}|${remoteId.toLowerCase()}`
+    const entry = this.recentFolderMutations.get(key)
+    if (!entry) return false
+    if (Date.now() > entry.expiresAt) {
+      this.recentFolderMutations.delete(key)
+      return false
+    }
+    return true
+  }
 
   constructor(
     private db: GlassmailDB,
@@ -397,7 +452,18 @@ export class SyncManager {
             } else if (action === 'move' && targetRole === 'custom' && targetFolderName) {
               const targetFolder = this.db.getFolderByName(account.id, targetFolderName)
               if (targetFolder?.remoteId) {
-                await modifyGmailThread(auth, remoteThreadId, [targetFolder.remoteId], ['INBOX'])
+                const removeIds = ['INBOX']
+                if (
+                  sourceRole === 'custom' &&
+                  sourceFolderName &&
+                  sourceFolderName.toLowerCase() !== targetFolderName.toLowerCase()
+                ) {
+                  const sourceFolder = this.db.getFolderByName(account.id, sourceFolderName)
+                  if (sourceFolder?.remoteId && sourceFolder.remoteId !== targetFolder.remoteId) {
+                    removeIds.push(sourceFolder.remoteId)
+                  }
+                }
+                await modifyGmailThread(auth, remoteThreadId, [targetFolder.remoteId], removeIds)
               }
             } else if (action === 'move' && targetRole === 'inbox') {
               await modifyGmailThread(auth, remoteThreadId, ['INBOX'], ['TRASH', 'SPAM'])
@@ -498,5 +564,367 @@ export class SyncManager {
     } finally {
       this.processingScheduled = false
     }
+  }
+
+  // ---- Unified Cross-Provider Folder CRUD ----
+
+  getFolderDeletePreview(folderId: string): FolderDeletePreview | null {
+    return this.db.getFolderDeletePreview(folderId)
+  }
+
+  async createFolder(input: FolderCreateInput): Promise<FolderMutationResult> {
+    const cleanName = (input.name || '').trim()
+    if (!cleanName) return { ok: false, error: 'Folder name cannot be empty.' }
+    const account = this.db.getAccount(input.accountId)
+    if (!account) return { ok: false, error: 'Account not found.' }
+
+    if (account.isDemo) {
+      const fullPath = input.parentPath ? `${input.parentPath}/${cleanName}` : cleanName
+      const folder: Folder = {
+        id: `${account.id}|${fullPath}`,
+        accountId: account.id,
+        remoteId: fullPath,
+        name: fullPath,
+        path: fullPath,
+        parentPath: input.parentPath ?? null,
+        delimiter: '/',
+        color: input.color ?? null,
+        icon: input.icon ?? null,
+        role: 'custom',
+        unreadCount: 0,
+        totalCount: 0,
+        isSelectable: true,
+        syncEnabled: true
+      }
+      this.db.upsertFolder(folder)
+      this.onSyncUpdate()
+      return { ok: true, folder: this.db.getFolderById(folder.id) || folder }
+    }
+
+    this.pendingRemoteMutations.set(account.id, (this.pendingRemoteMutations.get(account.id) || 0) + 1)
+    try {
+      if (account.provider === 'gmail') {
+        const settings = this.db.getSettings()
+        const auth = getAuthorizedGoogleClient(
+          account.id,
+          settings.googleOAuthClientId || '',
+          settings.googleOAuthClientSecret || '',
+          this.secrets
+        )
+        if (!auth) return { ok: false, error: 'Gmail authorization expired. Please reconnect account.' }
+        const fullLabelName = input.parentPath ? `${input.parentPath}/${cleanName}` : cleanName
+        const created = await createGmailLabel(auth, fullLabelName, input.color)
+        const folder: Folder = {
+          id: `${account.id}|${created.id}`,
+          accountId: account.id,
+          remoteId: created.id,
+          name: created.name,
+          path: created.name,
+          parentPath: input.parentPath ?? null,
+          delimiter: '/',
+          color: input.color ?? created.color ?? null,
+          icon: input.icon ?? null,
+          role: 'custom',
+          unreadCount: 0,
+          totalCount: 0,
+          isSelectable: true,
+          syncEnabled: true
+        }
+        this.recordFolderMutation(account.id, created.id, 'create')
+        this.db.upsertFolder(folder)
+        if (input.color !== undefined || input.icon !== undefined) {
+          this.db.updateFolderPrefs(folder.id, { color: input.color, icon: input.icon })
+        }
+        this.onSyncUpdate()
+        return { ok: true, folder: this.db.getFolderById(folder.id) || folder }
+      } else if (account.provider === 'outlook-local') {
+        const res = await createOutlookFolder(account, cleanName, input.parentPath)
+        if (!res.ok || !res.path) {
+          return { ok: false, error: res.error || 'Could not create Outlook folder.' }
+        }
+        const parentFolder = input.parentPath ? this.db.getFolderByName(account.id, input.parentPath) : null
+        const displayName = parentFolder ? `${parentFolder.name}/${res.name || cleanName}` : res.name || cleanName
+        const folder: Folder = {
+          id: `${account.id}|${res.path}`,
+          accountId: account.id,
+          remoteId: res.path,
+          name: displayName,
+          path: res.path,
+          parentPath: res.parentPath ?? null,
+          delimiter: '\\',
+          color: input.color ?? null,
+          icon: input.icon ?? null,
+          role: 'custom',
+          unreadCount: 0,
+          totalCount: 0,
+          isSelectable: true,
+          syncEnabled: true
+        }
+        this.recordFolderMutation(account.id, res.path, 'create')
+        this.db.upsertFolder(folder)
+        if (input.color !== undefined || input.icon !== undefined) {
+          this.db.updateFolderPrefs(folder.id, { color: input.color, icon: input.icon })
+        }
+        this.onSyncUpdate()
+        return { ok: true, folder: this.db.getFolderById(folder.id) || folder }
+      } else {
+        // IMAP
+        const parentFolder = input.parentPath ? this.db.getFolderByName(account.id, input.parentPath) : null
+        const delim = parentFolder?.delimiter || '/'
+        const segments = input.parentPath ? [...input.parentPath.split(delim).filter(Boolean), cleanName] : [cleanName]
+        const created = await createImapFolder(account, this.secrets, segments)
+        const folder: Folder = {
+          id: `${account.id}|${created.path}`,
+          accountId: account.id,
+          remoteId: created.path,
+          name: created.name,
+          path: created.path,
+          parentPath: created.parentPath,
+          delimiter: created.delimiter,
+          color: input.color ?? null,
+          icon: input.icon ?? null,
+          role: 'custom',
+          unreadCount: 0,
+          totalCount: 0,
+          isSelectable: true,
+          syncEnabled: true
+        }
+        this.recordFolderMutation(account.id, created.path, 'create')
+        this.db.upsertFolder(folder)
+        if (input.color !== undefined || input.icon !== undefined) {
+          this.db.updateFolderPrefs(folder.id, { color: input.color, icon: input.icon })
+        }
+        this.onSyncUpdate()
+        return { ok: true, folder: this.db.getFolderById(folder.id) || folder }
+      }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    } finally {
+      const nextCount = (this.pendingRemoteMutations.get(account.id) || 1) - 1
+      if (nextCount <= 0) this.pendingRemoteMutations.delete(account.id)
+      else this.pendingRemoteMutations.set(account.id, nextCount)
+    }
+  }
+
+  async renameFolder(input: FolderRenameInput): Promise<FolderMutationResult> {
+    const cleanLeaf = (input.newName || '').trim()
+    if (!cleanLeaf) return { ok: false, error: 'New folder name cannot be empty.' }
+    const folder = this.db.getFolderById(input.folderId)
+    if (!folder) return { ok: false, error: 'Folder not found.' }
+    if (folder.role !== 'custom') return { ok: false, error: 'Cannot rename a system folder.' }
+    const account = this.db.getAccount(folder.accountId)
+    if (!account) return { ok: false, error: 'Account not found.' }
+
+    const delim = folder.delimiter || '/'
+    const descendants = this.db.findDescendantFolders(folder)
+
+    if (account.isDemo) {
+      const nextPath = folder.parentPath ? `${folder.parentPath}${delim}${cleanLeaf}` : cleanLeaf
+      const updated = this.db.renameFolderCascade(folder.id, nextPath, nextPath, nextPath)
+      this.onSyncUpdate()
+      return { ok: true, folder: updated || undefined }
+    }
+
+    this.pendingRemoteMutations.set(account.id, (this.pendingRemoteMutations.get(account.id) || 0) + 1)
+    try {
+      if (account.provider === 'gmail') {
+        const settings = this.db.getSettings()
+        const auth = getAuthorizedGoogleClient(
+          account.id,
+          settings.googleOAuthClientId || '',
+          settings.googleOAuthClientSecret || '',
+          this.secrets
+        )
+        if (!auth) return { ok: false, error: 'Gmail authorization expired. Please reconnect account.' }
+        const nextFullName = folder.parentPath ? `${folder.parentPath}/${cleanLeaf}` : cleanLeaf
+        const res = await renameGmailLabel(auth, folder.remoteId, folder.path, nextFullName)
+        const childRenames = res.childRenames.map((cr) => {
+          const match = descendants.find((d) => d.remoteId === cr.remoteId)
+          return {
+            folderId: match ? match.id : `${account.id}|${cr.remoteId}`,
+            newName: cr.newPath,
+            newPath: cr.newPath,
+            newRemoteId: cr.remoteId
+          }
+        })
+        this.recordFolderMutation(account.id, folder.remoteId, 'create')
+        const updated = this.db.renameFolderCascade(folder.id, res.name, res.name, folder.remoteId, childRenames)
+        this.onSyncUpdate()
+        return { ok: true, folder: updated || undefined }
+      } else if (account.provider === 'outlook-local') {
+        const res = await renameOutlookFolder(account, folder.path, cleanLeaf)
+        if (!res.ok || !res.path) {
+          return { ok: false, error: res.error || 'Could not rename Outlook folder.' }
+        }
+        const oldNamePrefix = folder.name.includes('/') ? folder.name.slice(0, folder.name.lastIndexOf('/')) : ''
+        const nextDisplayName = oldNamePrefix ? `${oldNamePrefix}/${res.name || cleanLeaf}` : res.name || cleanLeaf
+
+        this.recordFolderMutation(account.id, folder.remoteId, 'rename-old')
+        this.recordFolderMutation(account.id, res.path, 'create')
+        for (const d of descendants) {
+          this.recordFolderMutation(account.id, d.remoteId, 'rename-old')
+        }
+
+        const childRenames = (res.childRenames || [])
+          .map((cr) => {
+            const match = descendants.find((d) => d.path.toLowerCase() === cr.oldPath.toLowerCase())
+            if (!match) return null
+            this.recordFolderMutation(account.id, cr.newPath, 'create')
+            const cNewName = match.name.toLowerCase().startsWith(`${folder.name.toLowerCase()}/`)
+              ? `${nextDisplayName}${match.name.slice(folder.name.length)}`
+              : match.name
+            return {
+              folderId: match.id,
+              newName: cNewName,
+              newPath: cr.newPath,
+              newRemoteId: cr.newPath
+            }
+          })
+          .filter((x): x is NonNullable<typeof x> => Boolean(x))
+
+        const updated = this.db.renameFolderCascade(folder.id, nextDisplayName, res.path, res.path, childRenames)
+        this.onSyncUpdate()
+        return { ok: true, folder: updated || undefined }
+      } else {
+        // IMAP
+        const nextPath = folder.parentPath ? `${folder.parentPath}${delim}${cleanLeaf}` : cleanLeaf
+        const res = await renameImapFolder(account, this.secrets, folder.path, nextPath)
+
+        this.recordFolderMutation(account.id, folder.remoteId, 'rename-old')
+        this.recordFolderMutation(account.id, res.newPath, 'create')
+        for (const d of descendants) {
+          this.recordFolderMutation(account.id, d.remoteId, 'rename-old')
+        }
+
+        const childRenames = res.childRenames
+          .map((cr) => {
+            const match = descendants.find((d) => d.path.toLowerCase() === cr.oldPath.toLowerCase())
+            if (!match) return null
+            this.recordFolderMutation(account.id, cr.newPath, 'create')
+            const parts = cr.newPath.split(res.delimiter)
+            return {
+              folderId: match.id,
+              newName: parts[parts.length - 1] || match.name,
+              newPath: cr.newPath,
+              newRemoteId: cr.newPath
+            }
+          })
+          .filter((x): x is NonNullable<typeof x> => Boolean(x))
+
+        const updated = this.db.renameFolderCascade(folder.id, cleanLeaf, res.newPath, res.newPath, childRenames)
+        this.onSyncUpdate()
+        return { ok: true, folder: updated || undefined }
+      }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    } finally {
+      const nextCount = (this.pendingRemoteMutations.get(account.id) || 1) - 1
+      if (nextCount <= 0) this.pendingRemoteMutations.delete(account.id)
+      else this.pendingRemoteMutations.set(account.id, nextCount)
+    }
+  }
+
+  async deleteFolder(input: FolderDeleteInput): Promise<FolderMutationResult> {
+    const folder = this.db.getFolderById(input.folderId)
+    if (!folder) return { ok: false, error: 'Folder not found.' }
+    if (folder.role !== 'custom') return { ok: false, error: 'Cannot delete a system folder.' }
+    const account = this.db.getAccount(folder.accountId)
+    if (!account) return { ok: false, error: 'Account not found.' }
+
+    const deleteChildren = input.deleteChildren !== false
+    const strategy =
+      input.strategy || (account.provider === 'gmail' ? 'remove-label' : 'move-messages')
+    const moveMessagesToRole =
+      strategy === 'move-messages' ? input.moveMessagesToRole || 'archive' : undefined
+
+    const descendants = deleteChildren ? this.db.findDescendantFolders(folder) : []
+    // Arm 90s TTL guard before remote call so an in-flight sync cannot resurrect the folder
+    this.recordFolderMutation(account.id, folder.remoteId, 'delete')
+    for (const d of descendants) {
+      this.recordFolderMutation(account.id, d.remoteId, 'delete')
+    }
+
+    if (account.isDemo) {
+      const { disabledRuleNames } = this.db.deleteFolderCascade(folder.id, {
+        strategy,
+        moveMessagesToRole,
+        deleteChildren
+      })
+      this.onSyncUpdate()
+      return { ok: true, disabledRuleNames }
+    }
+
+    this.pendingRemoteMutations.set(account.id, (this.pendingRemoteMutations.get(account.id) || 0) + 1)
+    try {
+      if (account.provider === 'gmail') {
+        const settings = this.db.getSettings()
+        const auth = getAuthorizedGoogleClient(
+          account.id,
+          settings.googleOAuthClientId || '',
+          settings.googleOAuthClientSecret || '',
+          this.secrets
+        )
+        if (!auth) return { ok: false, error: 'Gmail authorization expired. Please reconnect account.' }
+        await deleteGmailLabel(auth, folder.remoteId, {
+          deleteChildren,
+          oldPath: folder.path
+        })
+      } else if (account.provider === 'outlook-local') {
+        const res = await deleteOutlookFolder(account, folder.path, { moveMessagesToRole })
+        if (!res.ok) return { ok: false, error: res.error || 'Could not delete Outlook folder.' }
+      } else {
+        await deleteImapFolder(account, this.secrets, folder.path, {
+          moveMessagesToRole,
+          deleteChildren
+        })
+      }
+
+      const { disabledRuleNames } = this.db.deleteFolderCascade(folder.id, {
+        strategy,
+        moveMessagesToRole,
+        deleteChildren
+      })
+      this.onSyncUpdate()
+      return { ok: true, disabledRuleNames }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    } finally {
+      const nextCount = (this.pendingRemoteMutations.get(account.id) || 1) - 1
+      if (nextCount <= 0) this.pendingRemoteMutations.delete(account.id)
+      else this.pendingRemoteMutations.set(account.id, nextCount)
+    }
+  }
+
+  async updateFolderPrefs(input: FolderPrefsInput): Promise<FolderMutationResult> {
+    const existing = this.db.getFolderById(input.folderId)
+    if (!existing) return { ok: false, error: 'Folder not found.' }
+
+    const { folderId, ...prefs } = input
+    const updated = this.db.updateFolderPrefs(folderId, prefs)
+    if (!updated) return { ok: false, error: 'Could not update folder preferences.' }
+
+    // Best-effort sync color to Gmail when changing color on a custom Gmail label
+    if (prefs.color !== undefined && existing.role === 'custom') {
+      const account = this.db.getAccount(existing.accountId)
+      if (account && !account.isDemo && account.provider === 'gmail' && !this.isRateLimitBackoff(account)) {
+        try {
+          const settings = this.db.getSettings()
+          const auth = getAuthorizedGoogleClient(
+            account.id,
+            settings.googleOAuthClientId || '',
+            settings.googleOAuthClientSecret || '',
+            this.secrets
+          )
+          if (auth) {
+            await updateGmailLabelColor(auth, existing.remoteId, prefs.color)
+          }
+        } catch {
+          // Local color pref is already saved; don't fail the user's pref edit on remote error
+        }
+      }
+    }
+
+    this.onSyncUpdate()
+    return { ok: true, folder: updated }
   }
 }

@@ -128,6 +128,74 @@ export interface Folder {
   role: 'inbox' | 'sent' | 'drafts' | 'archive' | 'junk' | 'trash' | 'custom'
   unreadCount: number
   totalCount: number
+  parentPath?: string | null
+  delimiter?: string
+  color?: string | null
+  icon?: string | null
+  isPinned?: boolean
+  isHidden?: boolean
+  muteBadge?: boolean
+  sortOrder?: number
+  isSelectable?: boolean
+  syncEnabled?: boolean
+}
+
+export type FolderDeleteStrategy = 'remove-label' | 'move-messages' | 'delete-messages'
+
+export interface FolderCreateInput {
+  accountId: string
+  name: string
+  parentPath?: string | null
+  color?: string | null
+  icon?: string | null
+}
+
+export interface FolderRenameInput {
+  folderId: string
+  newName: string
+}
+
+export interface FolderDeleteInput {
+  folderId: string
+  strategy?: FolderDeleteStrategy
+  moveMessagesToRole?: 'archive' | 'inbox' | 'trash'
+  deleteChildren?: boolean
+}
+
+export interface FolderDeletePreview {
+  folderId: string
+  folderName: string
+  provider: AccountProvider
+  messageCount: number
+  childCount: number
+  affectedRuleNames: string[]
+  defaultStrategy: FolderDeleteStrategy
+}
+
+export interface FolderPrefsInput {
+  folderId: string
+  color?: string | null
+  icon?: string | null
+  isPinned?: boolean
+  isHidden?: boolean
+  muteBadge?: boolean
+  sortOrder?: number
+  syncEnabled?: boolean
+}
+
+export interface FolderMutationResult {
+  ok: boolean
+  folder?: Folder
+  disabledRuleNames?: string[]
+  error?: string
+}
+
+export interface FolderCrudIpcAPI {
+  createFolder: (input: FolderCreateInput) => Promise<FolderMutationResult>
+  renameFolder: (input: FolderRenameInput) => Promise<FolderMutationResult>
+  deleteFolder: (input: FolderDeleteInput) => Promise<FolderMutationResult>
+  getFolderDeletePreview: (folderId: string) => Promise<FolderDeletePreview | null>
+  updateFolderPrefs: (input: FolderPrefsInput) => Promise<FolderMutationResult>
 }
 
 export interface Attachment {

@@ -147,6 +147,7 @@ async function refreshGmailLabels(
 ): Promise<Map<string, string>> {
   const labelsRes = await gmail.users.labels.list({ userId: 'me' })
   const labelMap = new Map<string, string>()
+  const liveRemoteIds: string[] = []
   const gmailSystemFolders: Record<string, { name: string; role: Folder['role'] }> = {
     INBOX: { name: 'Inbox', role: 'inbox' },
     SENT: { name: 'Sent', role: 'sent' },
@@ -157,6 +158,7 @@ async function refreshGmailLabels(
   for (const lbl of labelsRes.data.labels || []) {
     if (!lbl.id || !lbl.name) continue
     labelMap.set(lbl.id, lbl.name)
+    liveRemoteIds.push(lbl.id)
     const sys = gmailSystemFolders[lbl.id]
     if (sys) {
       db.upsertFolder({
@@ -165,22 +167,34 @@ async function refreshGmailLabels(
         remoteId: lbl.id,
         name: sys.name,
         path: lbl.id,
+        parentPath: null,
+        delimiter: '/',
         role: sys.role,
         unreadCount: Number(lbl.messagesUnread || 0),
-        totalCount: Number(lbl.messagesTotal || 0)
+        totalCount: Number(lbl.messagesTotal || 0),
+        isSelectable: true
       })
     } else if (lbl.type === 'user') {
+      const slashIdx = lbl.name.lastIndexOf('/')
+      const parentPath = slashIdx > 0 ? lbl.name.slice(0, slashIdx) : null
       db.upsertFolder({
         id: `${account.id}|${lbl.id}`,
         accountId: account.id,
         remoteId: lbl.id,
         name: lbl.name,
         path: lbl.name,
+        parentPath,
+        delimiter: '/',
+        color: lbl.color?.backgroundColor ?? null,
         role: 'custom',
         unreadCount: Number(lbl.messagesUnread || 0),
-        totalCount: Number(lbl.messagesTotal || 0)
+        totalCount: Number(lbl.messagesTotal || 0),
+        isSelectable: true
       })
     }
+  }
+  if (liveRemoteIds.length > 0) {
+    db.pruneMissingFolders(account.id, liveRemoteIds)
   }
   lastLabelsRefreshByAccount.set(account.id, Date.now())
   return labelMap
@@ -860,6 +874,186 @@ export async function sendGmailMessage(
     requestBody: {
       raw,
       threadId: remoteThreadId
+    }
+  })
+}
+
+// ---- Gmail Label CRUD ----
+
+// Official Gmail API label color palette pairs (backgroundColor -> textColor)
+const GMAIL_LABEL_COLOR_PALETTE: { bg: string; fg: string }[] = [
+  { bg: '#000000', fg: '#ffffff' },
+  { bg: '#434343', fg: '#ffffff' },
+  { bg: '#666666', fg: '#ffffff' },
+  { bg: '#999999', fg: '#ffffff' },
+  { bg: '#cccccc', fg: '#000000' },
+  { bg: '#efefef', fg: '#000000' },
+  { bg: '#fb4c2f', fg: '#ffffff' },
+  { bg: '#cc3a21', fg: '#ffffff' },
+  { bg: '#e66550', fg: '#ffffff' },
+  { bg: '#ff7537', fg: '#ffffff' },
+  { bg: '#ffad47', fg: '#000000' },
+  { bg: '#eaa041', fg: '#000000' },
+  { bg: '#fad165', fg: '#000000' },
+  { bg: '#f2c960', fg: '#000000' },
+  { bg: '#16a766', fg: '#ffffff' },
+  { bg: '#43d692', fg: '#000000' },
+  { bg: '#0b804b', fg: '#ffffff' },
+  { bg: '#2da2bb', fg: '#ffffff' },
+  { bg: '#4a86e8', fg: '#ffffff' },
+  { bg: '#3c78d8', fg: '#ffffff' },
+  { bg: '#6d9eeb', fg: '#000000' },
+  { bg: '#a479e2', fg: '#ffffff' },
+  { bg: '#8e63ce', fg: '#ffffff' },
+  { bg: '#f691b3', fg: '#000000' },
+  { bg: '#e07798', fg: '#ffffff' },
+  { bg: '#b65775', fg: '#ffffff' }
+]
+
+function parseHexRgb(hex: string): [number, number, number] | null {
+  const m = hex.trim().replace(/^#/, '').match(/^([0-9a-f]{6})$/i)
+  if (!m) return null
+  const n = parseInt(m[1], 16)
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+}
+
+export function mapHexToGmailLabelColor(hex: string): { backgroundColor: string; textColor: string } | null {
+  const rgb = parseHexRgb(hex)
+  if (!rgb) return null
+  let best = GMAIL_LABEL_COLOR_PALETTE[0]
+  let bestDist = Infinity
+  for (const entry of GMAIL_LABEL_COLOR_PALETTE) {
+    const c = parseHexRgb(entry.bg)!
+    const dist = (rgb[0] - c[0]) ** 2 + (rgb[1] - c[1]) ** 2 + (rgb[2] - c[2]) ** 2
+    if (dist < bestDist) {
+      bestDist = dist
+      best = entry
+    }
+  }
+  return { backgroundColor: best.bg, textColor: best.fg }
+}
+
+export async function createGmailLabel(
+  auth: OAuth2Client,
+  name: string,
+  color?: string | null
+): Promise<{ id: string; name: string; color?: string | null }> {
+  const gmail = google.gmail({ version: 'v1', auth })
+  const mappedColor = color ? mapHexToGmailLabelColor(color) : null
+  const res = await gmail.users.labels.create({
+    userId: 'me',
+    requestBody: {
+      name,
+      labelListVisibility: 'labelShow',
+      messageListVisibility: 'show',
+      ...(mappedColor ? { color: mappedColor } : {})
+    }
+  })
+  if (!res.data.id || !res.data.name) {
+    throw new Error('Gmail did not return a valid label ID.')
+  }
+  return {
+    id: res.data.id,
+    name: res.data.name,
+    color: res.data.color?.backgroundColor ?? color ?? null
+  }
+}
+
+export async function renameGmailLabel(
+  auth: OAuth2Client,
+  labelId: string,
+  oldPath: string,
+  newPath: string
+): Promise<{ id: string; name: string; childRenames: { remoteId: string; oldPath: string; newPath: string }[] }> {
+  const gmail = google.gmail({ version: 'v1', auth })
+
+  // Discover any child labels under oldPath/* before patching so we can batch-patch them cleanly
+  const listRes = await gmail.users.labels.list({ userId: 'me' })
+  const prefix = `${oldPath}/`
+  const prefixLow = prefix.toLowerCase()
+  const children = (listRes.data.labels || []).filter(
+    (l) => l.type === 'user' && l.id && l.id !== labelId && l.name && l.name.toLowerCase().startsWith(prefixLow)
+  )
+
+  const primaryRes = await gmail.users.labels.patch({
+    userId: 'me',
+    id: labelId,
+    requestBody: { name: newPath }
+  })
+
+  const childRenames: { remoteId: string; oldPath: string; newPath: string }[] = []
+  for (const child of children) {
+    if (!child.id || !child.name) continue
+    const nextChildPath = `${newPath}${child.name.slice(oldPath.length)}`
+    await gmail.users.labels.patch({
+      userId: 'me',
+      id: child.id,
+      requestBody: { name: nextChildPath }
+    })
+    childRenames.push({
+      remoteId: child.id,
+      oldPath: child.name,
+      newPath: nextChildPath
+    })
+  }
+
+  return {
+    id: primaryRes.data.id || labelId,
+    name: primaryRes.data.name || newPath,
+    childRenames
+  }
+}
+
+export async function deleteGmailLabel(
+  auth: OAuth2Client,
+  labelId: string,
+  opts?: { deleteChildren?: boolean; oldPath?: string }
+): Promise<{ deletedIds: string[] }> {
+  const gmail = google.gmail({ version: 'v1', auth })
+  const deletedIds: string[] = []
+
+  if (opts?.deleteChildren && opts.oldPath) {
+    const listRes = await gmail.users.labels.list({ userId: 'me' })
+    const prefixLow = `${opts.oldPath}/`.toLowerCase()
+    const children = (listRes.data.labels || [])
+      .filter(
+        (l) => l.type === 'user' && l.id && l.id !== labelId && l.name && l.name.toLowerCase().startsWith(prefixLow)
+      )
+      .sort((a, b) => (b.name?.length || 0) - (a.name?.length || 0))
+
+    for (const child of children) {
+      if (!child.id) continue
+      try {
+        await gmail.users.labels.delete({ userId: 'me', id: child.id })
+        deletedIds.push(child.id)
+      } catch (err) {
+        if (!isGmailNotFoundError(err)) throw err
+      }
+    }
+  }
+
+  try {
+    await gmail.users.labels.delete({ userId: 'me', id: labelId })
+    deletedIds.push(labelId)
+  } catch (err) {
+    if (!isGmailNotFoundError(err)) throw err
+  }
+
+  return { deletedIds }
+}
+
+export async function updateGmailLabelColor(
+  auth: OAuth2Client,
+  labelId: string,
+  hexColor: string | null
+): Promise<void> {
+  const gmail = google.gmail({ version: 'v1', auth })
+  const mapped = hexColor ? mapHexToGmailLabelColor(hexColor) : null
+  await gmail.users.labels.patch({
+    userId: 'me',
+    id: labelId,
+    requestBody: {
+      color: mapped ? mapped : undefined
     }
   })
 }
