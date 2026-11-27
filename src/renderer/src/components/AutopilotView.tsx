@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react'
 import {
   Check,
+  ChevronDown,
+  Eye,
   Mic,
   Play,
   Plus,
@@ -12,6 +14,7 @@ import {
   Zap
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
+import { HabitSuggestionPreview } from './HabitSuggestionPreview'
 import type {
   AutopilotRule,
   SenderPreference,
@@ -128,6 +131,7 @@ export const AutopilotView: React.FC = () => {
     }
   }, [autopilotDraftPrompt, clearAutopilotDraftPrompt])
   const [busySuggestionId, setBusySuggestionId] = useState<string | null>(null)
+  const [previewSuggestionIds, setPreviewSuggestionIds] = useState<Record<string, boolean>>({})
   const [busyUndoLogId, setBusyUndoLogId] = useState<string | null>(null)
 
   // Voice Profiles state
@@ -349,55 +353,110 @@ export const AutopilotView: React.FC = () => {
               <div className="space-y-2">
                 {habitSuggestions.map((suggestion) => {
                   const busy = busySuggestionId === suggestion.id
+                  const isPreviewOpen = Boolean(previewSuggestionIds[suggestion.id])
+                  const showSenderChip =
+                    Boolean(suggestion.senderEmail) &&
+                    !suggestion.title.toLowerCase().includes(suggestion.senderEmail!.toLowerCase()) &&
+                    !suggestion.reason.toLowerCase().includes(suggestion.senderEmail!.toLowerCase())
                   return (
                     <div
                       key={suggestion.id}
-                      className="flex items-center justify-between gap-4 rounded-xl border p-3.5"
-                      style={{ background: 'var(--bg-main)', borderColor: 'var(--border-subtle)' }}
+                      className="rounded-xl border p-3.5 transition"
+                      style={{
+                        background: 'var(--bg-main)',
+                        borderColor: isPreviewOpen
+                          ? 'color-mix(in srgb, var(--accent) 45%, var(--border-subtle))'
+                          : 'var(--border-subtle)'
+                      }}
                     >
-                      <div className="min-w-0 flex-1">
-                        <div className="text-[13px] font-semibold" style={{ color: 'var(--text-primary)' }}>
-                          {suggestion.title}
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-[13px] font-semibold" style={{ color: 'var(--text-primary)' }}>
+                              {suggestion.title}
+                            </span>
+                            {showSenderChip && (
+                              <span
+                                className="rounded-md px-1.5 py-0.5 font-mono text-[10.5px]"
+                                style={{ background: 'var(--bg-elevated)', color: 'var(--text-muted)' }}
+                              >
+                                {suggestion.senderEmail}
+                              </span>
+                            )}
+                          </div>
+                          <p className="mt-0.5 text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                            {suggestion.reason}
+                          </p>
                         </div>
-                        <p className="mt-0.5 text-[12px]" style={{ color: 'var(--text-muted)' }}>
-                          {suggestion.reason}
-                        </p>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-2">
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={async () => {
-                            setBusySuggestionId(suggestion.id)
-                            try {
-                              await acceptHabitSuggestion(suggestion.id)
-                            } finally {
-                              setBusySuggestionId(null)
+                        <div className="flex shrink-0 items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPreviewSuggestionIds((prev) => ({
+                                ...prev,
+                                [suggestion.id]: !prev[suggestion.id]
+                              }))
                             }
-                          }}
-                          className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
-                          style={{ background: 'var(--accent)' }}
-                        >
-                          <Check size={12} />
-                          Turn On Rule
-                        </button>
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={async () => {
-                            setBusySuggestionId(suggestion.id)
-                            try {
-                              await dismissHabitSuggestion(suggestion.id)
-                            } finally {
-                              setBusySuggestionId(null)
-                            }
-                          }}
-                          className="rounded-lg border px-2.5 py-1.5 text-[12px] font-medium transition hover:bg-[var(--bg-hover)] disabled:opacity-50"
-                          style={{ borderColor: 'var(--border-strong)', color: 'var(--text-secondary)' }}
-                        >
-                          Dismiss
-                        </button>
+                            aria-expanded={isPreviewOpen}
+                            className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[12px] font-medium transition hover:bg-[var(--bg-hover)]"
+                            style={{
+                              borderColor: isPreviewOpen ? 'var(--accent)' : 'var(--border-strong)',
+                              background: isPreviewOpen ? 'var(--accent-soft)' : 'transparent',
+                              color: isPreviewOpen ? 'var(--accent-text)' : 'var(--text-secondary)'
+                            }}
+                          >
+                            <Eye size={12} />
+                            <span>{isPreviewOpen ? 'Hide emails' : 'See emails'}</span>
+                            <ChevronDown
+                              size={12}
+                              className={`transition-transform ${isPreviewOpen ? 'rotate-180' : ''}`}
+                            />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={async () => {
+                              setBusySuggestionId(suggestion.id)
+                              try {
+                                await acceptHabitSuggestion(suggestion.id)
+                              } finally {
+                                setBusySuggestionId(null)
+                              }
+                            }}
+                            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+                            style={{ background: 'var(--accent)' }}
+                          >
+                            <Check size={12} />
+                            Turn On Rule
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={async () => {
+                              setBusySuggestionId(suggestion.id)
+                              try {
+                                await dismissHabitSuggestion(suggestion.id)
+                              } finally {
+                                setBusySuggestionId(null)
+                              }
+                            }}
+                            className="rounded-lg border px-2.5 py-1.5 text-[12px] font-medium transition hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                            style={{ borderColor: 'var(--border-strong)', color: 'var(--text-secondary)' }}
+                          >
+                            Dismiss
+                          </button>
+                        </div>
                       </div>
+
+                      {isPreviewOpen && (
+                        <HabitSuggestionPreview
+                          suggestion={suggestion}
+                          onJumpToThread={(threadId) => {
+                            setActiveView('mail')
+                            void selectThread(threadId)
+                          }}
+                        />
+                      )}
                     </div>
                   )
                 })}

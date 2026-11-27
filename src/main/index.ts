@@ -1407,6 +1407,9 @@ function registerIpc(): void {
   ipcMain.handle('habits:listSuggestions', (_, status?: 'pending' | 'accepted' | 'dismissed' | 'all') =>
     db.listHabitSuggestions(status)
   )
+  ipcMain.handle('habits:getSuggestionSamples', (_, id: string, limit?: number) =>
+    db.getHabitSuggestionSamples(id, limit)
+  )
   ipcMain.handle('habits:acceptSuggestion', async (_, id: string) => {
     const res = await acceptHabitSuggestion(db, secrets, id)
     if (res.ok) broadcastDataUpdated()

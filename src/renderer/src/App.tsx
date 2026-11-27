@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { ArrowUpCircle, Check, ChevronDown, Command, Layers, PanelLeft, Search, X } from 'lucide-react'
+import { ArrowUpCircle, Check, ChevronDown, Command, Eye, Layers, PanelLeft, Search, X } from 'lucide-react'
 import { isMac, modKeyPrefix } from './utils/platform'
 import { getEffectiveShortcut, matchesCombo } from './utils/shortcuts'
 import { buildReplyComposerState } from './utils/replyHelper'
@@ -13,6 +13,7 @@ import { CalendarView } from './components/CalendarView'
 import { TriageView } from './components/TriageView'
 import { SubscriptionsView } from './components/SubscriptionsView'
 import { AutopilotView } from './components/AutopilotView'
+import { HabitSuggestionPreview } from './components/HabitSuggestionPreview'
 import { Composer } from './components/Composer'
 import { CommandPalette } from './components/CommandPalette'
 import { MoveToFolderModal } from './components/MoveToFolderModal'
@@ -79,6 +80,7 @@ export const App: React.FC = () => {
   const searchInputRef = useRef<HTMLInputElement | null>(null)
   const [showSearchScopeMenu, setShowSearchScopeMenu] = useState(false)
   const [habitToastHovered, setHabitToastHovered] = useState(false)
+  const [habitToastPreviewOpen, setHabitToastPreviewOpen] = useState(false)
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
     const saved = Number(localStorage.getItem('everybox:sidebarWidth'))
     return Number.isFinite(saved) && saved >= 190 && saved <= 480 ? saved : 244
@@ -180,15 +182,16 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     setHabitToastHovered(false)
+    setHabitToastPreviewOpen(false)
   }, [activeHabitToast?.id])
 
   useEffect(() => {
-    if (!activeHabitToast || habitToastHovered) return
+    if (!activeHabitToast || habitToastHovered || habitToastPreviewOpen) return
     const timer = window.setTimeout(() => {
       setActiveHabitToast(null)
     }, 7000)
     return () => window.clearTimeout(timer)
-  }, [activeHabitToast?.id, habitToastHovered, setActiveHabitToast])
+  }, [activeHabitToast?.id, habitToastHovered, habitToastPreviewOpen, setActiveHabitToast])
 
   // Global OS-aware & customizable keyboard shortcuts
   useEffect(() => {
@@ -462,58 +465,121 @@ export const App: React.FC = () => {
           aria-live="polite"
           onMouseEnter={() => setHabitToastHovered(true)}
           onMouseLeave={() => setHabitToastHovered(false)}
-          className="fixed bottom-5 right-5 z-50 flex max-w-[540px] items-center gap-2.5 rounded-full border py-2 pl-3.5 pr-2.5 text-[12.5px] shadow-xl backdrop-blur-md"
-          style={{
-            background: 'color-mix(in srgb, var(--bg-elevated) 94%, transparent)',
-            borderColor: 'var(--border-strong)'
-          }}
+          className="fixed bottom-5 right-5 z-50 flex max-w-[580px] flex-col items-end gap-2"
         >
-          <span aria-hidden="true" className="shrink-0">
-            ✨
-          </span>
-          <span
-            className="min-w-0 truncate font-medium"
-            style={{ color: 'var(--text-primary)' }}
-            title={activeHabitToast.reason || activeHabitToast.title}
+          {habitToastPreviewOpen && (
+            <div
+              className="w-[460px] max-w-[calc(100vw-2.5rem)] rounded-2xl border p-3.5 shadow-2xl backdrop-blur-md"
+              style={{
+                background: 'color-mix(in srgb, var(--bg-elevated) 96%, transparent)',
+                borderColor: 'var(--border-strong)'
+              }}
+            >
+              <div className="mb-2 flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="truncate text-[12.5px] font-semibold" style={{ color: 'var(--text-primary)' }}>
+                    {activeHabitToast.title}
+                  </div>
+                  <div className="mt-0.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                    {activeHabitToast.reason}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setHabitToastPreviewOpen(false)}
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition hover:bg-[var(--bg-hover)]"
+                  style={{ color: 'var(--text-muted)' }}
+                  aria-label="Close email preview"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+              <div className="max-h-[340px] overflow-y-auto pr-0.5">
+                <HabitSuggestionPreview
+                  suggestion={activeHabitToast}
+                  compact
+                  onJumpToThread={(threadId) => {
+                    setHabitToastPreviewOpen(false)
+                    setActiveView('mail')
+                    void selectThread(threadId)
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
+          <div
+            className="flex max-w-full items-center gap-2.5 rounded-full border py-2 pl-3.5 pr-2.5 text-[12.5px] shadow-xl backdrop-blur-md"
+            style={{
+              background: 'color-mix(in srgb, var(--bg-elevated) 94%, transparent)',
+              borderColor: 'var(--border-strong)'
+            }}
           >
-            {activeHabitToast.title}
-          </span>
-          <div className="ml-1 flex shrink-0 items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => {
-                setHabitToastHovered(false)
-                void acceptHabitSuggestion(activeHabitToast.id)
-              }}
-              className="rounded-full px-3 py-1 text-[12px] font-semibold transition hover:opacity-90"
-              style={{ background: 'var(--accent)', color: '#fff' }}
+            <span aria-hidden="true" className="shrink-0">
+              ✨
+            </span>
+            <span
+              className="min-w-0 truncate font-medium"
+              style={{ color: 'var(--text-primary)' }}
+              title={activeHabitToast.reason || activeHabitToast.title}
             >
-              Always do this
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setHabitToastHovered(false)
-                void dismissHabitSuggestion(activeHabitToast.id)
-              }}
-              className="rounded-full px-2.5 py-1 text-[12px] font-medium transition hover:bg-[var(--bg-hover)]"
-              style={{ color: 'var(--text-secondary)' }}
-            >
-              Not now
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setHabitToastHovered(false)
-                setActiveHabitToast(null)
-              }}
-              className="flex h-6 w-6 items-center justify-center rounded-full transition hover:bg-[var(--bg-hover)]"
-              style={{ color: 'var(--text-muted)' }}
-              title="Hide for now"
-              aria-label="Hide suggestion"
-            >
-              <X size={13} />
-            </button>
+              {activeHabitToast.title}
+            </span>
+            <div className="ml-1 flex shrink-0 items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setHabitToastPreviewOpen((v) => !v)}
+                aria-expanded={habitToastPreviewOpen}
+                className="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11.5px] font-medium transition hover:bg-[var(--bg-hover)]"
+                style={{
+                  borderColor: habitToastPreviewOpen ? 'var(--accent)' : 'var(--border-strong)',
+                  background: habitToastPreviewOpen ? 'var(--accent-soft)' : 'transparent',
+                  color: habitToastPreviewOpen ? 'var(--accent-text)' : 'var(--text-secondary)'
+                }}
+                title="Preview the emails behind this suggestion"
+              >
+                <Eye size={12} />
+                <span>{habitToastPreviewOpen ? 'Hide' : 'Preview'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setHabitToastHovered(false)
+                  setHabitToastPreviewOpen(false)
+                  void acceptHabitSuggestion(activeHabitToast.id)
+                }}
+                className="rounded-full px-3 py-1 text-[12px] font-semibold transition hover:opacity-90"
+                style={{ background: 'var(--accent)', color: '#fff' }}
+              >
+                Always do this
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setHabitToastHovered(false)
+                  setHabitToastPreviewOpen(false)
+                  void dismissHabitSuggestion(activeHabitToast.id)
+                }}
+                className="rounded-full px-2.5 py-1 text-[12px] font-medium transition hover:bg-[var(--bg-hover)]"
+                style={{ color: 'var(--text-secondary)' }}
+              >
+                Not now
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setHabitToastHovered(false)
+                  setHabitToastPreviewOpen(false)
+                  setActiveHabitToast(null)
+                }}
+                className="flex h-6 w-6 items-center justify-center rounded-full transition hover:bg-[var(--bg-hover)]"
+                style={{ color: 'var(--text-muted)' }}
+                title="Hide for now"
+                aria-label="Hide suggestion"
+              >
+                <X size={13} />
+              </button>
+            </div>
           </div>
         </div>
       )}
