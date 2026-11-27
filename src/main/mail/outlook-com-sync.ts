@@ -62,6 +62,28 @@ function toB64(str: string): string {
   return Buffer.from(str || '', 'utf8').toString('base64')
 }
 
+async function runPowerShellEncodedJson<T>(script: string, timeoutMs = 45_000): Promise<T> {
+  const encoded = Buffer.from(script, 'utf16le').toString('base64')
+  // Fall back to temp .ps1 if encoded command approaches Windows' 32 KB command-line ceiling
+  if (encoded.length > 24_000) {
+    return runPowerShellJson<T>(script, timeoutMs)
+  }
+  const { stdout } = await execFileAsync(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
+    {
+      windowsHide: true,
+      timeout: timeoutMs,
+      maxBuffer: 16 * 1024 * 1024
+    }
+  )
+  const trimmed = stdout.trim()
+  if (!trimmed) {
+    throw new Error('Classic Outlook returned no data.')
+  }
+  return JSON.parse(trimmed) as T
+}
+
 const PS_COMMON_HELPERS = `
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = 'Stop'
@@ -688,17 +710,32 @@ try {
     lastFolderWalkByAccount.set(account.id, Date.now())
   }
 
+  const computeOutlookParentPath = (folderPath: string): string | null => {
+    if (!folderPath.startsWith('\\\\')) return null
+    const parts = folderPath.slice(2).split('\\')
+    if (parts.length <= 2) return null
+    return '\\\\' + parts.slice(0, -1).join('\\')
+  }
+
+  const liveFolderPaths: string[] = []
   for (const f of raw.folders || []) {
+    liveFolderPaths.push(f.path)
     db.upsertFolder({
       id: `${account.id}|${f.path}`,
       accountId: account.id,
       remoteId: f.path,
       name: f.name,
       path: f.path,
+      parentPath: computeOutlookParentPath(f.path),
+      delimiter: '\\',
       role: f.role,
       totalCount: f.totalCount,
-      unreadCount: f.role === 'sent' ? 0 : f.unreadCount
+      unreadCount: f.role === 'sent' ? 0 : f.unreadCount,
+      isSelectable: true
     })
+  }
+  if (shouldWalkCustomFolders && liveFolderPaths.length > 0) {
+    db.pruneMissingFolders(account.id, liveFolderPaths)
   }
 
   const settings = db.getSettings()
@@ -1043,6 +1080,37 @@ try {
   $targetRole = '${opts.targetRole || ''}'
   $targetFolderName = From-B64 '${targetFolderB64}'
 
+  function Find-FolderRecursive($parent, $prefix, $target, $depth) {
+    if ($depth -gt 6) { return $null }
+    $targetLow = $target.ToLower()
+    foreach ($sub in $parent.Folders) {
+      try {
+        $fp = [string]$sub.FolderPath
+        $nm = [string]$sub.Name
+        $disp = if ($prefix) { "$prefix/$nm" } else { $nm }
+        if ($fp.ToLower() -eq $targetLow -or $disp.ToLower() -eq $targetLow) {
+          return $sub
+        }
+        $hit = Find-FolderRecursive $sub $disp $target ($depth + 1)
+        if ($null -ne $hit) { return $hit }
+      } catch {}
+    }
+    return $null
+  }
+
+  function Find-FolderByLeafName($parent, $target, $depth) {
+    if ($depth -gt 6) { return $null }
+    $targetLow = $target.ToLower()
+    foreach ($sub in $parent.Folders) {
+      try {
+        if (([string]$sub.Name).ToLower() -eq $targetLow) { return $sub }
+        $hit = Find-FolderByLeafName $sub $target ($depth + 1)
+        if ($null -ne $hit) { return $hit }
+      } catch {}
+    }
+    return $null
+  }
+
   function Resolve-DestFolder {
     if ($action -eq 'archive' -or $targetRole -eq 'archive') {
       foreach ($sub in $store.GetRootFolder().Folders) {
@@ -1054,8 +1122,11 @@ try {
     if ($targetRole -eq 'junk')  { return $store.GetDefaultFolder(23) }
     if ($targetRole -eq 'trash') { return $store.GetDefaultFolder(3) }
     if ($targetFolderName) {
-      foreach ($sub in $store.GetRootFolder().Folders) {
-        if ($sub.Name -eq $targetFolderName) { return $sub }
+      $rootF = $store.GetRootFolder()
+      $exact = Find-FolderRecursive $rootF '' $targetFolderName 0
+      if ($null -ne $exact) { return $exact }
+      if (-not $targetFolderName.Contains('/') -and -not $targetFolderName.Contains('\')) {
+        return Find-FolderByLeafName $rootF $targetFolderName 0
       }
     }
     return $null
@@ -1096,4 +1167,261 @@ try {
 `
 
   await runPowerShellJson<{ ok: boolean }>(script, 45_000).catch(() => {})
+}
+
+// ---- Classic Outlook COM Folder CRUD ----
+
+const PS_OUTLOOK_FOLDER_HELPERS = `
+function Get-DefaultFolderEntryIds($store) {
+  $ids = @{}
+  foreach ($fid in @(3, 4, 5, 6, 16, 23)) {
+    try {
+      $df = $store.GetDefaultFolder($fid)
+      if ($null -ne $df -and $df.EntryID) { $ids[[string]$df.EntryID] = $true }
+    } catch {}
+  }
+  return $ids
+}
+
+function Find-FolderByPathOrName($parent, $prefix, $target, $depth) {
+  if ($depth -gt 8) { return $null }
+  $targetLow = $target.ToLower()
+  foreach ($sub in $parent.Folders) {
+    try {
+      $fp = [string]$sub.FolderPath
+      $nm = [string]$sub.Name
+      $disp = if ($prefix) { "$prefix/$nm" } else { $nm }
+      if ($fp.ToLower() -eq $targetLow -or $disp.ToLower() -eq $targetLow) {
+        return $sub
+      }
+      $hit = Find-FolderByPathOrName $sub $disp $target ($depth + 1)
+      if ($null -ne $hit) { return $hit }
+    } catch {}
+  }
+  return $null
+}
+
+function Collect-DescendantFolders($folder, $outList, $depth) {
+  if ($depth -gt 8) { return }
+  foreach ($sub in $folder.Folders) {
+    try {
+      $null = $outList.Add([PSCustomObject]@{
+        name = [string]$sub.Name
+        path = [string]$sub.FolderPath
+      })
+      Collect-DescendantFolders $sub $outList ($depth + 1)
+    } catch {}
+  }
+}
+`
+
+export async function createOutlookFolder(
+  account: Account,
+  name: string,
+  parentPath?: string | null
+): Promise<{ ok: boolean; name?: string; path?: string; parentPath?: string | null; error?: string }> {
+  if (process.platform !== 'win32') {
+    return { ok: false, error: 'Classic Outlook Desktop is only available on Windows.' }
+  }
+  const cleanName = name.trim()
+  if (!cleanName) return { ok: false, error: 'Folder name cannot be empty.' }
+
+  const emailB64 = toB64(account.email)
+  const storeB64 = toB64(account.imapHost || account.email)
+  const nameB64 = toB64(cleanName)
+  const parentB64 = toB64(parentPath || '')
+
+  const script = `
+${PS_COMMON_HELPERS}
+${PS_OUTLOOK_FOLDER_HELPERS}
+try {
+  $outlook = Get-OutlookApp
+  $ns = $outlook.GetNamespace('MAPI')
+  $store = Find-TargetStore $ns (From-B64 '${emailB64}') (From-B64 '${storeB64}')
+  if ($null -eq $store) { throw 'Outlook store not found for this account.' }
+
+  $root = $store.GetRootFolder()
+  $parentSpec = From-B64 '${parentB64}'
+  $parentFolder = $root
+  if ($parentSpec) {
+    $foundParent = Find-FolderByPathOrName $root '' $parentSpec 0
+    if ($null -eq $foundParent) { throw "Parent folder not found: $parentSpec" }
+    $parentFolder = $foundParent
+  }
+
+  $folderName = From-B64 '${nameB64}'
+  # 0 = olFolderInbox (mail folder type)
+  $created = $parentFolder.Folders.Add($folderName, 0)
+  $createdPath = [string]$created.FolderPath
+  $resolvedParent = if ($parentFolder.FolderPath -eq $root.FolderPath) { $null } else { [string]$parentFolder.FolderPath }
+
+  ConvertTo-Json -InputObject @{
+    ok         = $true
+    name       = [string]$created.Name
+    path       = $createdPath
+    parentPath = $resolvedParent
+  } -Compress
+} catch {
+  ConvertTo-Json -InputObject @{ ok = $false; error = $_.Exception.Message } -Compress
+}
+`
+
+  return runPowerShellEncodedJson<{
+    ok: boolean
+    name?: string
+    path?: string
+    parentPath?: string | null
+    error?: string
+  }>(script, 30_000)
+}
+
+export async function renameOutlookFolder(
+  account: Account,
+  folderPath: string,
+  newName: string
+): Promise<{
+  ok: boolean
+  name?: string
+  path?: string
+  childRenames?: { oldPath: string; newPath: string }[]
+  error?: string
+}> {
+  if (process.platform !== 'win32') {
+    return { ok: false, error: 'Classic Outlook Desktop is only available on Windows.' }
+  }
+  const cleanName = newName.trim()
+  if (!cleanName) return { ok: false, error: 'New folder name cannot be empty.' }
+
+  const emailB64 = toB64(account.email)
+  const storeB64 = toB64(account.imapHost || account.email)
+  const pathB64 = toB64(folderPath)
+  const newNameB64 = toB64(cleanName)
+
+  const script = `
+${PS_COMMON_HELPERS}
+${PS_OUTLOOK_FOLDER_HELPERS}
+try {
+  $outlook = Get-OutlookApp
+  $ns = $outlook.GetNamespace('MAPI')
+  $store = Find-TargetStore $ns (From-B64 '${emailB64}') (From-B64 '${storeB64}')
+  if ($null -eq $store) { throw 'Outlook store not found for this account.' }
+
+  $root = $store.GetRootFolder()
+  $targetSpec = From-B64 '${pathB64}'
+  $target = Find-FolderByPathOrName $root '' $targetSpec 0
+  if ($null -eq $target) { throw "Folder not found in Outlook: $targetSpec" }
+
+  $defaultIds = Get-DefaultFolderEntryIds $store
+  if ($defaultIds.ContainsKey([string]$target.EntryID)) {
+    throw 'Cannot rename a default Outlook system folder.'
+  }
+
+  $oldPath = [string]$target.FolderPath
+  $desc = New-Object System.Collections.ArrayList
+  Collect-DescendantFolders $target $desc 0
+
+  $nextName = From-B64 '${newNameB64}'
+  $target.Name = $nextName
+  $newPath = [string]$target.FolderPath
+
+  $childRenames = New-Object System.Collections.ArrayList
+  foreach ($d in $desc) {
+    $op = [string]$d.path
+    if ($op.ToLower().StartsWith(($oldPath + '\').ToLower())) {
+      $np = $newPath + $op.Substring($oldPath.Length)
+      $null = $childRenames.Add([PSCustomObject]@{ oldPath = $op; newPath = $np })
+    }
+  }
+
+  ConvertTo-Json -InputObject @{
+    ok           = $true
+    name         = [string]$target.Name
+    path         = $newPath
+    childRenames = @($childRenames)
+  } -Depth 4 -Compress
+} catch {
+  ConvertTo-Json -InputObject @{ ok = $false; error = $_.Exception.Message } -Compress
+}
+`
+
+  return runPowerShellEncodedJson<{
+    ok: boolean
+    name?: string
+    path?: string
+    childRenames?: { oldPath: string; newPath: string }[]
+    error?: string
+  }>(script, 30_000)
+}
+
+export async function deleteOutlookFolder(
+  account: Account,
+  folderPath: string,
+  opts?: { moveMessagesToRole?: 'archive' | 'inbox' | 'trash' }
+): Promise<{ ok: boolean; error?: string }> {
+  if (process.platform !== 'win32') {
+    return { ok: false, error: 'Classic Outlook Desktop is only available on Windows.' }
+  }
+
+  const emailB64 = toB64(account.email)
+  const storeB64 = toB64(account.imapHost || account.email)
+  const pathB64 = toB64(folderPath)
+  const moveRole = opts?.moveMessagesToRole || ''
+
+  const script = `
+${PS_COMMON_HELPERS}
+${PS_OUTLOOK_FOLDER_HELPERS}
+try {
+  $outlook = Get-OutlookApp
+  $ns = $outlook.GetNamespace('MAPI')
+  $store = Find-TargetStore $ns (From-B64 '${emailB64}') (From-B64 '${storeB64}')
+  if ($null -eq $store) { throw 'Outlook store not found for this account.' }
+
+  $root = $store.GetRootFolder()
+  $targetSpec = From-B64 '${pathB64}'
+  $target = Find-FolderByPathOrName $root '' $targetSpec 0
+  if ($null -eq $target) {
+    ConvertTo-Json -InputObject @{ ok = $true } -Compress
+    exit 0
+  }
+
+  $defaultIds = Get-DefaultFolderEntryIds $store
+  if ($defaultIds.ContainsKey([string]$target.EntryID)) {
+    throw 'Cannot delete a default Outlook system folder.'
+  }
+
+  $moveRole = '${moveRole}'
+  if ($moveRole) {
+    $dest = $null
+    if ($moveRole -eq 'inbox') { $dest = $store.GetDefaultFolder(6) }
+    elseif ($moveRole -eq 'trash') { $dest = $store.GetDefaultFolder(3) }
+    elseif ($moveRole -eq 'archive') {
+      foreach ($sub in $root.Folders) {
+        if ($sub.Name -match '^Archive$') { $dest = $sub; break }
+      }
+      if ($null -eq $dest) { $dest = $root.Folders.Add('Archive') }
+    }
+
+    if ($null -ne $dest -and ([string]$dest.EntryID) -ne ([string]$target.EntryID)) {
+      function Move-AllItems($f, $d, $depth) {
+        if ($depth -gt 8) { return }
+        foreach ($sub in $f.Folders) {
+          Move-AllItems $sub $d ($depth + 1)
+        }
+        $cnt = [int]$f.Items.Count
+        for ($i = $cnt; $i -ge 1; $i--) {
+          try { $null = $f.Items.Item($i).Move($d) } catch {}
+        }
+      }
+      Move-AllItems $target $dest 0
+    }
+  }
+
+  $target.Delete()
+  ConvertTo-Json -InputObject @{ ok = $true } -Compress
+} catch {
+  ConvertTo-Json -InputObject @{ ok = $false; error = $_.Exception.Message } -Compress
+}
+`
+
+  return runPowerShellEncodedJson<{ ok: boolean; error?: string }>(script, 45_000)
 }

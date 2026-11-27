@@ -5,12 +5,16 @@ import type {
   Account,
   AppSettings,
   Attachment,
+  AutopilotAction,
   AutopilotLogEntry,
   AutopilotRule,
   CalendarEvent,
   CreateReminderPayload,
   EmailAddress,
   Folder,
+  FolderDeletePreview,
+  FolderDeleteStrategy,
+  FolderPrefsInput,
   HabitActionType,
   HabitEvent,
   HabitSuggestion,
@@ -102,7 +106,24 @@ export class GlassmailDB {
   // Guards against in-flight background syncs resurrecting freshly deleted/moved/read emails from stale snapshots
   private recentMutations = new Map<string, RecentThreadMutation>()
   private recentDeletedRemoteIds = new Map<string, number>()
+  private recentFolderGuards = new Map<string, { action: 'delete' | 'rename-old' | 'create'; expiresAt: number }>()
   private syncThreadCaptures = new Map<string, Set<string>>()
+
+  recordFolderGuard(accountId: string, remoteId: string, action: 'delete' | 'rename-old' | 'create', ttlMs = 90_000): void {
+    const key = `${accountId}|${remoteId.toLowerCase()}`
+    this.recentFolderGuards.set(key, { action, expiresAt: Date.now() + ttlMs })
+  }
+
+  private getFolderGuard(accountId: string, remoteId: string): 'delete' | 'rename-old' | 'create' | null {
+    const key = `${accountId}|${remoteId.toLowerCase()}`
+    const entry = this.recentFolderGuards.get(key)
+    if (!entry) return null
+    if (Date.now() > entry.expiresAt) {
+      this.recentFolderGuards.delete(key)
+      return null
+    }
+    return entry.action
+  }
 
   beginSyncThreadCapture(accountId: string): void {
     this.syncThreadCaptures.set(accountId, new Set())
@@ -211,8 +232,20 @@ export class GlassmailDB {
         path TEXT NOT NULL,
         role TEXT NOT NULL,
         unread_count INTEGER DEFAULT 0,
-        total_count INTEGER DEFAULT 0
+        total_count INTEGER DEFAULT 0,
+        parent_path TEXT,
+        delimiter TEXT DEFAULT '/',
+        color TEXT,
+        icon TEXT,
+        is_pinned INTEGER DEFAULT 0,
+        is_hidden INTEGER DEFAULT 0,
+        mute_badge INTEGER DEFAULT 0,
+        sort_order INTEGER DEFAULT 0,
+        is_selectable INTEGER DEFAULT 1,
+        sync_enabled INTEGER DEFAULT 1
       );
+
+      CREATE INDEX IF NOT EXISTS idx_folders_account ON folders(account_id);
 
       CREATE TABLE IF NOT EXISTS threads (
         id TEXT PRIMARY KEY,
@@ -575,6 +608,30 @@ export class GlassmailDB {
       this.db.exec(`ALTER TABLE autopilot_logs ADD COLUMN undone_at INTEGER`)
     } catch {
       // Column already exists
+    }
+    const folderMigrations = [
+      `ALTER TABLE folders ADD COLUMN parent_path TEXT`,
+      `ALTER TABLE folders ADD COLUMN delimiter TEXT DEFAULT '/'`,
+      `ALTER TABLE folders ADD COLUMN color TEXT`,
+      `ALTER TABLE folders ADD COLUMN icon TEXT`,
+      `ALTER TABLE folders ADD COLUMN is_pinned INTEGER DEFAULT 0`,
+      `ALTER TABLE folders ADD COLUMN is_hidden INTEGER DEFAULT 0`,
+      `ALTER TABLE folders ADD COLUMN mute_badge INTEGER DEFAULT 0`,
+      `ALTER TABLE folders ADD COLUMN sort_order INTEGER DEFAULT 0`,
+      `ALTER TABLE folders ADD COLUMN is_selectable INTEGER DEFAULT 1`,
+      `ALTER TABLE folders ADD COLUMN sync_enabled INTEGER DEFAULT 1`
+    ]
+    for (const sql of folderMigrations) {
+      try {
+        this.db.exec(sql)
+      } catch {
+        // Column already exists
+      }
+    }
+    try {
+      this.db.exec(`CREATE INDEX IF NOT EXISTS idx_folders_account ON folders(account_id)`)
+    } catch {
+      // Index already exists
     }
 
     // Decode any HTML-entity-encoded snippets (e.g. Gmail's `&#39;`, `&amp;`) already cached in SQLite
@@ -962,12 +1019,21 @@ export class GlassmailDB {
     if (accountIds && accountIds.length > 0) {
       const ph = accountIds.map(() => '?').join(',')
       const rows = this.db
-        .prepare(`SELECT * FROM folders WHERE account_id IN (${ph}) ORDER BY name ASC`)
+        .prepare(`SELECT * FROM folders WHERE account_id IN (${ph}) ORDER BY is_pinned DESC, sort_order ASC, name ASC`)
         .all(...accountIds) as Record<string, unknown>[]
-      return rows.map(this.mapFolder)
+      return rows.map((r) => this.mapFolder(r))
     }
-    const rows = this.db.prepare('SELECT * FROM folders ORDER BY name ASC').all() as Record<string, unknown>[]
-    return rows.map(this.mapFolder)
+    const rows = this.db
+      .prepare('SELECT * FROM folders ORDER BY is_pinned DESC, sort_order ASC, name ASC')
+      .all() as Record<string, unknown>[]
+    return rows.map((r) => this.mapFolder(r))
+  }
+
+  getFolderById(folderId: string): Folder | null {
+    const row = this.db
+      .prepare('SELECT * FROM folders WHERE id = ? LIMIT 1')
+      .get(folderId) as Record<string, unknown> | undefined
+    return row ? this.mapFolder(row) : null
   }
 
   getFolderByName(accountId: string, folderName: string): Folder | null {
@@ -978,18 +1044,591 @@ export class GlassmailDB {
   }
 
   upsertFolder(f: Folder): void {
+    // Guard against in-flight background sync resurrecting a just-deleted folder or reverting a rename
+    const guard = this.getFolderGuard(f.accountId, f.remoteId)
+    if (guard === 'delete' || guard === 'rename-old') {
+      return
+    }
+    // Sync-safe upsert: on conflict, update ONLY remote-owned columns and preserve local UI prefs
     this.db
       .prepare(`
-        INSERT INTO folders (id, account_id, remote_id, name, path, role, unread_count, total_count)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO folders (
+          id, account_id, remote_id, name, path, role, unread_count, total_count,
+          parent_path, delimiter, color, icon, is_pinned, is_hidden, mute_badge,
+          sort_order, is_selectable, sync_enabled
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
+          remote_id = excluded.remote_id,
           name = excluded.name,
           path = excluded.path,
+          parent_path = excluded.parent_path,
+          delimiter = excluded.delimiter,
           role = excluded.role,
           unread_count = excluded.unread_count,
-          total_count = excluded.total_count
+          total_count = excluded.total_count,
+          is_selectable = excluded.is_selectable
       `)
-      .run(f.id, f.accountId, f.remoteId, f.name, f.path, f.role, f.unreadCount, f.totalCount)
+      .run(
+        f.id,
+        f.accountId,
+        f.remoteId,
+        f.name,
+        f.path,
+        f.role,
+        f.unreadCount,
+        f.totalCount,
+        f.parentPath ?? null,
+        f.delimiter ?? '/',
+        f.color ?? null,
+        f.icon ?? null,
+        f.isPinned ? 1 : 0,
+        f.isHidden ? 1 : 0,
+        f.muteBadge ? 1 : 0,
+        f.sortOrder ?? 0,
+        f.isSelectable === false ? 0 : 1,
+        f.syncEnabled === false ? 0 : 1
+      )
+  }
+
+  updateFolderPrefs(folderId: string, prefs: Omit<FolderPrefsInput, 'folderId'>): Folder | null {
+    const existing = this.getFolderById(folderId)
+    if (!existing) return null
+    const sets: string[] = []
+    const params: (string | number | null)[] = []
+    if (prefs.color !== undefined) {
+      sets.push('color = ?')
+      params.push(prefs.color)
+    }
+    if (prefs.icon !== undefined) {
+      sets.push('icon = ?')
+      params.push(prefs.icon)
+    }
+    if (prefs.isPinned !== undefined) {
+      sets.push('is_pinned = ?')
+      params.push(prefs.isPinned ? 1 : 0)
+    }
+    if (prefs.isHidden !== undefined) {
+      sets.push('is_hidden = ?')
+      params.push(prefs.isHidden ? 1 : 0)
+    }
+    if (prefs.muteBadge !== undefined) {
+      sets.push('mute_badge = ?')
+      params.push(prefs.muteBadge ? 1 : 0)
+    }
+    if (prefs.sortOrder !== undefined) {
+      sets.push('sort_order = ?')
+      params.push(prefs.sortOrder)
+    }
+    if (prefs.syncEnabled !== undefined) {
+      sets.push('sync_enabled = ?')
+      params.push(prefs.syncEnabled ? 1 : 0)
+    }
+    if (sets.length > 0) {
+      params.push(folderId)
+      this.db.prepare(`UPDATE folders SET ${sets.join(', ')} WHERE id = ?`).run(...params)
+    }
+    return this.getFolderById(folderId)
+  }
+
+  pruneMissingFolders(
+    accountId: string,
+    liveRemoteIds: string[],
+    skipRemoteIds?: Set<string> | string[]
+  ): number {
+    const liveSet = new Set(liveRemoteIds.map((id) => id.toLowerCase()))
+    const skipSet = new Set(
+      (skipRemoteIds ? Array.from(skipRemoteIds) : []).map((id) => id.toLowerCase())
+    )
+    const rows = this.db
+      .prepare("SELECT id, remote_id FROM folders WHERE account_id = ? AND role = 'custom'")
+      .all(accountId) as { id: string; remote_id: string }[]
+    let removed = 0
+    const del = this.db.prepare('DELETE FROM folders WHERE id = ?')
+    for (const row of rows) {
+      const ridLow = row.remote_id.toLowerCase()
+      if (liveSet.has(ridLow) || skipSet.has(ridLow)) continue
+      if (this.getFolderGuard(accountId, row.remote_id) === 'create') continue
+      del.run(row.id)
+      removed++
+    }
+    return removed
+  }
+
+  findDescendantFolders(folder: Folder): Folder[] {
+    const all = this.listFolders([folder.accountId])
+    const delim = folder.delimiter || '/'
+    const pathPrefix = `${folder.path.toLowerCase()}${delim.toLowerCase()}`
+    const backslashPrefix = `${folder.path.toLowerCase()}\\`
+    const namePrefix = folder.name ? `${folder.name.toLowerCase()}/` : ''
+    const folderPathLow = folder.path.toLowerCase()
+
+    return all.filter((c) => {
+      if (c.id === folder.id) return false
+      const cPathLow = c.path.toLowerCase()
+      const cParentLow = (c.parentPath || '').toLowerCase()
+      const cNameLow = c.name.toLowerCase()
+      if (cParentLow && cParentLow === folderPathLow) return true
+      if (cPathLow.startsWith(pathPrefix) || cPathLow.startsWith(backslashPrefix)) return true
+      if (namePrefix && cNameLow.startsWith(namePrefix)) return true
+      return false
+    })
+  }
+
+  getFolderDeletePreview(folderId: string): FolderDeletePreview | null {
+    const folder = this.getFolderById(folderId)
+    if (!folder) return null
+    const account = this.getAccount(folder.accountId)
+    if (!account) return null
+
+    const descendants = this.findDescendantFolders(folder)
+    const allFolders = [folder, ...descendants]
+    const matchNames = new Set<string>()
+    for (const f of allFolders) {
+      if (f.name) matchNames.add(f.name.toLowerCase())
+      if (f.path) matchNames.add(f.path.toLowerCase())
+    }
+
+    // Count local threads matching any of these folders
+    const threadRows = this.db
+      .prepare('SELECT id, folder_name, labels_json FROM threads WHERE account_id = ?')
+      .all(folder.accountId) as { id: string; folder_name: string | null; labels_json: string | null }[]
+    let localThreadCount = 0
+    for (const tr of threadRows) {
+      const fn = (tr.folder_name || '').toLowerCase()
+      let matched = Boolean(fn && matchNames.has(fn))
+      if (!matched && tr.labels_json) {
+        try {
+          const labels = JSON.parse(tr.labels_json) as string[]
+          matched = labels.some((l) => matchNames.has(l.toLowerCase()))
+        } catch {
+          // ignore
+        }
+      }
+      if (matched) localThreadCount++
+    }
+
+    const remoteSum = allFolders.reduce((acc, f) => acc + Math.max(0, f.totalCount || 0), 0)
+    const messageCount = Math.max(localThreadCount, remoteSum)
+
+    const affectedRuleNames: string[] = []
+    for (const rule of this.listAutopilotRules()) {
+      const hits = rule.actions.some(
+        (act) => act.type === 'moveToFolder' && act.folderName && matchNames.has(act.folderName.toLowerCase())
+      )
+      if (hits) affectedRuleNames.push(rule.name)
+    }
+
+    const defaultStrategy: FolderDeleteStrategy =
+      account.provider === 'gmail' ? 'remove-label' : 'move-messages'
+
+    return {
+      folderId: folder.id,
+      folderName: folder.name,
+      provider: account.provider,
+      messageCount,
+      childCount: descendants.length,
+      affectedRuleNames,
+      defaultStrategy
+    }
+  }
+
+  renameFolderCascade(
+    folderId: string,
+    newName: string,
+    newPath: string,
+    newRemoteId?: string,
+    childRenames?: {
+      folderId: string
+      newName: string
+      newPath: string
+      newRemoteId?: string
+      newParentPath?: string | null
+    }[]
+  ): Folder | null {
+    const existing = this.getFolderById(folderId)
+    if (!existing) return null
+
+    const delim = existing.delimiter || '/'
+    const primaryNewRemoteId = newRemoteId ?? existing.remoteId
+    const primaryNewId =
+      newRemoteId && newRemoteId !== existing.remoteId ? `${existing.accountId}|${newRemoteId}` : existing.id
+
+    const computeParentPath = (path: string, d: string): string | null => {
+      if (d === '\\' && path.startsWith('\\\\')) {
+        // Outlook path: \\store\Parent\Child -> parent is \\store\Parent (null if top-level \\store\Folder)
+        const parts = path.slice(2).split('\\')
+        if (parts.length <= 2) return null
+        return '\\\\' + parts.slice(0, -1).join('\\')
+      }
+      const idx = path.lastIndexOf(d)
+      return idx > 0 ? path.slice(0, idx) : null
+    }
+
+    const renameEntries: {
+      oldId: string
+      newId: string
+      oldRemoteId: string
+      newRemoteId: string
+      oldName: string
+      newName: string
+      oldPath: string
+      newPath: string
+      newParentPath: string | null
+    }[] = [
+      {
+        oldId: existing.id,
+        newId: primaryNewId,
+        oldRemoteId: existing.remoteId,
+        newRemoteId: primaryNewRemoteId,
+        oldName: existing.name,
+        newName,
+        oldPath: existing.path,
+        newPath,
+        newParentPath: existing.parentPath !== undefined ? existing.parentPath : computeParentPath(newPath, delim)
+      }
+    ]
+
+    if (childRenames && childRenames.length > 0) {
+      for (const cr of childRenames) {
+        const child = this.getFolderById(cr.folderId)
+        if (!child) continue
+        const cDelim = child.delimiter || delim
+        const cNewRemote = cr.newRemoteId ?? child.remoteId
+        const cNewId =
+          cr.newRemoteId && cr.newRemoteId !== child.remoteId ? `${child.accountId}|${cr.newRemoteId}` : child.id
+        renameEntries.push({
+          oldId: child.id,
+          newId: cNewId,
+          oldRemoteId: child.remoteId,
+          newRemoteId: cNewRemote,
+          oldName: child.name,
+          newName: cr.newName,
+          oldPath: child.path,
+          newPath: cr.newPath,
+          newParentPath: cr.newParentPath !== undefined ? cr.newParentPath : computeParentPath(cr.newPath, cDelim)
+        })
+      }
+    } else {
+      // Auto-cascade to any descendants if caller did not supply explicit childRenames
+      const descendants = this.findDescendantFolders(existing)
+      for (const child of descendants) {
+        const cDelim = child.delimiter || delim
+        let cNewPath = child.path
+        if (child.path.toLowerCase().startsWith(`${existing.path.toLowerCase()}${cDelim.toLowerCase()}`)) {
+          cNewPath = `${newPath}${child.path.slice(existing.path.length)}`
+        }
+        let cNewName = child.name
+        if (child.name.toLowerCase().startsWith(`${existing.name.toLowerCase()}/`)) {
+          cNewName = `${newName}${child.name.slice(existing.name.length)}`
+        }
+        const remoteMatchesPath = child.remoteId === child.path
+        const cNewRemote = remoteMatchesPath ? cNewPath : child.remoteId
+        const cNewId = remoteMatchesPath ? `${child.accountId}|${cNewRemote}` : child.id
+        renameEntries.push({
+          oldId: child.id,
+          newId: cNewId,
+          oldRemoteId: child.remoteId,
+          newRemoteId: cNewRemote,
+          oldName: child.name,
+          newName: cNewName,
+          oldPath: child.path,
+          newPath: cNewPath,
+          newParentPath: computeParentPath(cNewPath, cDelim)
+        })
+      }
+    }
+
+    const replaceLabelArray = (rawJson: string | null, oldN: string, oldP: string, newN: string): string | null => {
+      if (!rawJson) return null
+      try {
+        const arr = JSON.parse(rawJson) as string[]
+        if (!Array.isArray(arr)) return null
+        let changed = false
+        const oldNLow = oldN.toLowerCase()
+        const oldPLow = oldP.toLowerCase()
+        const next = arr.map((item) => {
+          const low = String(item).toLowerCase()
+          if (low === oldNLow || low === oldPLow) {
+            changed = true
+            return newN
+          }
+          return item
+        })
+        return changed ? JSON.stringify(Array.from(new Set(next))) : null
+      } catch {
+        return null
+      }
+    }
+
+    this.db.exec('BEGIN')
+    try {
+      for (const entry of renameEntries) {
+        // 1. Update folders row (preserving local UI prefs)
+        this.db
+          .prepare(
+            'UPDATE folders SET id = ?, remote_id = ?, name = ?, path = ?, parent_path = ? WHERE id = ?'
+          )
+          .run(entry.newId, entry.newRemoteId, entry.newName, entry.newPath, entry.newParentPath, entry.oldId)
+
+        // 2. Update threads.folder_name and threads.labels_json
+        this.db
+          .prepare(
+            'UPDATE threads SET folder_name = ? WHERE account_id = ? AND (LOWER(folder_name) = LOWER(?) OR LOWER(folder_name) = LOWER(?))'
+          )
+          .run(entry.newName, existing.accountId, entry.oldName, entry.oldPath)
+
+        const threadLabelRows = this.db
+          .prepare('SELECT id, labels_json FROM threads WHERE account_id = ? AND (labels_json LIKE ? OR labels_json LIKE ?)')
+          .all(existing.accountId, `%${entry.oldName}%`, `%${entry.oldPath}%`) as {
+          id: string
+          labels_json: string | null
+        }[]
+        const updThreadLabels = this.db.prepare('UPDATE threads SET labels_json = ? WHERE id = ?')
+        for (const r of threadLabelRows) {
+          const next = replaceLabelArray(r.labels_json, entry.oldName, entry.oldPath, entry.newName)
+          if (next) updThreadLabels.run(next, r.id)
+        }
+
+        // 3. Update messages.folder_name and messages.labels_json
+        this.db
+          .prepare(
+            'UPDATE messages SET folder_name = ? WHERE account_id = ? AND (LOWER(folder_name) = LOWER(?) OR LOWER(folder_name) = LOWER(?))'
+          )
+          .run(entry.newName, existing.accountId, entry.oldName, entry.oldPath)
+
+        const msgLabelRows = this.db
+          .prepare('SELECT id, labels_json FROM messages WHERE account_id = ? AND (labels_json LIKE ? OR labels_json LIKE ?)')
+          .all(existing.accountId, `%${entry.oldName}%`, `%${entry.oldPath}%`) as {
+          id: string
+          labels_json: string | null
+        }[]
+        const updMsgLabels = this.db.prepare('UPDATE messages SET labels_json = ? WHERE id = ?')
+        for (const r of msgLabelRows) {
+          const next = replaceLabelArray(r.labels_json, entry.oldName, entry.oldPath, entry.newName)
+          if (next) updMsgLabels.run(next, r.id)
+        }
+
+        // 4. Update autopilot_rules.actions_json
+        const ruleRows = this.db
+          .prepare('SELECT id, actions_json FROM autopilot_rules')
+          .all() as { id: string; actions_json: string }[]
+        const updRule = this.db.prepare('UPDATE autopilot_rules SET actions_json = ? WHERE id = ?')
+        const oldNLow = entry.oldName.toLowerCase()
+        const oldPLow = entry.oldPath.toLowerCase()
+        for (const rr of ruleRows) {
+          try {
+            const actions = JSON.parse(rr.actions_json || '[]') as AutopilotAction[]
+            let changed = false
+            for (const act of actions) {
+              if (
+                act.type === 'moveToFolder' &&
+                act.folderName &&
+                (act.folderName.toLowerCase() === oldNLow || act.folderName.toLowerCase() === oldPLow)
+              ) {
+                act.folderName = entry.newName
+                changed = true
+              }
+            }
+            if (changed) {
+              updRule.run(JSON.stringify(actions), rr.id)
+            }
+          } catch {
+            // ignore malformed rule json
+          }
+        }
+
+        // 5. Update habit_suggestions.target_folder
+        this.db
+          .prepare(
+            'UPDATE habit_suggestions SET target_folder = ? WHERE LOWER(target_folder) = LOWER(?) OR LOWER(target_folder) = LOWER(?)'
+          )
+          .run(entry.newName, entry.oldName, entry.oldPath)
+
+        // 6. Update sender_profiles.moved_folders_json
+        const profileRows = this.db
+          .prepare("SELECT sender_email, moved_folders_json FROM sender_profiles WHERE moved_folders_json != '{}'")
+          .all() as { sender_email: string; moved_folders_json: string }[]
+        const updProfile = this.db.prepare('UPDATE sender_profiles SET moved_folders_json = ? WHERE sender_email = ?')
+        for (const pr of profileRows) {
+          try {
+            const map = JSON.parse(pr.moved_folders_json || '{}') as Record<string, number>
+            let changed = false
+            for (const key of Object.keys(map)) {
+              const kLow = key.toLowerCase()
+              if (kLow === oldNLow || kLow === oldPLow) {
+                const val = Number(map[key] || 0)
+                delete map[key]
+                map[entry.newName] = (map[entry.newName] || 0) + val
+                changed = true
+              }
+            }
+            if (changed) {
+              updProfile.run(JSON.stringify(map), pr.sender_email)
+            }
+          } catch {
+            // ignore
+          }
+        }
+
+        // 7. Update user_habit_events.folder_name
+        this.db
+          .prepare(
+            'UPDATE user_habit_events SET folder_name = ? WHERE LOWER(folder_name) = LOWER(?) OR LOWER(folder_name) = LOWER(?)'
+          )
+          .run(entry.newName, entry.oldName, entry.oldPath)
+      }
+
+      this.db.exec('COMMIT')
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
+
+    return this.getFolderById(primaryNewId)
+  }
+
+  deleteFolderCascade(
+    folderId: string,
+    opts?: {
+      strategy?: FolderDeleteStrategy
+      moveMessagesToRole?: 'archive' | 'inbox' | 'trash'
+      deleteChildren?: boolean
+    }
+  ): { deletedFolderIds: string[]; disabledRuleNames: string[] } {
+    const existing = this.getFolderById(folderId)
+    if (!existing) return { deletedFolderIds: [], disabledRuleNames: [] }
+
+    const includeChildren = opts?.deleteChildren !== false
+    const targets = includeChildren ? [existing, ...this.findDescendantFolders(existing)] : [existing]
+    const deletedFolderIds = targets.map((f) => f.id)
+    const matchSet = new Set<string>()
+    for (const f of targets) {
+      if (f.name) matchSet.add(f.name.toLowerCase())
+      if (f.path) matchSet.add(f.path.toLowerCase())
+    }
+
+    const strategy: FolderDeleteStrategy = opts?.strategy || 'move-messages'
+    const disabledRuleNames: string[] = []
+    const now = Date.now()
+
+    const stripDeletedLabels = (rawJson: string | null): string | null => {
+      if (!rawJson) return null
+      try {
+        const arr = JSON.parse(rawJson) as string[]
+        if (!Array.isArray(arr)) return null
+        const filtered = arr.filter((l) => !matchSet.has(String(l).toLowerCase()))
+        return filtered.length !== arr.length ? JSON.stringify(filtered) : null
+      } catch {
+        return null
+      }
+    }
+
+    this.db.exec('BEGIN')
+    try {
+      // 1. Delete folder + child rows
+      const ph = deletedFolderIds.map(() => '?').join(',')
+      this.db.prepare(`DELETE FROM folders WHERE id IN (${ph})`).run(...deletedFolderIds)
+
+      // 2. Disable affected autopilot rules
+      const rules = this.listAutopilotRules()
+      const disableRule = this.db.prepare('UPDATE autopilot_rules SET enabled = 0 WHERE id = ?')
+      for (const rule of rules) {
+        const affects = rule.actions.some(
+          (act) => act.type === 'moveToFolder' && act.folderName && matchSet.has(act.folderName.toLowerCase())
+        )
+        if (affects) {
+          if (rule.enabled) {
+            disableRule.run(rule.id)
+          }
+          disabledRuleNames.push(rule.name)
+        }
+      }
+
+      // 3. Dismiss matching pending habit suggestions
+      const pendingSuggestions = this.db
+        .prepare("SELECT id, target_folder FROM habit_suggestions WHERE status = 'pending' AND target_folder IS NOT NULL")
+        .all() as { id: string; target_folder: string }[]
+      const dismissSug = this.db.prepare("UPDATE habit_suggestions SET status = 'dismissed', resolved_at = ? WHERE id = ?")
+      for (const sug of pendingSuggestions) {
+        if (matchSet.has(sug.target_folder.toLowerCase())) {
+          dismissSug.run(now, sug.id)
+        }
+      }
+
+      // 4. Update/move/delete local threads & messages per strategy
+      const accThreads = this.db
+        .prepare('SELECT id, folder_role, folder_name, labels_json FROM threads WHERE account_id = ?')
+        .all(existing.accountId) as {
+        id: string
+        folder_role: string
+        folder_name: string | null
+        labels_json: string | null
+      }[]
+
+      const matchingThreadIds: string[] = []
+      const updThreadLabels = this.db.prepare('UPDATE threads SET labels_json = ? WHERE id = ?')
+      const updMsgLabels = this.db.prepare('UPDATE messages SET labels_json = ? WHERE id = ?')
+
+      for (const tr of accThreads) {
+        const fnLow = (tr.folder_name || '').toLowerCase()
+        const isInDeletedFolder = tr.folder_role === 'custom' && Boolean(fnLow && matchSet.has(fnLow))
+        if (isInDeletedFolder) {
+          matchingThreadIds.push(tr.id)
+        }
+        if (strategy !== 'delete-messages') {
+          const stripped = stripDeletedLabels(tr.labels_json)
+          if (stripped !== null) {
+            updThreadLabels.run(stripped, tr.id)
+          }
+        }
+      }
+
+      if (strategy !== 'delete-messages') {
+        const accMsgs = this.db
+          .prepare('SELECT id, labels_json FROM messages WHERE account_id = ?')
+          .all(existing.accountId) as { id: string; labels_json: string | null }[]
+        for (const m of accMsgs) {
+          const stripped = stripDeletedLabels(m.labels_json)
+          if (stripped !== null) {
+            updMsgLabels.run(stripped, m.id)
+          }
+        }
+      }
+
+      if (matchingThreadIds.length > 0) {
+        const tPh = matchingThreadIds.map(() => '?').join(',')
+        if (strategy === 'delete-messages') {
+          const msgs = this.db
+            .prepare(`SELECT account_id, remote_id FROM messages WHERE thread_id IN (${tPh})`)
+            .all(...matchingThreadIds) as { account_id: string; remote_id: string }[]
+          const exp = now + 90_000
+          for (const m of msgs) {
+            if (m.remote_id) this.recentDeletedRemoteIds.set(`${m.account_id}|${m.remote_id}`, exp)
+          }
+          this.recordThreadMutation(matchingThreadIds, { deleted: true }, 90_000)
+          this.db.prepare(`DELETE FROM messages_fts WHERE thread_id IN (${tPh})`).run(...matchingThreadIds)
+          this.db.prepare(`DELETE FROM threads WHERE id IN (${tPh})`).run(...matchingThreadIds)
+        } else {
+          const destRole: Folder['role'] =
+            strategy === 'remove-label' ? 'archive' : opts?.moveMessagesToRole || 'archive'
+          const destName = destRole === 'inbox' ? 'Inbox' : destRole === 'trash' ? 'Trash' : 'Archive'
+          this.db
+            .prepare(`UPDATE threads SET folder_role = ?, folder_name = ? WHERE id IN (${tPh})`)
+            .run(destRole, destName, ...matchingThreadIds)
+          this.db
+            .prepare(`UPDATE messages SET folder_role = ?, folder_name = ? WHERE thread_id IN (${tPh}) AND folder_role = 'custom'`)
+            .run(destRole, destName, ...matchingThreadIds)
+          this.recordThreadMutation(matchingThreadIds, { deleted: false, folderRole: destRole, folderName: destName }, 90_000)
+        }
+      }
+
+      this.db.exec('COMMIT')
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
+
+    return { deletedFolderIds, disabledRuleNames }
   }
 
   private mapFolder(r: Record<string, unknown>): Folder {
@@ -1002,7 +1641,17 @@ export class GlassmailDB {
       path: String(r.path),
       role,
       unreadCount: role === 'sent' ? 0 : Number(r.unread_count || 0),
-      totalCount: Number(r.total_count || 0)
+      totalCount: Number(r.total_count || 0),
+      parentPath: r.parent_path !== undefined && r.parent_path !== null ? String(r.parent_path) : null,
+      delimiter: r.delimiter ? String(r.delimiter) : '/',
+      color: r.color !== undefined && r.color !== null ? String(r.color) : null,
+      icon: r.icon !== undefined && r.icon !== null ? String(r.icon) : null,
+      isPinned: Boolean(r.is_pinned),
+      isHidden: Boolean(r.is_hidden),
+      muteBadge: Boolean(r.mute_badge),
+      sortOrder: Number(r.sort_order || 0),
+      isSelectable: r.is_selectable === undefined || r.is_selectable === null ? true : Boolean(r.is_selectable),
+      syncEnabled: r.sync_enabled === undefined || r.sync_enabled === null ? true : Boolean(r.sync_enabled)
     }
   }
 
@@ -2097,6 +2746,18 @@ export class GlassmailDB {
     if (threadIds.length === 0) return
     const ph = threadIds.map(() => '?').join(',')
     const name = folderName || folderRole.charAt(0).toUpperCase() + folderRole.slice(1)
+
+    // Capture previous custom folder names so custom-to-custom moves drop the previous custom label
+    const prevByThread = new Map<string, { folder_role: string; folder_name: string | null; labels_json: string | null }>()
+    if (folderRole === 'custom' && folderName) {
+      const prevRows = this.db
+        .prepare(`SELECT id, folder_role, folder_name, labels_json FROM threads WHERE id IN (${ph})`)
+        .all(...threadIds) as { id: string; folder_role: string; folder_name: string | null; labels_json: string | null }[]
+      for (const r of prevRows) {
+        prevByThread.set(r.id, r)
+      }
+    }
+
     this.db
       .prepare(`UPDATE threads SET folder_role = ?, folder_name = ?, snoozed_until = NULL WHERE id IN (${ph})`)
       .run(folderRole, name, ...threadIds)
@@ -2108,16 +2769,23 @@ export class GlassmailDB {
     // Keep labels_json in sync when moving to a custom folder (e.g. Gmail labels)
     if (folderRole === 'custom' && folderName) {
       for (const tid of threadIds) {
-        const row = this.db.prepare('SELECT labels_json FROM threads WHERE id = ?').get(tid) as
-          | { labels_json: string | null }
-          | undefined
+        const prev = prevByThread.get(tid)
         let labels: string[] = []
         try {
-          labels = JSON.parse(row?.labels_json || '[]') as string[]
+          labels = JSON.parse(prev?.labels_json || '[]') as string[]
         } catch {
           labels = []
         }
-        const nextLabels = Array.from(new Set([...labels.filter((l) => l !== 'INBOX'), folderName]))
+        const prevCustomNameLow =
+          prev?.folder_role === 'custom' && prev.folder_name && prev.folder_name.toLowerCase() !== folderName.toLowerCase()
+            ? prev.folder_name.toLowerCase()
+            : null
+        const nextLabels = Array.from(
+          new Set([
+            ...labels.filter((l) => l !== 'INBOX' && (!prevCustomNameLow || l.toLowerCase() !== prevCustomNameLow)),
+            folderName
+          ])
+        )
         const serialized = JSON.stringify(nextLabels)
         this.db.prepare('UPDATE threads SET labels_json = ? WHERE id = ?').run(serialized, tid)
         this.db.prepare('UPDATE messages SET labels_json = ? WHERE thread_id = ?').run(serialized, tid)

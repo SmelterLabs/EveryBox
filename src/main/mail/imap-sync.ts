@@ -147,21 +147,32 @@ export async function syncImapAccount(
     } else {
       // Discover & store all server folders
       const mailboxes = await client.list()
-      const selectableMailboxes = mailboxes.filter(
-        (mb) => !mb.flags?.has('\\Noselect') && !mb.flags?.has('\\NonExistent')
-      )
+      const nonExistentFiltered = mailboxes.filter((mb) => !mb.flags?.has('\\NonExistent'))
+      const selectableMailboxes = nonExistentFiltered.filter((mb) => !mb.flags?.has('\\Noselect'))
+      const liveRemoteIds: string[] = []
 
-      for (const mb of selectableMailboxes) {
+      for (const mb of nonExistentFiltered) {
+        const delimiter = mb.delimiter || '/'
+        const parts = mb.path.split(delimiter)
+        const parentPath = parts.length > 1 ? parts.slice(0, -1).join(delimiter) : null
+        const isSelectable = !mb.flags?.has('\\Noselect')
+        liveRemoteIds.push(mb.path)
         db.upsertFolder({
           id: `${account.id}|${mb.path}`,
           accountId: account.id,
           remoteId: mb.path,
           name: mb.name,
           path: mb.path,
+          parentPath,
+          delimiter,
           role: mapImapRole(mb.specialUse, mb.name),
           unreadCount: 0,
-          totalCount: 0
+          totalCount: 0,
+          isSelectable
         })
+      }
+      if (liveRemoteIds.length > 0) {
+        db.pruneMissingFolders(account.id, liveRemoteIds)
       }
 
       // Pick the best mailbox for each standard role (preferring RFC 6154 \SpecialUse flags)
@@ -620,6 +631,176 @@ export async function fetchImapAttachment(
       }
     }
     return null
+  } finally {
+    await closeImapClient(client)
+  }
+}
+
+// ---- IMAP Folder CRUD ----
+
+export async function createImapFolder(
+  account: Account,
+  secrets: SecretStore,
+  segments: string[]
+): Promise<{ path: string; name: string; parentPath: string | null; delimiter: string }> {
+  const password = secrets.get(`imap_pass:${account.id}`)
+  if (!password || !account.imapHost) {
+    throw new Error('Missing IMAP credentials or host.')
+  }
+  const cleanSegments = segments.map((s) => s.trim()).filter(Boolean)
+  if (cleanSegments.length === 0) {
+    throw new Error('Folder name cannot be empty.')
+  }
+
+  const client = createImapClient({
+    host: account.imapHost,
+    port: account.imapPort || 993,
+    secure: account.imapSecure !== false,
+    user: account.email,
+    pass: password
+  })
+
+  await client.connect()
+  try {
+    const mailboxes = await client.list()
+    const detectedDelimiter = mailboxes.find((mb) => Boolean(mb.delimiter))?.delimiter || '/'
+    const created = await client.mailboxCreate(cleanSegments)
+    const fullPath = created.path || cleanSegments.join(detectedDelimiter)
+    const parts = fullPath.split(detectedDelimiter)
+    const name = parts[parts.length - 1] || cleanSegments[cleanSegments.length - 1]
+    const parentPath = parts.length > 1 ? parts.slice(0, -1).join(detectedDelimiter) : null
+    return { path: fullPath, name, parentPath, delimiter: detectedDelimiter }
+  } finally {
+    await closeImapClient(client)
+  }
+}
+
+export async function renameImapFolder(
+  account: Account,
+  secrets: SecretStore,
+  oldPath: string,
+  newPath: string
+): Promise<{
+  oldPath: string
+  newPath: string
+  delimiter: string
+  childRenames: { oldPath: string; newPath: string }[]
+}> {
+  const password = secrets.get(`imap_pass:${account.id}`)
+  if (!password || !account.imapHost) {
+    throw new Error('Missing IMAP credentials or host.')
+  }
+
+  const client = createImapClient({
+    host: account.imapHost,
+    port: account.imapPort || 993,
+    secure: account.imapSecure !== false,
+    user: account.email,
+    pass: password
+  })
+
+  await client.connect()
+  try {
+    const mailboxes = await client.list()
+    const existingMb = mailboxes.find((mb) => mb.path.toLowerCase() === oldPath.toLowerCase())
+    const delimiter = existingMb?.delimiter || mailboxes.find((mb) => Boolean(mb.delimiter))?.delimiter || '/'
+    const prefixLow = `${oldPath.toLowerCase()}${delimiter.toLowerCase()}`
+    const childRenames = mailboxes
+      .filter((mb) => mb.path.toLowerCase().startsWith(prefixLow))
+      .map((mb) => ({
+        oldPath: mb.path,
+        newPath: `${newPath}${mb.path.slice(oldPath.length)}`
+      }))
+
+    const res = await client.mailboxRename(oldPath, newPath)
+    return {
+      oldPath: res.path || oldPath,
+      newPath: res.newPath || newPath,
+      delimiter,
+      childRenames
+    }
+  } finally {
+    await closeImapClient(client)
+  }
+}
+
+export async function deleteImapFolder(
+  account: Account,
+  secrets: SecretStore,
+  path: string,
+  opts?: {
+    moveMessagesToRole?: 'archive' | 'inbox' | 'trash'
+    deleteChildren?: boolean
+  }
+): Promise<{ deletedPaths: string[] }> {
+  const password = secrets.get(`imap_pass:${account.id}`)
+  if (!password || !account.imapHost) {
+    throw new Error('Missing IMAP credentials or host.')
+  }
+
+  const client = createImapClient({
+    host: account.imapHost,
+    port: account.imapPort || 993,
+    secure: account.imapSecure !== false,
+    user: account.email,
+    pass: password
+  })
+
+  await client.connect()
+  try {
+    const mailboxes = await client.list()
+    const existingMb = mailboxes.find((mb) => mb.path.toLowerCase() === path.toLowerCase())
+    const delimiter = existingMb?.delimiter || mailboxes.find((mb) => Boolean(mb.delimiter))?.delimiter || '/'
+
+    const findRolePath = (role: Folder['role']): string | null => {
+      if (role === 'inbox') return 'INBOX'
+      const bySpecial = mailboxes.find((mb) => mapImapRole(mb.specialUse, mb.name) === role && Boolean(mb.specialUse))
+      if (bySpecial) return bySpecial.path
+      const byName = mailboxes.find((mb) => mapImapRole(mb.specialUse, mb.name) === role)
+      return byName ? byName.path : null
+    }
+
+    const prefixLow = `${path.toLowerCase()}${delimiter.toLowerCase()}`
+    const descendants =
+      opts?.deleteChildren !== false
+        ? mailboxes
+            .filter((mb) => mb.path.toLowerCase().startsWith(prefixLow))
+            .sort((a, b) => b.path.split(delimiter).length - a.path.split(delimiter).length || b.path.length - a.path.length)
+        : []
+
+    // Bottom-up order: deepest children first, then target folder
+    const targets = [
+      ...descendants.map((mb) => ({ path: mb.path, selectable: !mb.flags?.has('\\Noselect') })),
+      { path, selectable: !existingMb?.flags?.has('\\Noselect') }
+    ]
+
+    let destPath: string | null = null
+    if (opts?.moveMessagesToRole) {
+      destPath = findRolePath(opts.moveMessagesToRole) || (opts.moveMessagesToRole === 'archive' ? 'INBOX' : null)
+    }
+
+    const deletedPaths: string[] = []
+    for (const target of targets) {
+      if (destPath && target.selectable && target.path.toLowerCase() !== destPath.toLowerCase()) {
+        let lock: Awaited<ReturnType<typeof client.getMailboxLock>> | null = null
+        try {
+          lock = await client.getMailboxLock(target.path)
+          const exists = client.mailbox ? Number(client.mailbox.exists || 0) : 0
+          if (exists > 0) {
+            await client.messageMove('1:*', destPath)
+          }
+        } catch {
+          // If mailbox is empty or cannot be locked, proceed to delete
+        } finally {
+          lock?.release()
+        }
+      }
+
+      await client.mailboxDelete(target.path)
+      deletedPaths.push(target.path)
+    }
+
+    return { deletedPaths }
   } finally {
     await closeImapClient(client)
   }
