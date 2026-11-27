@@ -54,6 +54,9 @@ export interface ThreadMutationSnapshot {
 
 export class SyncManager {
   private timer: NodeJS.Timeout | null = null
+  private backfillStartupTimer: NodeJS.Timeout | null = null
+  private backfillTimer: NodeJS.Timeout | null = null
+  private backfillRunning = false
   private inFlight = new Set<string>()
   private inFlightFolders = new Set<string>()
   private pendingRemoteMutations = new Map<string, number>()
@@ -108,12 +111,128 @@ export class SyncManager {
       void this.processScheduledEmails()
       void this.syncAllAccounts(false)
     }, 45_000)
+
+    // Gentle background custom-folder backfill so all folders are indexed for local search
+    this.backfillStartupTimer = setTimeout(() => {
+      this.backfillStartupTimer = null
+      void this.runCustomFolderBackfillPass()
+    }, 12_000)
+    this.backfillTimer = setInterval(() => {
+      void this.runCustomFolderBackfillPass()
+    }, 30_000)
   }
 
   stop(): void {
     if (this.timer) {
       clearInterval(this.timer)
       this.timer = null
+    }
+    if (this.backfillStartupTimer) {
+      clearTimeout(this.backfillStartupTimer)
+      this.backfillStartupTimer = null
+    }
+    if (this.backfillTimer) {
+      clearInterval(this.backfillTimer)
+      this.backfillTimer = null
+    }
+  }
+
+  /**
+   * Gently backfills custom folders in the background so older filed emails appear in local search
+   * without waiting for the user to manually click each folder.
+   */
+  async runCustomFolderBackfillPass(): Promise<void> {
+    if (this.backfillRunning) return
+    this.backfillRunning = true
+    try {
+      const accounts = this.db.listAccounts().filter((a) => a.isEnabled && !a.isDemo)
+      if (accounts.length === 0) return
+
+      const now = Date.now()
+      const staleBeforeMs = now - 12 * 3600_000 // Re-check already-backfilled folders every 12h
+      const settings = this.db.getSettings()
+      let totalSynced = 0
+
+      for (const account of accounts) {
+        if (this.inFlight.has(account.id)) continue
+        if (this.isRateLimitBackoff(account)) continue
+        if (account.syncBackoffUntil && now < account.syncBackoffUntil) continue
+
+        const batchLimit = account.provider === 'imap' ? 4 : account.provider === 'outlook-local' ? 2 : 1
+        const dueFolders = this.db.listFoldersDueForBackfill(account.id, staleBeforeMs, batchLimit)
+        if (dueFolders.length === 0) continue
+
+        if (account.provider === 'imap') {
+          const unlocked = dueFolders.filter((f) => {
+            const key = `${account.id}|${(f.path || f.remoteId || f.name).toLowerCase()}`
+            return !this.inFlightFolders.has(key)
+          })
+          if (unlocked.length === 0) continue
+          const lockKeys = unlocked.map((f) => `${account.id}|${(f.path || f.remoteId || f.name).toLowerCase()}`)
+          for (const k of lockKeys) this.inFlightFolders.add(k)
+          try {
+            const res = await syncImapAccount(account, this.secrets, this.db, 100, unlocked)
+            totalSynced += res.synced
+            for (const f of unlocked) this.db.markFolderSynced(f.id)
+          } catch (err) {
+            console.warn('[EveryBox backfill IMAP]', account.email, err instanceof Error ? err.message : err)
+          } finally {
+            for (const k of lockKeys) this.inFlightFolders.delete(k)
+          }
+        } else if (account.provider === 'outlook-local') {
+          for (const folder of dueFolders) {
+            if (this.inFlight.has(account.id)) break
+            const key = `${account.id}|${(folder.path || folder.remoteId || folder.name).toLowerCase()}`
+            if (this.inFlightFolders.has(key)) continue
+            this.inFlightFolders.add(key)
+            try {
+              const res = await syncOutlookComAccount(account, this.db, folder)
+              totalSynced += res.synced
+              this.db.markFolderSynced(folder.id)
+            } catch (err) {
+              console.warn('[EveryBox backfill Outlook]', account.email, folder.name, err instanceof Error ? err.message : err)
+            } finally {
+              this.inFlightFolders.delete(key)
+            }
+          }
+        } else if (account.provider === 'gmail') {
+          if (!settings.googleOAuthClientId || !settings.googleOAuthClientSecret) continue
+          const auth = getAuthorizedGoogleClient(
+            account.id,
+            settings.googleOAuthClientId,
+            settings.googleOAuthClientSecret,
+            this.secrets
+          )
+          if (!auth) continue
+          const folder = dueFolders[0]
+          const key = `${account.id}|${(folder.path || folder.remoteId || folder.name).toLowerCase()}`
+          if (this.inFlightFolders.has(key)) continue
+          this.inFlightFolders.add(key)
+          try {
+            const res = await syncGmailLabel(account, auth, this.db, folder, 40)
+            totalSynced += res.synced
+            this.db.markFolderSynced(folder.id)
+          } catch (err) {
+            const nextErrors = (account.syncConsecutiveErrors || 0) + 1
+            const rl = parseGmailRateLimit(err, Date.now(), nextErrors)
+            if (rl.isRateLimit && rl.retryAfterMs) {
+              const msg = rl.formattedMessage || `Gmail rate-limited — paused until ${formatRetryTime(rl.retryAfterMs)}`
+              this.db.updateAccountSyncState(account.id, 'error', msg, rl.retryAfterMs, nextErrors)
+              this.onSyncUpdate()
+            } else {
+              console.warn('[EveryBox backfill Gmail]', account.email, folder.name, err instanceof Error ? err.message : err)
+            }
+          } finally {
+            this.inFlightFolders.delete(key)
+          }
+        }
+      }
+
+      if (totalSynced > 0) {
+        this.onSyncUpdate()
+      }
+    } finally {
+      this.backfillRunning = false
     }
   }
 
@@ -370,12 +489,15 @@ export class SyncManager {
             if (!auth) return
             const res = await syncGmailLabel(account, auth, this.db, folder, 50)
             totalSynced += res.synced
+            this.db.markFolderSynced(folder.id)
           } else if (account.provider === 'outlook-local') {
             const res = await syncOutlookComAccount(account, this.db, folder)
             totalSynced += res.synced
+            this.db.markFolderSynced(folder.id)
           } else {
             const res = await syncImapAccount(account, this.secrets, this.db, 50, folder)
             totalSynced += res.synced
+            this.db.markFolderSynced(folder.id)
           }
         } catch (err) {
           if (account.provider === 'gmail') {

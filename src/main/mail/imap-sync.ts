@@ -115,7 +115,7 @@ export async function syncImapAccount(
   secrets: SecretStore,
   db: GlassmailDB,
   maxMessages = 50,
-  onlyFolder?: Folder
+  onlyFolder?: Folder | Folder[]
 ): Promise<{ synced: number }> {
   const password = secrets.get(`imap_pass:${account.id}`)
   if (!password || !account.imapHost) {
@@ -138,12 +138,15 @@ export async function syncImapAccount(
     const foldersToSync: { path: string; name: string; role: Folder['role']; limit: number }[] = []
 
     if (onlyFolder) {
-      foldersToSync.push({
-        path: onlyFolder.path || onlyFolder.remoteId,
-        name: onlyFolder.name,
-        role: onlyFolder.role,
-        limit: maxMessages
-      })
+      const list = Array.isArray(onlyFolder) ? onlyFolder : [onlyFolder]
+      for (const f of list) {
+        foldersToSync.push({
+          path: f.path || f.remoteId,
+          name: f.name,
+          role: f.role,
+          limit: maxMessages
+        })
+      }
     } else {
       // Discover & store all server folders
       const mailboxes = await client.list()
