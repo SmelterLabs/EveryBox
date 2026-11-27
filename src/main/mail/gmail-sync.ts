@@ -568,7 +568,8 @@ async function fetchAndUpsertGmailMessages(
         const isFromSelf = from.email.toLowerCase() === account.email.toLowerCase()
         // A message in INBOX from a different sender can still carry Gmail's SENT label
         // (e.g. delegated/shared Workspace senders or SMTP relays); treat it as received, not sent.
-        const isSent = isFromSelf || (labelIds.includes('SENT') && !labelIds.includes('INBOX'))
+        // Drafts are unsent even though From matches the account address.
+        const isSent = !isDraft && (isFromSelf || (labelIds.includes('SENT') && !labelIds.includes('INBOX')))
         const folderRole = mapGmailLabelsToRole(labelIds)
         const msgId = `${account.id}|${data.id}`
         const threadId = `${account.id}|${data.threadId || data.id}`

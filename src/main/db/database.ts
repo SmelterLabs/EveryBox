@@ -638,8 +638,37 @@ export class GlassmailDB {
     this.cleanupEncodedSnippets()
     // Fix cached inbox messages from external senders that were tagged is_sent=1 (e.g. Gmail SENT+INBOX)
     this.cleanupMisclassifiedInboxSentMessages()
+    // Ensure unsent drafts are never marked is_sent=1 or counted in "Waiting"
+    this.cleanupDraftWaitingState()
     // Repair UTF-8-as-Latin1 mojibake in cached subjects (e.g. `â€”`, `âš ï¸`)
     this.cleanupMojibakeSubjects()
+  }
+
+  private cleanupDraftWaitingState(): void {
+    try {
+      this.db.prepare('UPDATE messages SET is_sent = 0 WHERE is_draft = 1 AND is_sent = 1').run()
+      this.db
+        .prepare("UPDATE threads SET waiting_since = NULL WHERE folder_role IN ('drafts', 'trash', 'junk') AND waiting_since IS NOT NULL")
+        .run()
+
+      const waitingRows = this.db
+        .prepare('SELECT id FROM threads WHERE waiting_since IS NOT NULL')
+        .all() as { id: string }[]
+      if (waitingRows.length === 0) return
+
+      const latestNonDraftStmt = this.db.prepare(
+        'SELECT is_sent FROM messages WHERE thread_id = ? AND is_draft = 0 ORDER BY date DESC LIMIT 1'
+      )
+      const clearWaitingStmt = this.db.prepare('UPDATE threads SET waiting_since = NULL WHERE id = ?')
+      for (const row of waitingRows) {
+        const latest = latestNonDraftStmt.get(row.id) as { is_sent: number } | undefined
+        if (!latest || latest.is_sent !== 1) {
+          clearWaitingStmt.run(row.id)
+        }
+      }
+    } catch {
+      // Non-fatal startup cleanup
+    }
   }
 
   private cleanupMojibakeSubjects(): void {
@@ -1806,7 +1835,8 @@ export class GlassmailDB {
     const stats = this.db
       .prepare(`
         SELECT COUNT(*) AS cnt,
-          (SELECT is_sent FROM messages WHERE thread_id = ? ORDER BY date DESC LIMIT 1) AS last_is_sent,
+          (SELECT is_sent FROM messages WHERE thread_id = ? AND is_draft = 0 ORDER BY date DESC LIMIT 1) AS last_non_draft_is_sent,
+          (SELECT date FROM messages WHERE thread_id = ? AND is_draft = 0 ORDER BY date DESC LIMIT 1) AS last_non_draft_date,
           (SELECT date FROM messages WHERE thread_id = ? ORDER BY date DESC LIMIT 1) AS last_date,
           (SELECT from_json FROM messages WHERE thread_id = ? ORDER BY date DESC LIMIT 1) AS last_from,
           (SELECT folder_role FROM messages WHERE thread_id = ? ORDER BY date DESC LIMIT 1) AS last_folder_role,
@@ -1821,10 +1851,12 @@ export class GlassmailDB {
         msg.threadId,
         msg.threadId,
         msg.threadId,
+        msg.threadId,
         msg.threadId
       ) as {
       cnt: number
-      last_is_sent: number
+      last_non_draft_is_sent: number | null
+      last_non_draft_date: number | null
       last_date: number
       last_from: string
       last_folder_role: string | null
@@ -1834,7 +1866,10 @@ export class GlassmailDB {
 
     const effectiveRole = stats.inbox_folder_name ? 'inbox' : stats.last_folder_role || msg.folderRole
     const effectiveName = stats.inbox_folder_name || stats.last_folder_name || msg.folderName || 'Inbox'
-    const waitingSince = stats.last_is_sent === 1 ? stats.last_date : null
+    const waitingSince =
+      !['drafts', 'trash', 'junk'].includes(effectiveRole) && stats.last_non_draft_is_sent === 1
+        ? stats.last_non_draft_date
+        : null
 
     // Merge all message labels across the thread so custom labels (e.g. Gmail folders) are always up to date
     const labelRows = this.db
@@ -1926,14 +1961,15 @@ export class GlassmailDB {
             MAX(has_attachments) AS any_att,
             (SELECT subject FROM messages WHERE thread_id = ? ORDER BY date DESC LIMIT 1) AS last_subject,
             (SELECT snippet FROM messages WHERE thread_id = ? ORDER BY date DESC LIMIT 1) AS last_snippet,
-            (SELECT is_sent FROM messages WHERE thread_id = ? ORDER BY date DESC LIMIT 1) AS last_is_sent,
+            (SELECT is_sent FROM messages WHERE thread_id = ? AND is_draft = 0 ORDER BY date DESC LIMIT 1) AS last_non_draft_is_sent,
+            (SELECT date FROM messages WHERE thread_id = ? AND is_draft = 0 ORDER BY date DESC LIMIT 1) AS last_non_draft_date,
             (SELECT from_json FROM messages WHERE thread_id = ? ORDER BY date DESC LIMIT 1) AS last_from,
             (SELECT folder_role FROM messages WHERE thread_id = ? ORDER BY date DESC LIMIT 1) AS last_folder_role,
             (SELECT folder_name FROM messages WHERE thread_id = ? ORDER BY date DESC LIMIT 1) AS last_folder_name,
             (SELECT folder_name FROM messages WHERE thread_id = ? AND folder_role = 'inbox' ORDER BY date DESC LIMIT 1) AS inbox_folder_name
           FROM messages WHERE thread_id = ?`
         )
-        .get(threadId, threadId, threadId, threadId, threadId, threadId, threadId, threadId) as {
+        .get(threadId, threadId, threadId, threadId, threadId, threadId, threadId, threadId, threadId) as {
         cnt: number
         last_date: number | null
         all_read: number | null
@@ -1941,7 +1977,8 @@ export class GlassmailDB {
         any_att: number | null
         last_subject: string | null
         last_snippet: string | null
-        last_is_sent: number | null
+        last_non_draft_is_sent: number | null
+        last_non_draft_date: number | null
         last_from: string | null
         last_folder_role: string | null
         last_folder_name: string | null
@@ -1953,7 +1990,10 @@ export class GlassmailDB {
       } else {
         const effectiveRole = remaining.inbox_folder_name ? 'inbox' : remaining.last_folder_role || 'archive'
         const effectiveName = remaining.inbox_folder_name || remaining.last_folder_name || 'Archive'
-        const waitingSince = remaining.last_is_sent === 1 ? remaining.last_date : null
+        const waitingSince =
+          !['drafts', 'trash', 'junk'].includes(effectiveRole) && remaining.last_non_draft_is_sent === 1
+            ? remaining.last_non_draft_date
+            : null
         this.db
           .prepare(
             `UPDATE threads
@@ -2030,7 +2070,7 @@ export class GlassmailDB {
           params.push(Date.now())
           break
         case 'waiting':
-          where.push("t.waiting_since IS NOT NULL AND t.folder_role NOT IN ('trash', 'junk')")
+          where.push("t.waiting_since IS NOT NULL AND t.folder_role NOT IN ('drafts', 'trash', 'junk')")
           break
         case 'drafts':
           where.push(
@@ -2654,14 +2694,15 @@ export class GlassmailDB {
           MAX(has_attachments) AS any_att,
           (SELECT subject FROM messages WHERE thread_id = ? ORDER BY date DESC LIMIT 1) AS last_subject,
           (SELECT snippet FROM messages WHERE thread_id = ? ORDER BY date DESC LIMIT 1) AS last_snippet,
-          (SELECT is_sent FROM messages WHERE thread_id = ? ORDER BY date DESC LIMIT 1) AS last_is_sent,
+          (SELECT is_sent FROM messages WHERE thread_id = ? AND is_draft = 0 ORDER BY date DESC LIMIT 1) AS last_non_draft_is_sent,
+          (SELECT date FROM messages WHERE thread_id = ? AND is_draft = 0 ORDER BY date DESC LIMIT 1) AS last_non_draft_date,
           (SELECT from_json FROM messages WHERE thread_id = ? ORDER BY date DESC LIMIT 1) AS last_from,
           (SELECT folder_role FROM messages WHERE thread_id = ? ORDER BY date DESC LIMIT 1) AS last_folder_role,
           (SELECT folder_name FROM messages WHERE thread_id = ? ORDER BY date DESC LIMIT 1) AS last_folder_name,
           (SELECT folder_name FROM messages WHERE thread_id = ? AND folder_role = 'inbox' ORDER BY date DESC LIMIT 1) AS inbox_folder_name
         FROM messages WHERE thread_id = ?`
       )
-      .get(threadId, threadId, threadId, threadId, threadId, threadId, threadId, threadId) as {
+      .get(threadId, threadId, threadId, threadId, threadId, threadId, threadId, threadId, threadId) as {
       cnt: number
       last_date: number | null
       all_read: number | null
@@ -2669,7 +2710,8 @@ export class GlassmailDB {
       any_att: number | null
       last_subject: string | null
       last_snippet: string | null
-      last_is_sent: number | null
+      last_non_draft_is_sent: number | null
+      last_non_draft_date: number | null
       last_from: string | null
       last_folder_role: string | null
       last_folder_name: string | null
@@ -2698,7 +2740,10 @@ export class GlassmailDB {
 
     const effectiveRole = remaining.inbox_folder_name ? 'inbox' : remaining.last_folder_role || 'archive'
     const effectiveName = remaining.inbox_folder_name || remaining.last_folder_name || 'Archive'
-    const waitingSince = remaining.last_is_sent === 1 ? remaining.last_date : null
+    const waitingSince =
+      !['drafts', 'trash', 'junk'].includes(effectiveRole) && remaining.last_non_draft_is_sent === 1
+        ? remaining.last_non_draft_date
+        : null
 
     this.db
       .prepare(
@@ -2891,8 +2936,8 @@ export class GlassmailDB {
       starredUnread: countQuery(`SELECT COUNT(*) AS c FROM threads WHERE is_starred = 1 AND is_read = 0 AND folder_role NOT IN ('trash', 'junk') ${accFilter}`),
       snoozed: countQuery(`SELECT COUNT(*) AS c FROM threads WHERE snoozed_until IS NOT NULL AND snoozed_until > ? ${accFilter}`, [now]),
       snoozedUnread: countQuery(`SELECT COUNT(*) AS c FROM threads WHERE snoozed_until IS NOT NULL AND snoozed_until > ? AND is_read = 0 ${accFilter}`, [now]),
-      waiting: countQuery(`SELECT COUNT(*) AS c FROM threads WHERE waiting_since IS NOT NULL AND folder_role NOT IN ('trash', 'junk') ${accFilter}`),
-      waitingUnread: countQuery(`SELECT COUNT(*) AS c FROM threads WHERE waiting_since IS NOT NULL AND folder_role NOT IN ('trash', 'junk') AND is_read = 0 ${accFilter}`),
+      waiting: countQuery(`SELECT COUNT(*) AS c FROM threads WHERE waiting_since IS NOT NULL AND folder_role NOT IN ('drafts', 'trash', 'junk') ${accFilter}`),
+      waitingUnread: countQuery(`SELECT COUNT(*) AS c FROM threads WHERE waiting_since IS NOT NULL AND folder_role NOT IN ('drafts', 'trash', 'junk') AND is_read = 0 ${accFilter}`),
       drafts: countQuery(`SELECT COUNT(*) AS c FROM threads WHERE (folder_role = 'drafts' OR EXISTS (SELECT 1 FROM messages m WHERE m.thread_id = threads.id AND m.is_draft = 1)) AND folder_role NOT IN ('trash', 'junk') ${accFilter}`),
       draftsUnread: 0,
       sent: countQuery(`SELECT COUNT(*) AS c FROM threads WHERE (folder_role = 'sent' OR EXISTS (SELECT 1 FROM messages m WHERE m.thread_id = threads.id AND m.is_sent = 1)) AND folder_role NOT IN ('trash', 'junk') ${accFilter}`),

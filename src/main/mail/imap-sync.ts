@@ -279,8 +279,10 @@ export async function syncImapAccount(
                 const unsubHeader = parsed.headers.get('list-unsubscribe')
                 const unsub = parseListUnsubscribe(typeof unsubHeader === 'string' ? unsubHeader : undefined)
                 const autoSub = parsed.headers.get('auto-submitted')
+                const flags = msg.flags || new Set<string>()
+                const isDraft = target.role === 'drafts' || flags.has('\\Draft')
                 const isSent =
-                  target.role === 'sent' || from.email.toLowerCase() === account.email.toLowerCase()
+                  !isDraft && (target.role === 'sent' || from.email.toLowerCase() === account.email.toLowerCase())
 
                 const category = classifyCategory({
                   from,
@@ -316,7 +318,6 @@ export async function syncImapAccount(
                   }
                 })
 
-                const flags = msg.flags || new Set<string>()
                 const parsedDateMs = parsed.date?.getTime()
                 const envDateMs = msg.envelope?.date ? new Date(msg.envelope.date).getTime() : NaN
                 const internalDateMs = msg.internalDate ? new Date(msg.internalDate).getTime() : NaN
@@ -343,7 +344,7 @@ export async function syncImapAccount(
                   date: msgDate,
                   isRead: target.role === 'sent' ? true : flags.has('\\Seen'),
                   isStarred: flags.has('\\Flagged'),
-                  isDraft: target.role === 'drafts' || flags.has('\\Draft'),
+                  isDraft,
                   isSent,
                   folderRole: target.role,
                   folderName: target.name,
