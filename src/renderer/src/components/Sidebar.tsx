@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Archive,
   Bell,
@@ -55,6 +55,9 @@ import { ACCOUNT_ICON_OPTIONS, AccountIcon } from './AccountIcon'
 import appIcon from '../assets/icon.png'
 import type { Account, AccountIconId, Folder, MailboxId, OutlookFocusedMode } from '../../../shared/types'
 
+const THREAD_DND_MIME = 'application/x-everybox-threads'
+const SPRING_LOAD_DELAY_MS = 550
+
 const COLOR_SWATCHES = [
   '#3B82F6',
   '#2DD4BF',
@@ -98,8 +101,11 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
     toggleAccountFilter,
     selectWorkspace,
     toggleAccountExpanded,
+    setAccountExpanded,
     toggleFolderExpanded,
+    setFolderExpanded,
     toggleShowHiddenFolders,
+    moveThreadsToFolder,
     updateFolderPrefs,
     syncSingleFolder,
     openAutopilotWithPrompt,
@@ -159,7 +165,63 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
   const [savingAccount, setSavingAccount] = useState(false)
   const [draggedAccountId, setDraggedAccountId] = useState<string | null>(null)
   const [dragOverAccountId, setDragOverAccountId] = useState<string | null>(null)
+  const [threadDropTargetKey, setThreadDropTargetKey] = useState<string | null>(null)
+  const springLoadTimerRef = useRef<number | null>(null)
+  const springLoadTargetRef = useRef<string | null>(null)
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+
+  const clearSpringLoad = () => {
+    if (springLoadTimerRef.current !== null) {
+      window.clearTimeout(springLoadTimerRef.current)
+      springLoadTimerRef.current = null
+    }
+    springLoadTargetRef.current = null
+  }
+
+  useEffect(() => () => clearSpringLoad(), [])
+
+  const isThreadDragEvent = (e: React.DragEvent): boolean =>
+    Array.from(e.dataTransfer.types || []).includes(THREAD_DND_MIME)
+
+  const scheduleSpringLoad = (targetKey: string, action: () => void) => {
+    if (springLoadTargetRef.current === targetKey) return
+    clearSpringLoad()
+    springLoadTargetRef.current = targetKey
+    springLoadTimerRef.current = window.setTimeout(() => {
+      springLoadTimerRef.current = null
+      springLoadTargetRef.current = null
+      action()
+    }, SPRING_LOAD_DELAY_MS)
+  }
+
+  const handleThreadDropOnFolder = (
+    e: React.DragEvent,
+    target: {
+      accountId: string
+      role: Folder['role']
+      folderName?: string
+      folderId?: string
+    }
+  ) => {
+    e.preventDefault()
+    e.stopPropagation()
+    clearSpringLoad()
+    setThreadDropTargetKey(null)
+    const raw = e.dataTransfer.getData(THREAD_DND_MIME)
+    if (!raw) return
+    let payload: { threadIds?: string[]; accountId?: string } | null = null
+    try {
+      payload = JSON.parse(raw) as { threadIds?: string[]; accountId?: string }
+    } catch {
+      return
+    }
+    if (!payload?.threadIds?.length) return
+    if (payload.accountId && payload.accountId !== target.accountId) {
+      showToast('Cannot move threads across different accounts', undefined, 3500)
+      return
+    }
+    void moveThreadsToFolder(payload.threadIds, target.role, target.folderName, target.folderId)
+  }
 
   const openAccountMenu = (e: React.MouseEvent, acc: Account) => {
     e.preventDefault()
@@ -621,16 +683,56 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
     const canIndentChildren = node.depth < 4
     const showCollapsedRollup = node.hasChildren && !isExpanded && node.rolledUpUnread > 0
     const showDirectUnread = (!node.hasChildren || isExpanded) && node.unreadCount > 0
+    const dropKey = `folder:${node.key}`
+    const isThreadDropOver = threadDropTargetKey === dropKey
 
     return (
       <div key={node.key}>
         <div
           className="group flex items-center rounded-md pl-0.5 pr-1.5 transition hover:bg-[var(--bg-hover)]"
           style={{
-            background: isItemActive ? 'var(--bg-selected)' : undefined,
+            background: isThreadDropOver
+              ? 'var(--accent-soft)'
+              : isItemActive
+                ? 'var(--bg-selected)'
+                : undefined,
+            boxShadow: isThreadDropOver ? 'inset 0 0 0 1px var(--accent)' : undefined,
             opacity: mutedOpacity ? 0.65 : 1
           }}
           title={node.fullPath}
+          onDragOver={(e) => {
+            if (!isThreadDragEvent(e)) return
+            e.preventDefault()
+            e.stopPropagation()
+            e.dataTransfer.dropEffect = 'move'
+            if (node.hasChildren && !isExpanded) {
+              scheduleSpringLoad(dropKey, () => setFolderExpanded(node.key, true))
+            }
+            if (folder && threadDropTargetKey !== dropKey) {
+              setThreadDropTargetKey(dropKey)
+            }
+          }}
+          onDragLeave={(e) => {
+            if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
+            if (springLoadTargetRef.current === dropKey) clearSpringLoad()
+            if (threadDropTargetKey === dropKey) setThreadDropTargetKey(null)
+          }}
+          onDrop={(e) => {
+            if (!isThreadDragEvent(e)) return
+            if (folder) {
+              handleThreadDropOnFolder(e, {
+                accountId: acc.id,
+                role: 'custom',
+                folderName: folder.path || folder.name,
+                folderId: folder.id
+              })
+            } else {
+              e.preventDefault()
+              e.stopPropagation()
+              clearSpringLoad()
+              setThreadDropTargetKey(null)
+            }
+          }}
           onContextMenu={(e) => {
             if (!folder) return
             openFolderMenu(e, {
@@ -1136,6 +1238,14 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
                   : folder.role === 'inbox'
                     ? acc.unreadCount || folder.unreadCount || 0
                     : folder.unreadCount || 0
+                const canDropFav =
+                  isCustom ||
+                  folder.role === 'inbox' ||
+                  folder.role === 'archive' ||
+                  folder.role === 'trash' ||
+                  folder.role === 'junk'
+                const favDropKey = `fav:${folder.id}`
+                const isFavDropOver = threadDropTargetKey === favDropKey
 
                 return (
                   <button
@@ -1148,6 +1258,26 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
                         isCustom ? folder.name : null
                       )
                     }
+                    onDragOver={(e) => {
+                      if (!canDropFav || !isThreadDragEvent(e)) return
+                      e.preventDefault()
+                      e.stopPropagation()
+                      e.dataTransfer.dropEffect = 'move'
+                      if (threadDropTargetKey !== favDropKey) setThreadDropTargetKey(favDropKey)
+                    }}
+                    onDragLeave={(e) => {
+                      if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
+                      if (threadDropTargetKey === favDropKey) setThreadDropTargetKey(null)
+                    }}
+                    onDrop={(e) => {
+                      if (!canDropFav || !isThreadDragEvent(e)) return
+                      handleThreadDropOnFolder(e, {
+                        accountId: acc.id,
+                        role: folder.role,
+                        folderName: isCustom ? folder.path || folder.name : folder.name,
+                        folderId: folder.id
+                      })
+                    }}
                     onContextMenu={(e) =>
                       openFolderMenu(e, {
                         mailbox: isCustom ? 'inbox' : (folder.role as MailboxId),
@@ -1160,7 +1290,12 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
                     }
                     className="flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-[12.5px] transition hover:bg-[var(--bg-hover)]"
                     style={{
-                      background: isFavActive ? 'var(--bg-selected)' : undefined,
+                      background: isFavDropOver
+                        ? 'var(--accent-soft)'
+                        : isFavActive
+                          ? 'var(--bg-selected)'
+                          : undefined,
+                      boxShadow: isFavDropOver ? 'inset 0 0 0 1px var(--accent)' : undefined,
                       color: isFavActive ? 'var(--text-primary)' : 'var(--text-secondary)',
                       fontWeight: isFavActive || unread > 0 ? 600 : 400
                     }}
@@ -1292,14 +1427,35 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
                       e.dataTransfer.setData('text/plain', acc.id)
                     }}
                     onDragOver={(e) => {
+                      if (isThreadDragEvent(e)) {
+                        e.preventDefault()
+                        e.dataTransfer.dropEffect = 'move'
+                        const accDropKey = `acc:${acc.id}`
+                        if (!isExpanded) {
+                          scheduleSpringLoad(accDropKey, () => setAccountExpanded(acc.id, true))
+                        }
+                        if (threadDropTargetKey !== accDropKey) setThreadDropTargetKey(accDropKey)
+                        return
+                      }
                       e.preventDefault()
                       e.dataTransfer.dropEffect = 'move'
                       if (dragOverAccountId !== acc.id) setDragOverAccountId(acc.id)
                     }}
-                    onDragLeave={() => {
+                    onDragLeave={(e) => {
+                      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                        const accDropKey = `acc:${acc.id}`
+                        if (springLoadTargetRef.current === accDropKey) clearSpringLoad()
+                        if (threadDropTargetKey === accDropKey) setThreadDropTargetKey(null)
+                      }
                       if (dragOverAccountId === acc.id) setDragOverAccountId(null)
                     }}
                     onDrop={(e) => {
+                      if (isThreadDragEvent(e)) {
+                        e.preventDefault()
+                        clearSpringLoad()
+                        setThreadDropTargetKey(null)
+                        return
+                      }
                       e.preventDefault()
                       void handleDropAccount(acc.id)
                     }}
@@ -1310,9 +1466,14 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
                     onContextMenu={(e) => openAccountMenu(e, acc)}
                     className="group relative flex items-center justify-between overflow-hidden rounded-lg py-1.5 pl-2 pr-1.5 text-[12.5px] transition hover:brightness-105"
                     style={{
-                      background: accBg,
+                      background: threadDropTargetKey === `acc:${acc.id}` ? 'var(--accent-soft)' : accBg,
                       opacity: isDragging ? 0.35 : 1,
-                      boxShadow: isDragOver ? 'inset 0 2px 0 0 var(--accent)' : undefined
+                      boxShadow:
+                        threadDropTargetKey === `acc:${acc.id}`
+                          ? 'inset 0 0 0 1px var(--accent)'
+                          : isDragOver
+                            ? 'inset 0 2px 0 0 var(--accent)'
+                            : undefined
                     }}
                   >
                     {hasBar && (
@@ -1418,11 +1579,38 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
                           activeView === 'mail' &&
                           !activeFolderName &&
                           activeMailbox === item.mailbox
+                        const isDroppableSys =
+                          item.mailbox === 'inbox' ||
+                          item.mailbox === 'archive' ||
+                          item.mailbox === 'trash' ||
+                          item.mailbox === 'junk'
+                        const sysDropKey = `sys:${item.key}`
+                        const isSysDropOver = threadDropTargetKey === sysDropKey
                         return (
                           <button
                             key={item.key}
                             type="button"
                             onClick={() => void selectAccountMailbox(acc.id, item.mailbox, null)}
+                            onDragOver={(e) => {
+                              if (!isDroppableSys || !isThreadDragEvent(e)) return
+                              e.preventDefault()
+                              e.stopPropagation()
+                              e.dataTransfer.dropEffect = 'move'
+                              if (threadDropTargetKey !== sysDropKey) setThreadDropTargetKey(sysDropKey)
+                            }}
+                            onDragLeave={(e) => {
+                              if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
+                              if (threadDropTargetKey === sysDropKey) setThreadDropTargetKey(null)
+                            }}
+                            onDrop={(e) => {
+                              if (!isDroppableSys || !isThreadDragEvent(e)) return
+                              handleThreadDropOnFolder(e, {
+                                accountId: acc.id,
+                                role: item.mailbox as Folder['role'],
+                                folderName: item.label,
+                                folderId: item.folder?.id
+                              })
+                            }}
                             onContextMenu={(e) =>
                               openFolderMenu(e, {
                                 mailbox: item.mailbox,
@@ -1434,7 +1622,12 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
                             }
                             className="flex w-full items-center justify-between rounded-md px-2 py-1 text-[12px] transition hover:bg-[var(--bg-hover)]"
                             style={{
-                              background: isItemActive ? 'var(--bg-selected)' : undefined,
+                              background: isSysDropOver
+                                ? 'var(--accent-soft)'
+                                : isItemActive
+                                  ? 'var(--bg-selected)'
+                                  : undefined,
+                              boxShadow: isSysDropOver ? 'inset 0 0 0 1px var(--accent)' : undefined,
                               color: isItemActive ? 'var(--text-primary)' : 'var(--text-secondary)',
                               fontWeight: isItemActive || item.unreadCount > 0 ? 600 : 400
                             }}
