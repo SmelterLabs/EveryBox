@@ -12,7 +12,7 @@ export type AccountRowStyle = 'gradient' | 'bar' | 'dot'
 
 export type OutlookFocusedMode = 'all' | 'focused-only' | 'other-to-updates'
 
-export type AccountIconId =
+export type BuiltinAccountIconId =
   | 'none'
   | 'home'
   | 'briefcase'
@@ -26,6 +26,8 @@ export type AccountIconId =
   | 'code'
   | 'user'
   | 'sparkles'
+
+export type AccountIconId = BuiltinAccountIconId | `data:image/${string}`
 
 export type AccountSwitchBehavior = 'home' | 'last-email' | 'first-email'
 

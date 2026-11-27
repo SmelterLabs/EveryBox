@@ -38,7 +38,7 @@ const GROUPS: { title: string; items: { keys: string; desc: string }[] }[] = [
       { keys: `${modKeyPrefix}Enter`, desc: 'Send message' },
       { keys: `${modKeyPrefix}B / ${modKeyPrefix}I`, desc: 'Bold / Italic in composer' },
       { keys: `Alt+${modKeyPrefix}S`, desc: 'Insert snippet' },
-      { keys: 'Z', desc: 'Undo last action / cancel send' }
+      { keys: `${modKeyPrefix}Z`, desc: 'Undo last action / cancel send' }
     ]
   }
 ]
