@@ -28,6 +28,7 @@ import {
   getWaitingOnYouItems,
   runAutopilotPass
 } from './ai/autopilot'
+import { acceptHabitSuggestion, dismissHabitSuggestion, recordUserHabitAction } from './ai/habits'
 import { parseNaturalLanguageSearch } from './ai/nl-search'
 import { checkForAppUpdates } from './updater'
 import type {
@@ -39,9 +40,11 @@ import type {
   CreateReminderPayload,
   DecisionAISettings,
   Folder,
+  HabitActionType,
   ImplicitCalendarEvent,
   MailboxId,
   SendEmailPayload,
+  SenderPreference,
   Snippet,
   ThreadPreDraft,
   VoiceProfile,
@@ -220,6 +223,45 @@ function broadcastDataUpdated(): void {
     if (!win.isDestroyed()) {
       win.webContents.send('glassmail:data-updated')
     }
+  }
+}
+
+function recordHabitForThread(
+  threadId: string,
+  action: HabitActionType,
+  opts?: { folderName?: string }
+): void {
+  try {
+    const detail = db.getThreadDetail(threadId)
+    if (!detail) return
+    const accEmail = (detail.accountEmail || '').toLowerCase().trim()
+    const inboundMsgs = detail.messages.filter(
+      (m) => !m.isDraft && !m.isSent && (m.from?.email || '').toLowerCase().trim() !== accEmail
+    )
+    const latestInbound = inboundMsgs.length > 0 ? inboundMsgs[inboundMsgs.length - 1] : null
+    const sender = latestInbound?.from || detail.latestExternalFrom || detail.latestFrom
+    const senderEmail = (sender?.email || '').trim().toLowerCase()
+    if (!senderEmail || senderEmail === accEmail) return
+
+    const meta = db.getThreadAiMeta(threadId)
+    const res = recordUserHabitAction(db, {
+      senderEmail,
+      displayName: sender?.name || '',
+      action,
+      folderName: opts?.folderName ?? null,
+      bundle: meta?.bundle ?? null,
+      hadOpened: detail.isRead,
+      threadId
+    })
+
+    if (res.newSuggestion) {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('habits:new-suggestion', res.newSuggestion)
+      }
+      broadcastDataUpdated()
+    }
+  } catch (err) {
+    console.warn('[EveryBox Habit] failed to record habit action:', err)
   }
 }
 
@@ -531,6 +573,11 @@ function registerIpc(): void {
 
   ipcMain.handle('mail:set-starred', async (_, threadIds: string[], isStarred: boolean) => {
     db.setThreadStarred(threadIds, isStarred)
+    if (isStarred) {
+      for (const tid of threadIds) {
+        recordHabitForThread(tid, 'star')
+      }
+    }
     broadcastDataUpdated()
     void syncManager.syncThreadMutationToRemote(threadIds, isStarred ? 'star' : 'unstar')
     return { ok: true }
@@ -553,6 +600,13 @@ function registerIpc(): void {
         }))
       }))
     db.moveThreads(threadIds, folderRole, folderName)
+    if (folderRole === 'archive') {
+      for (const tid of threadIds) recordHabitForThread(tid, 'archive')
+    } else if (folderRole === 'trash') {
+      for (const tid of threadIds) recordHabitForThread(tid, 'trash')
+    } else if (folderRole === 'custom' && folderName) {
+      for (const tid of threadIds) recordHabitForThread(tid, 'move_folder', { folderName })
+    }
     broadcastDataUpdated()
     void syncManager.syncThreadMutationToRemote(threadIds, 'move', folderRole, snapshots, folderName)
     return { ok: true }
@@ -609,7 +663,18 @@ function registerIpc(): void {
     return { ok: true }
   })
 
-  ipcMain.handle('mail:send', (_, payload: SendEmailPayload) => syncManager.sendEmail(payload))
+  ipcMain.handle('mail:send', async (_, payload: SendEmailPayload) => {
+    const res = await syncManager.sendEmail(payload)
+    if (res.ok && payload.threadId) {
+      const preDraft = db.getPreDraft(payload.threadId)
+      if (preDraft && (preDraft.status === 'ready' || !preDraft.status)) {
+        db.updatePreDraftStatus(payload.threadId, 'promoted')
+        recordHabitForThread(payload.threadId, 'draft_accepted')
+      }
+      recordHabitForThread(payload.threadId, 'reply')
+    }
+    return res
+  })
   ipcMain.handle('mail:save-draft', async (_, payload: SendEmailPayload) => {
     const acc = db.getAccount(payload.accountId)
     if (!acc) return { ok: false, error: 'Account not found' }
@@ -1097,6 +1162,7 @@ function registerIpc(): void {
   ipcMain.handle('ai:reclassifyThread', (_, threadId: string) => triageWorker.classifyThreadNow(threadId, true))
   ipcMain.handle('ai:dismissPreDraft', (_, threadId: string) => {
     db.updatePreDraftStatus(threadId, 'dismissed')
+    recordHabitForThread(threadId, 'draft_dismissed')
     broadcastDataUpdated()
     return { ok: true }
   })
@@ -1204,18 +1270,110 @@ function registerIpc(): void {
     getWaitingOnYouItems(db, secrets, accountIds, Boolean(useAI))
   )
   ipcMain.handle('autopilot:list-logs', (_, limit?: number) => db.listAutopilotLogs(limit))
-  ipcMain.handle('autopilot:undo-log', async (_, logId: string, threadId: string, undoAction: string) => {
-    if (undoAction === 'restoreInbox') {
-      db.moveThreads([threadId], 'inbox', 'Inbox')
-    } else if (undoAction === 'markUnread') {
-      db.setThreadRead([threadId], false)
-    } else if (undoAction === 'unstar') {
-      db.setThreadStarred([threadId], false)
+  const undoAutopilotLogEntry = async (
+    logId: string,
+    opts?: { pauseRule?: boolean; fallbackThreadId?: string; fallbackUndoAction?: string }
+  ): Promise<{ ok: boolean; error?: string }> => {
+    const log = db.getAutopilotLog(logId)
+    if (!log) {
+      if (opts?.fallbackThreadId && opts?.fallbackUndoAction) {
+        if (opts.fallbackUndoAction === 'restoreInbox') {
+          db.moveThreads([opts.fallbackThreadId], 'inbox', 'Inbox')
+        } else if (opts.fallbackUndoAction === 'markUnread') {
+          db.setThreadRead([opts.fallbackThreadId], false)
+        } else if (opts.fallbackUndoAction === 'unstar') {
+          db.setThreadStarred([opts.fallbackThreadId], false)
+        }
+        broadcastDataUpdated()
+        return { ok: true }
+      }
+      return { ok: false, error: 'Autopilot log entry not found' }
     }
-    db.deleteAutopilotLog(logId)
+
+    if (log.undoneAt) {
+      return { ok: true }
+    }
+
+    const threadId = log.threadId || opts?.fallbackThreadId
+    const inferredUndoAction =
+      log.undoAction ||
+      opts?.fallbackUndoAction ||
+      (log.actionType === 'archive' || log.actionType === 'trash' || log.actionType === 'moveToFolder'
+        ? 'restoreInbox'
+        : log.actionType === 'markRead'
+          ? 'markUnread'
+          : log.actionType === 'star'
+            ? 'unstar'
+            : null)
+
+    if (threadId) {
+      if (inferredUndoAction === 'restoreInbox') {
+        const detail = db.getThreadDetail(threadId)
+        const snapshots = detail
+          ? [
+              {
+                threadId: detail.id,
+                accountId: detail.accountId,
+                folderRole: detail.folderRole,
+                folderName: detail.folderName,
+                messageRemoteIds: detail.messages.map((m) => m.remoteId),
+                messageFolders: detail.messages.map((m) => ({
+                  remoteId: m.remoteId,
+                  folderRole: m.folderRole,
+                  folderName: m.folderName
+                }))
+              }
+            ]
+          : undefined
+        db.moveThreads([threadId], 'inbox', 'Inbox')
+        void syncManager.syncThreadMutationToRemote([threadId], 'move', 'inbox', snapshots, 'Inbox')
+      } else if (inferredUndoAction === 'markUnread') {
+        db.setThreadRead([threadId], false)
+        void syncManager.syncThreadMutationToRemote([threadId], 'unread')
+      } else if (inferredUndoAction === 'unstar') {
+        db.setThreadStarred([threadId], false)
+        void syncManager.syncThreadMutationToRemote([threadId], 'unstar')
+      }
+    }
+
+    db.markAutopilotLogUndone(logId)
+    if (opts?.pauseRule && log.ruleId) {
+      db.toggleAutopilotRule(log.ruleId, false)
+    }
     broadcastDataUpdated()
     return { ok: true }
+  }
+
+  ipcMain.handle('autopilot:undoLog', (_, logId: string, pauseRule?: boolean) =>
+    undoAutopilotLogEntry(logId, { pauseRule })
+  )
+  ipcMain.handle('autopilot:undo-log', (_, logId: string, threadId?: string, undoAction?: string) =>
+    undoAutopilotLogEntry(logId, { fallbackThreadId: threadId, fallbackUndoAction: undoAction })
+  )
+
+  // ---- Habit Learning & Rule Suggestions ----
+  ipcMain.handle('habits:listSuggestions', (_, status?: 'pending' | 'accepted' | 'dismissed' | 'all') =>
+    db.listHabitSuggestions(status)
+  )
+  ipcMain.handle('habits:acceptSuggestion', async (_, id: string) => {
+    const res = await acceptHabitSuggestion(db, secrets, id)
+    if (res.ok) broadcastDataUpdated()
+    return res
   })
+  ipcMain.handle('habits:dismissSuggestion', (_, id: string) => {
+    const res = dismissHabitSuggestion(db, id)
+    if (res.ok) broadcastDataUpdated()
+    return res
+  })
+  ipcMain.handle('habits:listSenderProfiles', (_, limit?: number) => db.listSenderProfiles(limit))
+  ipcMain.handle(
+    'habits:setSenderPreference',
+    (_, senderEmail: string, preference: SenderPreference, locked = true) => {
+      const profile = db.setSenderPreference(senderEmail, preference, locked)
+      broadcastDataUpdated()
+      return { ok: true, profile }
+    }
+  )
 
   // ---- Voice Profiles ----
   ipcMain.handle('voices:list', () => db.listVoiceProfiles())

@@ -236,7 +236,10 @@ export class TriageWorker {
 
     // Tier 0: deterministic 0-token fast-reject for automated/2FA/newsletter/promo mail
     const vipSenders = settings.autopilot?.preDraftAlwaysSenders || []
-    const tier0 = classifyTier0FastReject(latestMsg, vipSenders)
+    const fromEmail = (latestMsg.from?.email || '').toLowerCase().trim()
+    const senderProfile = fromEmail ? this.db.getSenderProfile(fromEmail) : null
+    const isLearnedVip = senderProfile?.preference === 'vip'
+    const tier0 = isLearnedVip ? null : classifyTier0FastReject(latestMsg, vipSenders)
     if (tier0) {
       const meta: ThreadAIMeta = {
         threadId,
@@ -299,11 +302,14 @@ export class TriageWorker {
       }
     }
 
+    const boostedUrgency: 0 | 1 | 2 | 3 =
+      isLearnedVip && decision.needsReply && decision.urgency < 2 ? 2 : decision.urgency
+
     const meta: ThreadAIMeta = {
       threadId,
       classifiedMsgAt: latestMsgAt,
       bundle: decision.bundle,
-      urgency: decision.urgency,
+      urgency: boostedUrgency,
       needsReply: decision.needsReply,
       replyConfidence: decision.replyConfidence,
       autoDraftWorthy: decision.autoDraftWorthy,

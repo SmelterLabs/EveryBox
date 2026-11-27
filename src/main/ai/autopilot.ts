@@ -6,6 +6,7 @@ import type {
   AutopilotAction,
   AutopilotCondition,
   AutopilotRule,
+  SenderProfile,
   ThreadSummary,
   WaitingOnYouItem
 } from '../../shared/types'
@@ -264,6 +265,7 @@ export async function runAutopilotPass(
           threadId: t.id,
           threadSubject: t.subject,
           actionSummary: 'Archived expired sign-in code',
+          actionType: 'archive',
           undoAction: 'restoreInbox',
           createdAt: Date.now()
         })
@@ -286,28 +288,34 @@ export async function runAutopilotPass(
         processedRuleThreads.add(key)
 
         const summaries: string[] = []
+        let actionType: string | undefined
         let undoAction: 'restoreInbox' | 'markUnread' | 'unstar' | null = null
 
         for (const act of rule.actions) {
           if (act.type === 'archive') {
             db.moveThreads([t.id], 'archive', 'Archive')
             summaries.push('Archived')
+            actionType = 'archive'
             undoAction = 'restoreInbox'
           } else if (act.type === 'trash') {
             db.moveThreads([t.id], 'trash', 'Trash')
             summaries.push('Moved to Trash')
+            actionType = 'trash'
             undoAction = 'restoreInbox'
           } else if (act.type === 'moveToFolder' && act.folderName) {
             db.moveThreads([t.id], 'custom', act.folderName)
             summaries.push(`Moved to ${act.folderName}`)
+            actionType = 'moveToFolder'
             undoAction = 'restoreInbox'
           } else if (act.type === 'markRead') {
             db.setThreadRead([t.id], true)
             summaries.push('Marked read')
+            if (!actionType) actionType = 'markRead'
             if (!undoAction) undoAction = 'markUnread'
           } else if (act.type === 'star') {
             db.setThreadStarred([t.id], true)
             summaries.push('Starred')
+            if (!actionType) actionType = 'star'
             if (!undoAction) undoAction = 'unstar'
           } else if (act.type === 'notify') {
             // Only fire desktop alerts for unread emails so restarts/rules never spam notifications for old read mail
@@ -317,6 +325,7 @@ export async function runAutopilotPass(
                 body: t.subject
               }).show()
               summaries.push('Notified')
+              if (!actionType) actionType = 'notify'
             }
           } else if (act.type === 'preDraft') {
             if (!db.getPreDraft(t.id, { includeDismissed: true }) && !attemptedPreDraftThreads.has(t.id)) {
@@ -343,6 +352,7 @@ export async function runAutopilotPass(
                   source: 'auto'
                 })
                 summaries.push('Pre-drafted reply')
+                if (!actionType) actionType = 'preDraft'
               }
             }
           }
@@ -356,6 +366,7 @@ export async function runAutopilotPass(
             threadId: t.id,
             threadSubject: t.subject,
             actionSummary: summaries.join(' · '),
+            actionType,
             undoAction,
             createdAt: Date.now()
           })
@@ -419,6 +430,7 @@ export async function runAutopilotPass(
             threadId: t.id,
             threadSubject: t.subject,
             actionSummary: `Drafted reply (${res.providerLabel})`,
+            actionType: 'preDraft',
             undoAction: null,
             createdAt: Date.now()
           })
@@ -426,6 +438,15 @@ export async function runAutopilotPass(
           return true
         }
         return false
+      }
+
+      const senderProfileCache = new Map<string, SenderProfile | null>()
+      const getSenderProfileCached = (email: string): SenderProfile | null => {
+        if (!email) return null
+        if (!senderProfileCache.has(email)) {
+          senderProfileCache.set(email, db.getSenderProfile(email))
+        }
+        return senderProfileCache.get(email) ?? null
       }
 
       const evaluateSixPointGate = (
@@ -439,8 +460,16 @@ export async function runAutopilotPass(
         if (matchesList(fromEmail, excludedSenders)) return { pass: false }
         if (attemptedPreDraftThreads.has(t.id)) return { pass: false }
 
+        // Lane 1 Silent Safe Tuning: respect learned/locked sender preferences at 0 tokens
+        const isExplicitAlways = matchesList(fromEmail, alwaysSenders)
+        const senderProfile = getSenderProfileCached(fromEmail)
+        if (senderProfile?.preference === 'no_autodraft' && !isExplicitAlways) {
+          return { pass: false }
+        }
+        const effectiveVip = isVip || senderProfile?.preference === 'vip'
+
         // Gate 1: Tier 0 pass (not automated / unsubscribe / security)
-        if (!isVip) {
+        if (!effectiveVip) {
           if (t.category !== 'people') return { pass: false }
           if (t.unsubscribeUrl || t.signInCode) return { pass: false }
           if (automatedSenderRe.test(fromEmail)) return { pass: false }
@@ -462,7 +491,7 @@ export async function runAutopilotPass(
         if (now - latestMsg.date > maxAgeMs) return { pass: false }
 
         // Gate 1 (body check for disguised newsletters on non-VIP)
-        if (!isVip) {
+        if (!effectiveVip) {
           const fullBodyCheck = `${latestMsg.bodyText || ''} ${latestMsg.bodyHtml || ''}`
           if (
             /unsubscribe|manage\s+(?:your\s+)?(?:email\s+)?preferences|email\s+preferences|view\s+(?:this\s+email\s+)?in\s+(?:your\s+)?browser|opt[\s-]out/i.test(
@@ -492,8 +521,8 @@ export async function runAutopilotPass(
           return { pass: false }
         }
 
-        // Gate 4: Persisted thread_ai_meta confidence check (VIP alwaysSenders bypasses Gate 4)
-        if (!isVip) {
+        // Gate 4: Persisted thread_ai_meta confidence check (VIP alwaysSenders / learned VIP bypasses Gate 4)
+        if (!effectiveVip) {
           if (
             !meta ||
             !meta.modelLabel ||
