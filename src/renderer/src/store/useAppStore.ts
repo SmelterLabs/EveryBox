@@ -129,6 +129,7 @@ interface AppState {
   sidebarVisible: boolean
   assistantOpen: boolean
   assistantDraftPrompt: string | null
+  autopilotDraftPrompt: string | null
   pendingSummarizeThreadId: string | null
   pendingDraftThreadId: string | null
   pendingCalendarDraft: {
@@ -244,6 +245,8 @@ interface AppState {
   toggleAssistant: () => void
   askAssistantPrompt: (prompt: string) => void
   clearAssistantDraftPrompt: () => void
+  openAutopilotWithPrompt: (prompt: string) => void
+  clearAutopilotDraftPrompt: () => void
   requestSummarizeThread: (threadId: string) => Promise<void>
   clearPendingSummarize: () => void
   requestDraftReply: (threadId: string) => Promise<void>
@@ -395,6 +398,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   sidebarVisible: true,
   assistantOpen: false,
   assistantDraftPrompt: null,
+  autopilotDraftPrompt: null,
   pendingSummarizeThreadId: null,
   pendingDraftThreadId: null,
   pendingCalendarDraft: null,
@@ -1281,6 +1285,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   toggleAssistant: () => set((s) => ({ assistantOpen: !s.assistantOpen })),
   askAssistantPrompt: (prompt) => set({ assistantOpen: true, assistantDraftPrompt: prompt }),
   clearAssistantDraftPrompt: () => set({ assistantDraftPrompt: null }),
+  openAutopilotWithPrompt: (prompt) => set({ activeView: 'autopilot', autopilotDraftPrompt: prompt }),
+  clearAutopilotDraftPrompt: () => set({ autopilotDraftPrompt: null }),
   requestSummarizeThread: async (threadId) => {
     set({ activeView: 'mail', pendingSummarizeThreadId: threadId })
     await get().selectThread(threadId)

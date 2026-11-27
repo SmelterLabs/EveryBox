@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import {
   Check,
   Mic,
@@ -101,6 +101,7 @@ export const AutopilotView: React.FC = () => {
     preDrafts,
     autopilotRules,
     autopilotLogs,
+    autopilotDraftPrompt,
     habitSuggestions,
     senderProfiles,
     voiceProfiles,
@@ -108,6 +109,7 @@ export const AutopilotView: React.FC = () => {
     refreshAll,
     setActiveView,
     selectThread,
+    clearAutopilotDraftPrompt,
     acceptHabitSuggestion,
     dismissHabitSuggestion,
     setSenderPreference,
@@ -118,6 +120,13 @@ export const AutopilotView: React.FC = () => {
   const [rulePrompt, setRulePrompt] = useState('')
   const [buildingRule, setBuildingRule] = useState(false)
   const [runningPass, setRunningPass] = useState(false)
+
+  useEffect(() => {
+    if (autopilotDraftPrompt) {
+      setRulePrompt(autopilotDraftPrompt)
+      clearAutopilotDraftPrompt()
+    }
+  }, [autopilotDraftPrompt, clearAutopilotDraftPrompt])
   const [busySuggestionId, setBusySuggestionId] = useState<string | null>(null)
   const [busyUndoLogId, setBusyUndoLogId] = useState<string | null>(null)
 

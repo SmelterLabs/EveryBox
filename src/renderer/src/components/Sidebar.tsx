@@ -1,14 +1,17 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import {
   Archive,
   Bell,
+  BellOff,
   Calendar,
   Check,
   ChevronDown,
   ChevronRight,
   Clock,
+  Eye,
+  EyeOff,
   FileText,
-  Folder as FolderIcon,
+  FolderPlus,
   GripVertical,
   HelpCircle,
   Hourglass,
@@ -17,11 +20,15 @@ import {
   Mail,
   MailOpen,
   Newspaper,
+  Palette,
   PanelRight,
   Pencil,
   PenSquare,
+  Pin,
+  PinOff,
   Plus,
   RefreshCw,
+  RotateCcw,
   Send,
   Settings,
   ShieldAlert,
@@ -34,10 +41,19 @@ import {
 import { useAppStore } from '../store/useAppStore'
 import { usePaneZoom } from '../hooks/usePaneZoom'
 import { modKeyPrefix } from '../utils/platform'
+import {
+  buildFolderTree,
+  FOLDER_ICON_OPTIONS,
+  getLeafFolderName,
+  NORDIC_FOLDER_COLORS,
+  renderFolderIcon,
+  type FolderTreeNode
+} from '../utils/folderTree'
 import { ContextMenu, type ContextMenuItem, type ContextMenuState } from './ContextMenu'
+import { CreateFolderModal, DeleteFolderModal, RenameFolderModal } from './FolderModals'
 import { ACCOUNT_ICON_OPTIONS, AccountIcon } from './AccountIcon'
 import appIcon from '../assets/icon.png'
-import type { Account, AccountIconId, MailboxId, OutlookFocusedMode } from '../../../shared/types'
+import type { Account, AccountIconId, Folder, MailboxId, OutlookFocusedMode } from '../../../shared/types'
 
 const COLOR_SWATCHES = [
   '#3B82F6',
@@ -68,6 +84,9 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
     assistantOpen,
     activeMailbox,
     activeFolderName,
+    expandedAccountIds,
+    expandedFolderIds,
+    showHiddenFoldersByAccount,
     isSyncing,
     setActiveView,
     toggleAssistant,
@@ -78,6 +97,12 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
     selectAccountMailbox,
     toggleAccountFilter,
     selectWorkspace,
+    toggleAccountExpanded,
+    toggleFolderExpanded,
+    toggleShowHiddenFolders,
+    updateFolderPrefs,
+    syncSingleFolder,
+    openAutopilotWithPrompt,
     openComposer,
     openSettings,
     openConfirm,
@@ -93,11 +118,22 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
 
   const [showMore, setShowMore] = useState(false)
   const { ref: zoomRef, zoom, zoomBadge } = usePaneZoom<HTMLElement>('sidebar')
-  const [expandedAccountIds, setExpandedAccountIds] = useState<Record<string, boolean>>({})
   const [addingReminder, setAddingReminder] = useState(false)
   const [newReminderTitle, setNewReminderTitle] = useState('')
   const [newReminderPreset, setNewReminderPreset] = useState<'10m' | '30m' | '1h' | 'tomorrow' | 'nextweek'>('1h')
   const [blinkingReminderIds, setBlinkingReminderIds] = useState<Record<string, boolean>>({})
+  const [createFolderModal, setCreateFolderModal] = useState<{
+    account: Account
+    parentFolder?: Folder | null
+  } | null>(null)
+  const [renameFolderModal, setRenameFolderModal] = useState<{
+    account: Account
+    folder: Folder
+  } | null>(null)
+  const [deleteFolderModal, setDeleteFolderModal] = useState<{
+    account: Account
+    folder: Folder
+  } | null>(null)
 
   useEffect(() => {
     const unsub = window.glassmail.onReminderDue((reminderId) => {
@@ -128,11 +164,17 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
   const openAccountMenu = (e: React.MouseEvent, acc: Account) => {
     e.preventDefault()
     e.stopPropagation()
+    const isGmail = acc.provider === 'gmail'
     const items: ContextMenuItem[] = [
       {
         label: `New email from ${acc.name}`,
         icon: <PenSquare size={13} />,
         onClick: () => openComposer({ mode: 'new', accountId: acc.id })
+      },
+      {
+        label: isGmail ? 'New Label…' : 'New Folder…',
+        icon: <FolderPlus size={13} />,
+        onClick: () => setCreateFolderModal({ account: acc, parentFolder: null })
       },
       {
         label: 'Sync now',
@@ -156,13 +198,213 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
 
   const openFolderMenu = (
     e: React.MouseEvent,
-    opts: { mailbox: MailboxId; label: string; accountIds?: string[]; folderName?: string }
+    opts: {
+      mailbox: MailboxId
+      label: string
+      accountIds?: string[]
+      folderName?: string
+      account?: Account
+      folder?: Folder
+    }
   ) => {
     e.preventDefault()
     e.stopPropagation()
-    const items: ContextMenuItem[] = [
-      {
-        label: 'Mark all as read',
+
+    const { account, folder } = opts
+    const items: ContextMenuItem[] = []
+
+    const pushEmptyTrashOrJunk = () => {
+      if ((opts.mailbox === 'trash' || opts.mailbox === 'junk') && !opts.folderName) {
+        const role = opts.mailbox
+        items.push(
+          { type: 'separator' },
+          {
+            label: `Empty ${opts.label}`,
+            icon: <Trash2 size={13} />,
+            danger: true,
+            onClick: () => {
+              const count = role === 'trash' ? counts.trash : counts.junk
+              openConfirm({
+                title: `Empty ${opts.label}?`,
+                description: count
+                  ? `This will permanently delete ${count} conversation${count === 1 ? '' : 's'} in ${opts.label}. This action cannot be undone.`
+                  : `This will permanently delete all messages in ${opts.label}. This action cannot be undone.`,
+                confirmLabel: `Empty ${opts.label}`,
+                danger: true,
+                onConfirm: async () => {
+                  await window.glassmail.emptyFolder(
+                    role,
+                    opts.accountIds && opts.accountIds.length > 0 ? opts.accountIds : undefined
+                  )
+                  await refreshAll()
+                  showToast(`Emptied ${opts.label}`)
+                }
+              })
+            }
+          }
+        )
+      }
+    }
+
+    if (account && folder && folder.role === 'custom') {
+      const isGmail = account.provider === 'gmail'
+      const colorIconChildren: ContextMenuItem[] = [
+        { type: 'header', label: 'Color' },
+        ...NORDIC_FOLDER_COLORS.map((swatch) => {
+          const isCurrent = folder.color?.toLowerCase() === swatch.hex.toLowerCase()
+          return {
+            key: `color-${swatch.id}`,
+            label: swatch.label,
+            icon: (
+              <span
+                className="flex h-3 w-3 items-center justify-center rounded-full"
+                style={{ background: swatch.hex }}
+              >
+                {isCurrent && <Check size={8} className="text-white" strokeWidth={3} />}
+              </span>
+            ),
+            onClick: () => void updateFolderPrefs({ folderId: folder.id, color: swatch.hex })
+          }
+        }),
+        {
+          key: 'color-reset',
+          label: 'Reset color',
+          icon: <RotateCcw size={12} />,
+          disabled: !folder.color,
+          onClick: () => void updateFolderPrefs({ folderId: folder.id, color: null })
+        },
+        { type: 'separator' },
+        { type: 'header', label: 'Icon' },
+        ...FOLDER_ICON_OPTIONS.map((opt) => {
+          const isCurrent = folder.icon === opt.id
+          return {
+            key: `icon-${opt.id}`,
+            label: isCurrent ? `${opt.label} ✓` : opt.label,
+            icon: renderFolderIcon(opt.id, isGmail, folder.color, 13),
+            onClick: () => void updateFolderPrefs({ folderId: folder.id, icon: opt.id })
+          }
+        }),
+        {
+          key: 'icon-reset',
+          label: 'Reset icon',
+          icon: <RotateCcw size={12} />,
+          disabled: !folder.icon,
+          onClick: () => void updateFolderPrefs({ folderId: folder.id, icon: null })
+        }
+      ]
+
+      items.push(
+        {
+          label: isGmail ? 'New Sub-label…' : 'New Subfolder…',
+          icon: <FolderPlus size={13} />,
+          onClick: () => setCreateFolderModal({ account, parentFolder: folder })
+        },
+        {
+          label: 'Rename…',
+          icon: <Pencil size={13} />,
+          onClick: () => setRenameFolderModal({ account, folder })
+        },
+        {
+          label: 'Color & Icon',
+          icon: <Palette size={13} />,
+          disableFilter: true,
+          children: colorIconChildren
+        },
+        {
+          label: folder.isPinned ? 'Unpin from Favorites' : 'Pin to Favorites',
+          icon: folder.isPinned ? <PinOff size={13} /> : <Pin size={13} />,
+          onClick: () => void updateFolderPrefs({ folderId: folder.id, isPinned: !folder.isPinned })
+        },
+        { type: 'separator' },
+        {
+          label: 'Mark All as Read',
+          icon: <MailOpen size={13} />,
+          onClick: () =>
+            void markFolderRead({
+              mailbox: opts.mailbox,
+              accountIds: opts.accountIds,
+              folderName: opts.folderName,
+              label: opts.label
+            })
+        },
+        {
+          label: 'Sync This Folder',
+          icon: <RefreshCw size={13} />,
+          onClick: () => void syncSingleFolder(account.id, folder.path || folder.name)
+        },
+        {
+          label: folder.muteBadge ? 'Show Unread Badge' : 'Mute Unread Badge',
+          icon: folder.muteBadge ? <Bell size={13} /> : <BellOff size={13} />,
+          onClick: () => void updateFolderPrefs({ folderId: folder.id, muteBadge: !folder.muteBadge })
+        },
+        {
+          label: 'Create Autopilot Rule for Folder…',
+          icon: <Zap size={13} />,
+          onClick: () =>
+            openAutopilotWithPrompt(`Move matching emails to "${folder.path || folder.name}"`)
+        },
+        {
+          label: folder.isHidden ? 'Show Folder' : 'Hide Folder',
+          icon: folder.isHidden ? <Eye size={13} /> : <EyeOff size={13} />,
+          onClick: () => void updateFolderPrefs({ folderId: folder.id, isHidden: !folder.isHidden })
+        },
+        { type: 'separator' },
+        {
+          label: isGmail ? 'Delete Label…' : 'Delete Folder…',
+          icon: <Trash2 size={13} />,
+          danger: true,
+          onClick: () => setDeleteFolderModal({ account, folder })
+        }
+      )
+    } else if (account && folder) {
+      // System folder inside an account: hide impossible actions (Rename, Delete, Color & Icon, Hide)
+      const canCreateSubfolder =
+        account.provider !== 'gmail' &&
+        (folder.role === 'inbox' || folder.role === 'sent' || folder.role === 'archive')
+
+      items.push({
+        label: folder.isPinned ? 'Unpin from Favorites' : 'Pin to Favorites',
+        icon: folder.isPinned ? <PinOff size={13} /> : <Pin size={13} />,
+        onClick: () => void updateFolderPrefs({ folderId: folder.id, isPinned: !folder.isPinned })
+      })
+
+      if (canCreateSubfolder) {
+        items.push({
+          label: 'New Subfolder…',
+          icon: <FolderPlus size={13} />,
+          onClick: () => setCreateFolderModal({ account, parentFolder: folder })
+        })
+      }
+
+      items.push(
+        { type: 'separator' },
+        {
+          label: 'Mark All as Read',
+          icon: <MailOpen size={13} />,
+          onClick: () =>
+            void markFolderRead({
+              mailbox: opts.mailbox,
+              accountIds: opts.accountIds,
+              folderName: opts.folderName,
+              label: opts.label
+            })
+        },
+        {
+          label: 'Sync This Folder',
+          icon: <RefreshCw size={13} />,
+          onClick: () => void syncSingleFolder(account.id, folder.path || folder.name)
+        },
+        {
+          label: folder.muteBadge ? 'Show Unread Badge' : 'Mute Unread Badge',
+          icon: folder.muteBadge ? <Bell size={13} /> : <BellOff size={13} />,
+          onClick: () => void updateFolderPrefs({ folderId: folder.id, muteBadge: !folder.muteBadge })
+        }
+      )
+      pushEmptyTrashOrJunk()
+    } else {
+      // Unified top-level mailbox or system folder without a persisted Folder row
+      items.push({
+        label: 'Mark All as Read',
         icon: <MailOpen size={13} />,
         onClick: () =>
           void markFolderRead({
@@ -171,38 +413,10 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
             folderName: opts.folderName,
             label: opts.label
           })
-      }
-    ]
-    if ((opts.mailbox === 'trash' || opts.mailbox === 'junk') && !opts.folderName) {
-      const role = opts.mailbox
-      items.push(
-        { type: 'separator' },
-        {
-          label: `Empty ${opts.label}`,
-          icon: <Trash2 size={13} />,
-          danger: true,
-          onClick: () => {
-            const count = role === 'trash' ? counts.trash : counts.junk
-            openConfirm({
-              title: `Empty ${opts.label}?`,
-              description: count
-                ? `This will permanently delete ${count} conversation${count === 1 ? '' : 's'} in ${opts.label}. This action cannot be undone.`
-                : `This will permanently delete all messages in ${opts.label}. This action cannot be undone.`,
-              confirmLabel: `Empty ${opts.label}`,
-              danger: true,
-              onConfirm: async () => {
-                await window.glassmail.emptyFolder(
-                  role,
-                  opts.accountIds && opts.accountIds.length > 0 ? opts.accountIds : undefined
-                )
-                await refreshAll()
-                showToast(`Emptied ${opts.label}`)
-              }
-            })
-          }
-        }
-      )
+      })
+      pushEmptyTrashOrJunk()
     }
+
     setContextMenu({ x: e.clientX, y: e.clientY, items })
   }
 
@@ -318,54 +532,205 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
     )
   }
 
-  const toggleExpandAccount = (accountId: string) => {
-    setExpandedAccountIds((prev) => ({ ...prev, [accountId]: !prev[accountId] }))
+  const accountById = useMemo(() => {
+    const map = new Map<string, Account>()
+    for (const acc of accounts) map.set(acc.id, acc)
+    return map
+  }, [accounts])
+
+  const pinnedFolders = useMemo(
+    () =>
+      folders
+        .filter((f) => f.isPinned && !f.isHidden && accountById.has(f.accountId))
+        .sort((a, b) => {
+          const orderA = a.sortOrder ?? Number.MAX_SAFE_INTEGER
+          const orderB = b.sortOrder ?? Number.MAX_SAFE_INTEGER
+          if (orderA !== orderB) return orderA - orderB
+          return getLeafFolderName(a).localeCompare(getLeafFolderName(b), undefined, { sensitivity: 'base' })
+        }),
+    [folders, accountById]
+  )
+
+  const renderSystemRoleIcon = (role: Folder['role'], size = 13): React.ReactNode => {
+    switch (role) {
+      case 'inbox':
+        return <Inbox size={size} />
+      case 'drafts':
+        return <FileText size={size} />
+      case 'sent':
+        return <Send size={size} />
+      case 'archive':
+        return <Archive size={size} />
+      case 'junk':
+        return <ShieldAlert size={size} />
+      case 'trash':
+        return <Trash2 size={size} />
+      default:
+        return renderFolderIcon(null, false, null, size)
+    }
   }
 
-  const getAccountFolderItems = (acc: Account) => {
+  const getAccountSystemFolders = (acc: Account) => {
     const accFolders = folders.filter((f) => f.accountId === acc.id)
-    const findByRole = (role: 'inbox' | 'sent' | 'drafts' | 'junk' | 'trash' | 'archive') =>
+    const findByRole = (role: 'inbox' | 'drafts' | 'sent' | 'archive' | 'junk' | 'trash') =>
       accFolders.find((f) => f.role === role)
 
     const standardDefs: {
-      role: 'inbox' | 'sent' | 'drafts' | 'junk' | 'trash' | 'archive'
+      role: 'inbox' | 'drafts' | 'sent' | 'archive' | 'junk' | 'trash'
       defaultLabel: string
       icon: React.ReactNode
     }[] = [
       { role: 'inbox', defaultLabel: 'Inbox', icon: <Inbox size={13} /> },
-      { role: 'sent', defaultLabel: 'Sent', icon: <Send size={13} /> },
       { role: 'drafts', defaultLabel: 'Drafts', icon: <FileText size={13} /> },
+      { role: 'sent', defaultLabel: 'Sent', icon: <Send size={13} /> },
+      { role: 'archive', defaultLabel: 'Archive', icon: <Archive size={13} /> },
       { role: 'junk', defaultLabel: acc.provider === 'gmail' ? 'Spam' : 'Junk', icon: <ShieldAlert size={13} /> },
-      { role: 'trash', defaultLabel: 'Trash', icon: <Trash2 size={13} /> },
-      { role: 'archive', defaultLabel: 'Archive', icon: <Archive size={13} /> }
+      { role: 'trash', defaultLabel: 'Trash', icon: <Trash2 size={13} /> }
     ]
 
-    const standardItems = standardDefs.map((def) => {
+    return standardDefs.map((def) => {
       const matched = findByRole(def.role)
+      const rawUnread = def.role === 'inbox' ? acc.unreadCount || matched?.unreadCount || 0 : matched?.unreadCount || 0
       return {
         key: `${acc.id}:${def.role}`,
         label: matched?.name || def.defaultLabel,
         mailbox: def.role as MailboxId,
-        customFolderName: null as string | null,
         icon: def.icon,
-        totalCount: def.role === 'inbox' ? acc.totalCount || matched?.totalCount || 0 : matched?.totalCount || 0,
-        unreadCount: def.role === 'inbox' ? acc.unreadCount || 0 : matched?.unreadCount || 0
+        folder: matched,
+        unreadCount: matched?.muteBadge ? 0 : rawUnread
       }
     })
+  }
 
-    const customItems = accFolders
-      .filter((f) => f.role === 'custom')
-      .map((f) => ({
-        key: f.id,
-        label: f.name,
-        mailbox: 'inbox' as MailboxId,
-        customFolderName: f.name,
-        icon: <FolderIcon size={13} />,
-        totalCount: f.totalCount || 0,
-        unreadCount: f.unreadCount || 0
-      }))
+  const renderCustomFolderNode = (
+    node: FolderTreeNode,
+    acc: Account,
+    isSoloed: boolean,
+    mutedOpacity = false
+  ): React.ReactNode => {
+    const isGmail = acc.provider === 'gmail'
+    const folder = node.folder
+    const isExpanded = Boolean(expandedFolderIds[node.key])
+    const isItemActive = Boolean(
+      folder &&
+        isSoloed &&
+        activeView === 'mail' &&
+        activeFolderName &&
+        (activeFolderName === folder.name || activeFolderName === folder.path)
+    )
+    const canIndentChildren = node.depth < 4
+    const showCollapsedRollup = node.hasChildren && !isExpanded && node.rolledUpUnread > 0
+    const showDirectUnread = (!node.hasChildren || isExpanded) && node.unreadCount > 0
 
-    return [...standardItems, ...customItems]
+    return (
+      <div key={node.key}>
+        <div
+          className="group flex items-center rounded-md pl-0.5 pr-1.5 transition hover:bg-[var(--bg-hover)]"
+          style={{
+            background: isItemActive ? 'var(--bg-selected)' : undefined,
+            opacity: mutedOpacity ? 0.65 : 1
+          }}
+          title={node.fullPath}
+          onContextMenu={(e) => {
+            if (!folder) return
+            openFolderMenu(e, {
+              mailbox: 'inbox',
+              label: `${acc.name} · ${node.name}`,
+              accountIds: [acc.id],
+              folderName: folder.name,
+              account: acc,
+              folder
+            })
+          }}
+        >
+          {/* Fixed 16px chevron slot so leaf and parent icons align vertically */}
+          {node.hasChildren ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                toggleFolderExpanded(node.key)
+              }}
+              className="flex h-4 w-4 shrink-0 items-center justify-center rounded transition hover:bg-[var(--bg-elevated)]"
+              style={{ color: 'var(--text-muted)' }}
+              aria-label={isExpanded ? `Collapse ${node.name}` : `Expand ${node.name}`}
+            >
+              {isExpanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+            </button>
+          ) : (
+            <span className="h-4 w-4 shrink-0" aria-hidden="true" />
+          )}
+
+          <button
+            type="button"
+            onClick={() => {
+              if (folder) {
+                void selectAccountMailbox(acc.id, 'inbox', folder.name)
+              } else if (node.hasChildren) {
+                toggleFolderExpanded(node.key)
+              }
+            }}
+            className="flex min-w-0 flex-1 items-center justify-between gap-1.5 py-1 pl-1 text-left text-[12px]"
+            style={{
+              color: isItemActive ? 'var(--text-primary)' : 'var(--text-secondary)',
+              fontWeight: isItemActive || node.unreadCount > 0 ? 600 : 400
+            }}
+          >
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span
+                className="flex shrink-0 items-center"
+                style={{
+                  color: folder?.color || (isItemActive ? acc.color : 'var(--text-muted)')
+                }}
+              >
+                {renderFolderIcon(folder?.icon, isGmail, folder?.color, 13)}
+              </span>
+              <span className="truncate">{node.name}</span>
+            </span>
+
+            {showDirectUnread && (
+              <span
+                className="shrink-0 text-[11px] font-bold tabular-nums"
+                style={{ color: 'var(--text-primary)' }}
+                title={`${node.unreadCount} unread`}
+              >
+                {node.unreadCount}
+              </span>
+            )}
+
+            {showCollapsedRollup && (
+              <span
+                className="inline-flex shrink-0 items-center gap-1 text-[10.5px] font-medium tabular-nums"
+                style={{ color: node.unreadCount > 0 ? 'var(--text-primary)' : 'var(--text-muted)' }}
+                title={`${node.rolledUpUnread} unread in folder & subfolders`}
+              >
+                {node.unreadCount === 0 && (
+                  <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'var(--text-muted)' }} />
+                )}
+                {node.rolledUpUnread}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {node.hasChildren && isExpanded && (
+          <div
+            className="relative"
+            style={
+              canIndentChildren
+                ? {
+                    marginLeft: '9px',
+                    paddingLeft: '3px',
+                    borderLeft: '1px solid var(--border-subtle)'
+                  }
+                : undefined
+            }
+          >
+            {node.children.map((child) => renderCustomFolderNode(child, acc, isSoloed, mutedOpacity))}
+          </div>
+        )}
+      </div>
+    )
   }
 
   const computeReminderDueAt = (preset: '10m' | '30m' | '1h' | 'tomorrow' | 'nextweek'): number => {
@@ -743,6 +1108,102 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
           </div>
         </div>
 
+        {/* Pinned / Favorites Section (only rendered when at least one visible folder is pinned) */}
+        {pinnedFolders.length > 0 && (
+          <div className="mt-4">
+            <div className="mb-1 flex items-center gap-1.5 px-2.5">
+              <Pin size={11} style={{ color: 'var(--text-muted)' }} />
+              <span className="text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
+                Favorites
+              </span>
+            </div>
+            <div className="space-y-0.5">
+              {pinnedFolders.map((folder) => {
+                const acc = accountById.get(folder.accountId)
+                if (!acc) return null
+                const isCustom = folder.role === 'custom'
+                const isGmail = acc.provider === 'gmail'
+                const leafLabel = isCustom ? getLeafFolderName(folder) : folder.name
+                const isSoloed = activeAccountIds.length === 1 && activeAccountIds[0] === acc.id
+                const isFavActive =
+                  isSoloed &&
+                  activeView === 'mail' &&
+                  (isCustom
+                    ? activeFolderName === folder.name || activeFolderName === folder.path
+                    : !activeFolderName && activeMailbox === folder.role)
+                const unread = folder.muteBadge
+                  ? 0
+                  : folder.role === 'inbox'
+                    ? acc.unreadCount || folder.unreadCount || 0
+                    : folder.unreadCount || 0
+
+                return (
+                  <button
+                    key={`fav-${folder.id}`}
+                    type="button"
+                    onClick={() =>
+                      void selectAccountMailbox(
+                        acc.id,
+                        isCustom ? 'inbox' : (folder.role as MailboxId),
+                        isCustom ? folder.name : null
+                      )
+                    }
+                    onContextMenu={(e) =>
+                      openFolderMenu(e, {
+                        mailbox: isCustom ? 'inbox' : (folder.role as MailboxId),
+                        label: `${acc.name} · ${leafLabel}`,
+                        accountIds: [acc.id],
+                        folderName: isCustom ? folder.name : undefined,
+                        account: acc,
+                        folder
+                      })
+                    }
+                    className="flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-[12.5px] transition hover:bg-[var(--bg-hover)]"
+                    style={{
+                      background: isFavActive ? 'var(--bg-selected)' : undefined,
+                      color: isFavActive ? 'var(--text-primary)' : 'var(--text-secondary)',
+                      fontWeight: isFavActive || unread > 0 ? 600 : 400
+                    }}
+                    title={`${acc.name} · ${folder.path || folder.name}`}
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span
+                        className="flex shrink-0 items-center"
+                        style={{
+                          color: isCustom
+                            ? folder.color || (isFavActive ? acc.color : 'var(--text-muted)')
+                            : isFavActive
+                              ? acc.color
+                              : 'var(--text-muted)'
+                        }}
+                      >
+                        {isCustom
+                          ? renderFolderIcon(folder.icon, isGmail, folder.color, 13)
+                          : renderSystemRoleIcon(folder.role, 13)}
+                      </span>
+                      <span className="truncate">{leafLabel}</span>
+                      <span
+                        className="h-1.5 w-1.5 shrink-0 rounded-full"
+                        style={{ background: acc.color }}
+                        title={acc.name}
+                      />
+                    </span>
+                    {unread > 0 && (
+                      <span
+                        className="shrink-0 text-[11px] font-bold tabular-nums"
+                        style={{ color: 'var(--text-primary)' }}
+                        title={`${unread} unread`}
+                      >
+                        {unread}
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Accounts & Focus Toggles */}
         <div className="mt-5">
           <div className="mb-1.5 flex items-center justify-between px-2.5">
@@ -797,7 +1258,19 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
               const isExpanded = Boolean(expandedAccountIds[acc.id])
               const isDragging = draggedAccountId === acc.id
               const isDragOver = dragOverAccountId === acc.id && draggedAccountId !== acc.id
-              const accountFolders = isExpanded ? getAccountFolderItems(acc) : []
+              const systemFolders = isExpanded ? getAccountSystemFolders(acc) : []
+              const accCustomFolders = isExpanded
+                ? folders.filter((f) => f.accountId === acc.id && f.role === 'custom')
+                : []
+              const visibleCustomTree = isExpanded
+                ? buildFolderTree(accCustomFolders.filter((f) => !f.isHidden))
+                : []
+              const hiddenCustomFolders = isExpanded ? accCustomFolders.filter((f) => f.isHidden) : []
+              const hiddenCustomTree =
+                isExpanded && showHiddenFoldersByAccount[acc.id] && hiddenCustomFolders.length > 0
+                  ? buildFolderTree(hiddenCustomFolders)
+                  : []
+              const hasAnyCustom = visibleCustomTree.length > 0 || hiddenCustomFolders.length > 0
               const rowStyle = settings?.accountRowStyle || 'gradient'
               const hasWash = isChecked && rowStyle === 'gradient'
               const hasBar = isChecked && (rowStyle === 'gradient' || rowStyle === 'bar')
@@ -853,7 +1326,7 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation()
-                          toggleExpandAccount(acc.id)
+                          toggleAccountExpanded(acc.id)
                         }}
                         className="flex h-4 w-4 shrink-0 items-center justify-center rounded transition hover:bg-[var(--bg-elevated)]"
                         style={{ color: 'var(--text-muted)' }}
@@ -933,37 +1406,37 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
                     </div>
                   </div>
 
-                  {/* Per-account folder tree (Inbox, Sent/Sent Items, Drafts, Junk/Spam, Trash/Deleted Items, Archive, Custom) */}
+                  {/* Per-account folder tree: System folders first, 1px divider, nested custom folders, hidden toggle */}
                   {isExpanded && (
                     <div
                       className="ml-4 mt-0.5 space-y-0.5 border-l pl-2"
                       style={{ borderColor: 'var(--border-subtle)' }}
                     >
-                      {accountFolders.map((item) => {
+                      {systemFolders.map((item) => {
                         const isItemActive =
                           isSoloed &&
                           activeView === 'mail' &&
-                          (item.customFolderName
-                            ? activeFolderName === item.customFolderName
-                            : !activeFolderName && activeMailbox === item.mailbox)
+                          !activeFolderName &&
+                          activeMailbox === item.mailbox
                         return (
                           <button
                             key={item.key}
                             type="button"
-                            onClick={() => void selectAccountMailbox(acc.id, item.mailbox, item.customFolderName)}
+                            onClick={() => void selectAccountMailbox(acc.id, item.mailbox, null)}
                             onContextMenu={(e) =>
                               openFolderMenu(e, {
                                 mailbox: item.mailbox,
                                 label: `${acc.name} · ${item.label}`,
                                 accountIds: [acc.id],
-                                folderName: item.customFolderName || undefined
+                                account: acc,
+                                folder: item.folder
                               })
                             }
                             className="flex w-full items-center justify-between rounded-md px-2 py-1 text-[12px] transition hover:bg-[var(--bg-hover)]"
                             style={{
                               background: isItemActive ? 'var(--bg-selected)' : undefined,
                               color: isItemActive ? 'var(--text-primary)' : 'var(--text-secondary)',
-                              fontWeight: isItemActive ? 600 : 400
+                              fontWeight: isItemActive || item.unreadCount > 0 ? 600 : 400
                             }}
                           >
                             <span className="flex min-w-0 items-center gap-2 truncate">
@@ -972,10 +1445,47 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
                               </span>
                               <span className="truncate">{item.label}</span>
                             </span>
-                            {renderCounts(item.totalCount, item.unreadCount)}
+                            {item.unreadCount > 0 && (
+                              <span
+                                className="ml-1.5 shrink-0 text-[11px] font-bold tabular-nums"
+                                style={{ color: 'var(--text-primary)' }}
+                                title={`${item.unreadCount} unread`}
+                              >
+                                {item.unreadCount}
+                              </span>
+                            )}
                           </button>
                         )
                       })}
+
+                      {hasAnyCustom && (
+                        <div className="my-1.5 h-px" style={{ background: 'var(--border-subtle)' }} />
+                      )}
+
+                      {visibleCustomTree.map((node) => renderCustomFolderNode(node, acc, isSoloed, false))}
+
+                      {hiddenCustomFolders.length > 0 && (
+                        <div className="pt-1">
+                          <button
+                            type="button"
+                            onClick={() => toggleShowHiddenFolders(acc.id)}
+                            className="flex w-full items-center gap-1 rounded-md px-1.5 py-1 text-[11px] transition hover:bg-[var(--bg-hover)]"
+                            style={{ color: 'var(--text-muted)' }}
+                          >
+                            {showHiddenFoldersByAccount[acc.id] ? (
+                              <ChevronDown size={11} />
+                            ) : (
+                              <ChevronRight size={11} />
+                            )}
+                            <span>Hidden folders ({hiddenCustomFolders.length})</span>
+                          </button>
+                          {showHiddenFoldersByAccount[acc.id] && (
+                            <div className="mt-0.5 space-y-0.5">
+                              {hiddenCustomTree.map((node) => renderCustomFolderNode(node, acc, isSoloed, true))}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1372,6 +1882,27 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
             </div>
           </form>
         </div>
+      )}
+      {createFolderModal && (
+        <CreateFolderModal
+          account={createFolderModal.account}
+          parentFolder={createFolderModal.parentFolder}
+          onClose={() => setCreateFolderModal(null)}
+        />
+      )}
+      {renameFolderModal && (
+        <RenameFolderModal
+          account={renameFolderModal.account}
+          folder={renameFolderModal.folder}
+          onClose={() => setRenameFolderModal(null)}
+        />
+      )}
+      {deleteFolderModal && (
+        <DeleteFolderModal
+          account={deleteFolderModal.account}
+          folder={deleteFolderModal.folder}
+          onClose={() => setDeleteFolderModal(null)}
+        />
       )}
       <ContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} />
     </aside>
