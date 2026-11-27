@@ -55,9 +55,13 @@ function spawnWithStdin(cmd: string, args: string[], stdinText: string, timeoutM
   })
 }
 
-function stripThinkingTags(raw: string): string {
+export function stripThinkingTags(raw: string): string {
   return raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
 }
+
+export type AIPriority = 'interactive' | 'background'
+
+export type SecretReader = Pick<SecretStore, 'get'>
 
 export interface AICompletionRequest {
   system: string
@@ -65,6 +69,53 @@ export interface AICompletionRequest {
   images?: AIImageInput[]
   jsonMode?: boolean
   maxTokens?: number
+  priority?: AIPriority
+}
+
+class AIPriorityQueue {
+  private active = 0
+  private readonly interactive: (() => void)[] = []
+  private readonly background: (() => void)[] = []
+
+  constructor(private readonly maxConcurrent: number) {}
+
+  enqueue<T>(priority: AIPriority, task: () => Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const run = () => {
+        this.active++
+        task()
+          .then(resolve, reject)
+          .finally(() => {
+            this.active--
+            this.drain()
+          })
+      }
+      if (this.active < this.maxConcurrent) {
+        run()
+      } else if (priority === 'interactive') {
+        this.interactive.push(run)
+      } else {
+        this.background.push(run)
+      }
+    })
+  }
+
+  private drain(): void {
+    while (this.active < this.maxConcurrent) {
+      const next = this.interactive.shift() ?? this.background.shift()
+      if (!next) break
+      next()
+    }
+  }
+}
+
+const localAIQueue = new AIPriorityQueue(1)
+const remoteAIQueue = new AIPriorityQueue(3)
+
+function queueForProvider(provider: AISettings['provider']): AIPriorityQueue {
+  return provider === 'local-openai' || provider === 'ollama' || provider === 'lmstudio'
+    ? localAIQueue
+    : remoteAIQueue
 }
 
 function writeTempVisionImages(images: AIImageInput[]): { dir: string; paths: string[]; cleanup: () => void } {
@@ -201,9 +252,38 @@ function formatParamCount(n?: number): string | undefined {
   return undefined
 }
 
+interface LocalOpenAiProbeResult {
+  running: boolean
+  urlUsed: string
+  serverName: string | null
+  models: DiscoveredModel[]
+}
+
+const LOCAL_PROBE_TTL_MS = 60_000
+let localOpenAiProbeCache: {
+  configuredKey: string
+  result: LocalOpenAiProbeResult
+  expiresAt: number
+} | null = null
+
+export function invalidateLocalOpenAiProbeCache(): void {
+  localOpenAiProbeCache = null
+}
+
 async function probeOpenAiCompatibleServer(
-  configuredUrl?: string
-): Promise<{ running: boolean; urlUsed: string; serverName: string | null; models: DiscoveredModel[] }> {
+  configuredUrl?: string,
+  forceRefresh = false
+): Promise<LocalOpenAiProbeResult> {
+  const configuredKey = configuredUrl?.trim() ? normalizeHttpUrl(configuredUrl) : ''
+  if (
+    !forceRefresh &&
+    localOpenAiProbeCache &&
+    localOpenAiProbeCache.configuredKey === configuredKey &&
+    Date.now() < localOpenAiProbeCache.expiresAt
+  ) {
+    return localOpenAiProbeCache.result
+  }
+
   const defaults = [
     'http://127.0.0.1:8080',
     'http://127.0.0.1:8001',
@@ -211,8 +291,8 @@ async function probeOpenAiCompatibleServer(
     'http://127.0.0.1:8081'
   ]
   const candidates: string[] = []
-  if (configuredUrl?.trim()) {
-    candidates.push(normalizeHttpUrl(configuredUrl))
+  if (configuredKey) {
+    candidates.push(configuredKey)
   }
   for (const d of defaults) {
     if (!candidates.includes(d)) candidates.push(d)
@@ -241,18 +321,30 @@ async function probeOpenAiCompatibleServer(
         : ownedBy.includes('vllm')
           ? 'vLLM'
           : 'Local OpenAI Server'
-      return { running: true, urlUsed: base, serverName, models }
+      const result: LocalOpenAiProbeResult = { running: true, urlUsed: base, serverName, models }
+      localOpenAiProbeCache = {
+        configuredKey,
+        result,
+        expiresAt: Date.now() + LOCAL_PROBE_TTL_MS
+      }
+      return result
     } catch {
       // try next candidate
     }
   }
 
-  return {
+  const fallback: LocalOpenAiProbeResult = {
     running: false,
-    urlUsed: configuredUrl?.trim() ? normalizeHttpUrl(configuredUrl) : 'http://127.0.0.1:8080',
+    urlUsed: configuredKey || 'http://127.0.0.1:8080',
     serverName: null,
     models: []
   }
+  localOpenAiProbeCache = {
+    configuredKey,
+    result: fallback,
+    expiresAt: Date.now() + 15_000
+  }
+  return fallback
 }
 
 function readClaudeCliTierVersions(): { sonnet: string | null; haiku: string | null; opus: string | null } {
@@ -424,6 +516,8 @@ export async function detectLocalAI(
   const geminiKey = secrets?.get('ai_key:gemini') ?? null
   const openaiKey = secrets?.get('ai_key:openai') ?? null
   const grokKey = secrets?.get('ai_key:grok') ?? null
+  const jevKey = secrets?.get('ai_key:jev') ?? null
+  const openrouterKey = secrets?.get('ai_key:openrouter') ?? null
 
   const [
     gpuName,
@@ -441,7 +535,7 @@ export async function detectLocalAI(
     grokModels
   ] = await Promise.all([
     detectGpuName(),
-    probeOpenAiCompatibleServer(localServerOverride),
+    probeOpenAiCompatibleServer(localServerOverride, true),
     (async (): Promise<{ running: boolean; models: DiscoveredModel[] }> => {
       try {
         const res = await fetch(`${ollamaUrlUsed}/api/tags`, {
@@ -515,7 +609,9 @@ export async function detectLocalAI(
       anthropic: Boolean(anthropicKey),
       gemini: Boolean(geminiKey),
       openai: Boolean(openaiKey),
-      grok: Boolean(grokKey)
+      grok: Boolean(grokKey),
+      jev: Boolean(jevKey),
+      openrouter: Boolean(openrouterKey)
     },
     cloudModels: {
       anthropic: anthropicModels,
@@ -529,7 +625,78 @@ export async function detectLocalAI(
 export async function completeAI(
   req: AICompletionRequest,
   settings: AISettings,
-  secrets: SecretStore
+  secrets: SecretReader
+): Promise<AICompletionResult> {
+  const priority = req.priority ?? 'interactive'
+  return queueForProvider(settings.provider).enqueue(priority, () =>
+    completeAIInner(req, settings, secrets)
+  )
+}
+
+function selectFastAISettings(settings: AISettings): AISettings {
+  switch (settings.provider) {
+    case 'claude-cli':
+      return { ...settings, claudeCliModel: 'haiku' }
+    case 'anthropic':
+      return {
+        ...settings,
+        anthropicModel: /haiku/i.test(settings.anthropicModel || '')
+          ? settings.anthropicModel
+          : 'claude-haiku-4-5'
+      }
+    case 'gemini':
+      return {
+        ...settings,
+        geminiModel: /flash-lite/i.test(settings.geminiModel || '')
+          ? settings.geminiModel
+          : 'gemini-2.5-flash-lite'
+      }
+    case 'openai':
+      return {
+        ...settings,
+        openaiModel: /nano/i.test(settings.openaiModel || '')
+          ? settings.openaiModel
+          : 'gpt-5-nano'
+      }
+    case 'grok':
+      return {
+        ...settings,
+        grokModel: /mini|fast/i.test(settings.grokModel || '')
+          ? settings.grokModel
+          : 'grok-3-mini'
+      }
+    default:
+      return settings
+  }
+}
+
+export async function completeFastAI(
+  req: AICompletionRequest,
+  settings: AISettings,
+  secrets: SecretReader
+): Promise<AICompletionResult> {
+  const fastSettings = selectFastAISettings(settings)
+  const noThinkNote = '\nDo not include <think> tags, reasoning traces, or markdown fences unless requested. Be concise.'
+  const result = await completeAI(
+    {
+      ...req,
+      system: `${req.system}${noThinkNote}`,
+      maxTokens: req.maxTokens ?? 512,
+      priority: req.priority ?? 'background'
+    },
+    fastSettings,
+    secrets
+  )
+  return {
+    text: stripThinkingTags(result.text),
+    providerLabel: result.providerLabel
+  }
+}
+
+async function completeAIInner(
+  req: AICompletionRequest,
+  settings: AISettings,
+  secrets: SecretReader
 ): Promise<AICompletionResult> {
   const langNote =
     settings.responseLanguage && settings.responseLanguage !== 'auto'
@@ -562,12 +729,21 @@ export async function completeAI(
         }),
         signal: AbortSignal.timeout(90_000)
       })
-    let res = await callLocalOpenAi(Boolean(req.images?.length))
-    if (!res.ok && req.images?.length) {
-      // Graceful fallback if the loaded local model is text-only
-      res = await callLocalOpenAi(false)
+    let res: Response
+    try {
+      res = await callLocalOpenAi(Boolean(req.images?.length))
+      if (!res.ok && req.images?.length) {
+        // Graceful fallback if the loaded local model is text-only
+        res = await callLocalOpenAi(false)
+      }
+    } catch (err) {
+      invalidateLocalOpenAiProbeCache()
+      throw err
     }
-    if (!res.ok) throw new Error(`Local server error (${res.status}): ${await res.text()}`)
+    if (!res.ok) {
+      if (res.status >= 500) invalidateLocalOpenAiProbeCache()
+      throw new Error(`Local server error (${res.status}): ${await res.text()}`)
+    }
     const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }
     const gpu = await detectGpuName()
     return {
@@ -597,6 +773,7 @@ export async function completeAI(
           model,
           stream: false,
           format: req.jsonMode ? 'json' : undefined,
+          options: req.maxTokens ? { num_predict: req.maxTokens } : undefined,
           messages: [
             { role: 'system', content: system },
             withImages && req.images?.length
@@ -614,7 +791,7 @@ export async function completeAI(
     const data = (await res.json()) as { message?: { content?: string } }
     const gpu = await detectGpuName()
     return {
-      text: data.message?.content || '',
+      text: stripThinkingTags(data.message?.content || ''),
       providerLabel: `Ollama (${model}) · Local${gpu ? ` (${gpu})` : ''}`
     }
   }
@@ -655,7 +832,7 @@ export async function completeAI(
     const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }
     const gpu = await detectGpuName()
     return {
-      text: data.choices?.[0]?.message?.content || '',
+      text: stripThinkingTags(data.choices?.[0]?.message?.content || ''),
       providerLabel: `LM Studio (${model}) · Local${gpu ? ` (${gpu})` : ''}`
     }
   }
@@ -740,6 +917,7 @@ export async function completeAI(
       },
       body: JSON.stringify({
         model,
+        max_tokens: req.maxTokens || 2048,
         response_format: req.jsonMode ? { type: 'json_object' } : undefined,
         messages: [
           { role: 'system', content: system },
@@ -751,7 +929,7 @@ export async function completeAI(
     if (!res.ok) throw new Error(`Grok (xAI) API error (${res.status}): ${await res.text()}`)
     const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }
     return {
-      text: data.choices?.[0]?.message?.content || '',
+      text: stripThinkingTags(data.choices?.[0]?.message?.content || ''),
       providerLabel: `Grok (${model})`
     }
   }
@@ -803,6 +981,9 @@ export async function completeAI(
           { text: req.prompt }
         ]
       : [{ text: req.prompt }]
+    const generationConfig: Record<string, unknown> = {}
+    if (req.jsonMode) generationConfig.responseMimeType = 'application/json'
+    if (req.maxTokens) generationConfig.maxOutputTokens = req.maxTokens
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`,
       {
@@ -811,7 +992,7 @@ export async function completeAI(
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: system }] },
           contents: [{ role: 'user', parts: geminiParts }],
-          generationConfig: req.jsonMode ? { responseMimeType: 'application/json' } : undefined
+          generationConfig: Object.keys(generationConfig).length > 0 ? generationConfig : undefined
         }),
         signal: AbortSignal.timeout(60_000)
       }
@@ -819,7 +1000,7 @@ export async function completeAI(
     if (!res.ok) throw new Error(`Gemini API error (${res.status}): ${await res.text()}`)
     const data = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] }
     return {
-      text: data.candidates?.[0]?.content?.parts?.[0]?.text || '',
+      text: stripThinkingTags(data.candidates?.[0]?.content?.parts?.[0]?.text || ''),
       providerLabel: `Gemini (${model})`
     }
   }
@@ -827,6 +1008,7 @@ export async function completeAI(
   // OpenAI
   const key = secrets.get('ai_key:openai')
   if (!key) throw new Error('OpenAI API key not set in Settings > AI.')
+  const openAiModel = settings.openaiModel || 'gpt-4.1-mini'
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -834,7 +1016,8 @@ export async function completeAI(
       Authorization: `Bearer ${key}`
     },
     body: JSON.stringify({
-      model: settings.openaiModel || 'gpt-4.1-mini',
+      model: openAiModel,
+      max_completion_tokens: req.maxTokens || undefined,
       response_format: req.jsonMode ? { type: 'json_object' } : undefined,
       messages: [
         { role: 'system', content: system },
@@ -846,8 +1029,8 @@ export async function completeAI(
   if (!res.ok) throw new Error(`OpenAI API error (${res.status}): ${await res.text()}`)
   const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }
   return {
-    text: data.choices?.[0]?.message?.content || '',
-    providerLabel: `OpenAI (${settings.openaiModel})`
+    text: stripThinkingTags(data.choices?.[0]?.message?.content || ''),
+    providerLabel: `OpenAI (${openAiModel})`
   }
 }
 

@@ -4,11 +4,21 @@ import type { ThreadAISummary } from '../../shared/types'
 import { extractEmailImages } from './images'
 import { completeAI, extractJsonBlock } from './provider'
 
+export interface SummarizeThreadOptions {
+  cachedSummary?: ThreadAISummary | null
+  forceRefresh?: boolean
+}
+
 export async function summarizeThread(
   threadId: string,
   db: GlassmailDB,
-  secrets: SecretStore
+  secrets: SecretStore,
+  options?: SummarizeThreadOptions
 ): Promise<ThreadAISummary> {
+  if (!options?.forceRefresh && options?.cachedSummary?.gist) {
+    return options.cachedSummary
+  }
+
   const detail = db.getThreadDetail(threadId)
   if (!detail) throw new Error('Thread not found.')
   const settings = db.getSettings()
@@ -28,6 +38,7 @@ export async function summarizeThread(
       {
         jsonMode: true,
         maxTokens: 2048,
+        priority: 'interactive',
         images,
         system: `You summarize email threads for EveryBox. If embedded images (charts, receipts, tables, screenshots) are included, read their contents and include the key facts in the summary.
 Return STRICT JSON:

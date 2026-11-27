@@ -271,6 +271,24 @@ export interface Snippet {
   body: string
 }
 
+export type DecisionProvider =
+  | 'auto'
+  | 'jev'
+  | 'gemini-decisions'
+  | 'openai-decisions'
+  | 'openrouter-jev'
+  | 'local-fast'
+  | 'off'
+
+export interface DecisionAISettings {
+  enabled: boolean
+  provider: DecisionProvider
+  model?: string
+  endpoint?: string
+  apiKeyConfigured?: boolean
+  autoDraftMinConfidence?: number // 0..1
+}
+
 export interface AISettings {
   provider: AIProviderType
   localOpenAiUrl?: string
@@ -287,6 +305,7 @@ export interface AISettings {
   openaiModel: string
   grokModel?: string
   responseLanguage: 'auto' | string
+  decision?: DecisionAISettings
 }
 
 export interface DiscoveredModel {
@@ -325,6 +344,8 @@ export interface LocalAIStatus {
     gemini: boolean
     openai: boolean
     grok: boolean
+    jev?: boolean
+    openrouter?: boolean
   }
   cloudModels: {
     anthropic: DiscoveredModel[]
@@ -396,6 +417,9 @@ export interface ThreadPreDraft {
   body: string
   providerLabel: string
   createdAt: number
+  messageId?: string
+  status?: 'ready' | 'dismissed' | 'promoted'
+  source?: 'auto' | 'manual'
 }
 
 export interface AutopilotCondition {
@@ -501,6 +525,73 @@ export interface ThreadAISummary {
   actionItems: string[]
   keyDates: string[]
   providerLabel: string
+}
+
+export type ThreadAIBundle =
+  | 'action'
+  | 'waiting'
+  | 'fyi'
+  | 'finance'
+  | 'shipping'
+  | 'newsletter'
+  | 'promo'
+  | 'cold_outreach'
+  | 'security'
+
+export interface ImplicitCalendarEvent {
+  title: string
+  startIso: string
+  endIso?: string
+  location?: string
+  confidence: number
+  notes?: string
+}
+
+export interface ThreadAIMeta {
+  threadId: string
+  classifiedMsgAt: number
+  bundle: ThreadAIBundle
+  urgency: 0 | 1 | 2 | 3
+  needsReply: boolean
+  replyConfidence: number
+  autoDraftWorthy: boolean
+  aiReason: string
+  hasImplicitEvent: boolean
+  implicitEvent?: ImplicitCalendarEvent | null
+  phishingRisk: 0 | 1 | 2
+  expectsReply?: boolean
+  matchedRuleIds?: string[]
+  summary?: ThreadAISummary | null
+  modelLabel: string
+  updatedAt: number
+}
+
+export interface DecisionProviderTestResult {
+  ok: boolean
+  latencyMs: number
+  detail: string
+  modelLabel: string
+}
+
+/**
+ * Decision AI & Thread Triage IPC contract to be implemented on `GlassmailAPI`
+ * in `src/preload/index.ts` and `src/main/index.ts`.
+ */
+export interface DecisionAIIpcAPI {
+  saveDecisionApiKey: (
+    provider: 'jev' | 'openrouter' | 'gemini' | 'openai',
+    apiKey: string
+  ) => Promise<{ ok: boolean }>
+  testDecisionProvider: (override?: Partial<DecisionAISettings>) => Promise<DecisionProviderTestResult>
+  getThreadAiMeta: (threadId: string) => Promise<ThreadAIMeta | null>
+  getThreadAiMetaBatch: (threadIds: string[]) => Promise<Record<string, ThreadAIMeta>>
+  reclassifyThread: (threadId: string) => Promise<ThreadAIMeta | null>
+  dismissPreDraft: (threadId: string) => Promise<{ ok: boolean }>
+  createCalendarEventFromImplicit: (input: {
+    accountId: string
+    threadId: string
+    event: ImplicitCalendarEvent
+  }) => Promise<{ ok: boolean; id?: string; error?: string }>
 }
 
 export interface ParsedSearchQuery {
