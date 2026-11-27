@@ -7,7 +7,7 @@
     <img src="https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D6?style=flat-square&logo=windows" alt="Windows" />
     <img src="https://img.shields.io/badge/Stack-Electron%20%2B%20React%2019%20%2B%20TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="Tech Stack" />
     <img src="https://img.shields.io/badge/Storage-Local%20SQLite%20%2B%20DPAPI-0F766E?style=flat-square" alt="Local-First" />
-    <img src="https://img.shields.io/badge/AI-Local%20Ollama%20%2F%20LM%20Studio%20%2F%20BYOK-6D28D9?style=flat-square" alt="Private AI" />
+    <img src="https://img.shields.io/badge/AI-Local%20%2F%20CLI%20Subscriptions%20%2F%20BYOK-6D28D9?style=flat-square" alt="Private AI" />
     <img src="https://img.shields.io/badge/Agents-Built--in%20MCP%20Server-111827?style=flat-square" alt="MCP Server" />
     <a href="https://github.com/SmelterLabs/EveryBox/actions/workflows/ci.yml"><img src="https://github.com/SmelterLabs/EveryBox/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   </p>
@@ -22,7 +22,7 @@ Most modern email apps force an ugly trade-off: **pay \$20–\$40/month** to han
 **EveryBox takes a different path:**
 
 - **One Calm Workspace for Every Hat You Wear** — Combine multiple Gmail and IMAP/SMTP accounts alongside a unified calendar, then filter *both* mail and calendar together with 1-click account toggles and `Ctrl+1..9` Workspaces.
-- **Private AI Without a Monthly AI Tax** — Run AI triage, thread summaries, natural-language search, and voice-matched drafts directly on your own PC via **Ollama / LM Studio / local OpenAI-compatible servers**, or plug in your own API keys (Anthropic, Gemini, OpenAI, Grok). Zero third-party cloud mail proxy sits between you and your inbox.
+- **Private AI Without a Monthly AI Tax** — Run AI triage, thread summaries, natural-language search, and voice-matched drafts directly on your own PC via **Ollama / LM Studio / local OpenAI-compatible servers**, connect your existing **Claude CLI / Codex CLI / Antigravity CLI subscriptions** so you aren't double-paying for AI, or plug in your own API keys (Anthropic, Gemini, OpenAI, Grok). Zero third-party cloud mail proxy sits between you and your inbox.
 - **Built for Windows & Classic Outlook Refugees** — Local-first SQLite + FTS5 speed, Windows DPAPI credential encryption, a familiar **Classic Outlook UI mode**, built-in local calendars for IMAP accounts, and **1-click Classic Outlook calendar import**.
 - **Agent-Ready by Design (Local MCP Server)** — Give Claude Desktop, Cursor, or your own local AI agents safe, read-only access to your unified inbox and calendar via EveryBox's built-in **Model Context Protocol (MCP)** server — with `<email_content>` prompt-injection wrapping and per-account, per-folder, and per-sender privacy controls.
 
@@ -35,7 +35,7 @@ Most modern email apps force an ugly trade-off: **pay \$20–\$40/month** to han
 | **Multi-Entity Founder / Fractional Exec** | Create Workspaces (`Ctrl+1` Personal, `Ctrl+2` Company A, `Ctrl+3` Client B). Toggle one account or any subset and watch both your inbox and combined calendar filter instantly. Train distinct **Voice Profiles** per account so replies always match the right tone. |
 | **Classic Outlook Escape Hatch** | Switch the UI theme to **Classic Outlook**, import your local *"Calendar (This computer only)"* folders in one click via Windows COM/MAPI, and keep legacy IMAP accounts (Network Solutions, GoDaddy, Fastmail, cPanel) fast and offline-ready. |
 | **5-Minute Morning Triage** | Open **Assistant** for a structured Today Brief (`Needs You`, `Worth a Look`, `Updates`), jump into full-window keyboard **Triage** (`T`, then `E` Archive / `H` Snooze / `R` Reply / `J` Next), and approve AI pre-drafted replies for VIP senders. |
-| **Local-AI & Privacy Purist** | Point EveryBox at your local Ollama or LM Studio model (with automatic GPU detection). Tracking pixels and remote images are blocked by default, suspicious senders get scam warnings, and expired 2FA codes auto-clean themselves. |
+| **Local-AI & Subscription Purist** | Point EveryBox at your local Ollama / LM Studio model (with automatic GPU detection) or connect your existing **Claude / Codex / Antigravity CLI subscription** for \$0 extra API cost. Tracking pixels and remote images are blocked by default, suspicious senders get scam warnings, and expired 2FA codes auto-clean themselves. |
 | **AI Agent & MCP Power User** | Connect Claude Desktop, Cursor, or custom local agents to EveryBox's local MCP server (`npm run mcp`). Ask *"What am I waiting on from vendors this week?"* or *"Prep me for tomorrow's meetings"* across all accounts without handing raw Gmail OAuth tokens to every agent. |
 | **Hands-Off Autopilot Organizer** | Write plain-English **Autopilot Rules** with conditions, actions, VIP auto-pre-drafting, an undoable audit log, and `onlyIfNoReply` follow-up reminders so nothing slips through the cracks. |
 
@@ -56,7 +56,7 @@ Most modern email apps force an ugly trade-off: **pay \$20–\$40/month** to han
 - **Local SQLite Calendars + Outlook Import:** Every IMAP account gets a built-in local calendar out of the box, with deduplicated **1-click Classic Outlook COM/MAPI import** and standard `.ics` import/export.
 
 ### Private AI, Voice Profiles & Autopilot
-- **Flexible AI Backends:** Ollama, LM Studio, local OpenAI-compatible servers, BYOK cloud keys (Anthropic, Gemini, OpenAI, Grok), and optional local CLI adapters.
+- **Flexible AI Backends (\$0 Extra Cost):** Run 100% locally via **Ollama**, **LM Studio**, or any local OpenAI-compatible server; bridge your existing **Claude CLI**, **Codex CLI**, or **Antigravity CLI** subscriptions; or bring your own API keys (Anthropic, Gemini, OpenAI, Grok).
 - **Voice-Matched Drafting:** Learns your writing style per account (`personal`, `business`, `customer`, `colleague`, `executive`, `custom`) and can automatically pre-draft replies to VIP senders.
 - **Natural-Language Search & Summaries:** Query locally with plain English (`"pdf from maya last week"`), get instant thread gists + action items + key dates, and chat with your inbox in **Assistant**.
 - **Autopilot Rules Engine:** Natural-language rules with full execution logs and one-click undo.
