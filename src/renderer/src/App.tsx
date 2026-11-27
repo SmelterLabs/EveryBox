@@ -43,6 +43,7 @@ export const App: React.FC = () => {
     shortcutHelpOpen,
     confirmDialog,
     toast,
+    activeHabitToast,
     updateStatus,
     setSidebarVisible,
     setActiveView,
@@ -65,11 +66,16 @@ export const App: React.FC = () => {
     setReadThreads,
     toggleCheckThread,
     clearCheckedThreads,
-    clearToast
+    clearToast,
+    refreshHabits,
+    acceptHabitSuggestion,
+    dismissHabitSuggestion,
+    setActiveHabitToast
   } = useAppStore()
 
   const searchInputRef = useRef<HTMLInputElement | null>(null)
   const [showSearchScopeMenu, setShowSearchScopeMenu] = useState(false)
+  const [habitToastHovered, setHabitToastHovered] = useState(false)
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
     const saved = Number(localStorage.getItem('everybox:sidebarWidth'))
     return Number.isFinite(saved) && saved >= 190 && saved <= 480 ? saved : 244
@@ -154,6 +160,10 @@ export const App: React.FC = () => {
       setActiveView('mail')
       void selectThread(threadId)
     })
+    const unsubHabit = window.glassmail.onHabitSuggestion((s) => {
+      setActiveHabitToast(s)
+      void refreshHabits()
+    })
     const updateTimer = window.setTimeout(() => {
       void useAppStore.getState().checkForUpdates({ silent: true })
     }, 10_000)
@@ -161,8 +171,21 @@ export const App: React.FC = () => {
       window.clearTimeout(updateTimer)
       unsubData()
       unsubFocus()
+      unsubHabit()
     }
   }, [])
+
+  useEffect(() => {
+    setHabitToastHovered(false)
+  }, [activeHabitToast?.id])
+
+  useEffect(() => {
+    if (!activeHabitToast || habitToastHovered) return
+    const timer = window.setTimeout(() => {
+      setActiveHabitToast(null)
+    }, 7000)
+    return () => window.clearTimeout(timer)
+  }, [activeHabitToast?.id, habitToastHovered, setActiveHabitToast])
 
   // Global OS-aware & customizable keyboard shortcuts
   useEffect(() => {
@@ -413,6 +436,69 @@ export const App: React.FC = () => {
               <span className="relative z-10">Undo</span>
             </button>
           )}
+        </div>
+      )}
+
+      {/* Bottom-Right Calm Habit Learning Toast */}
+      {activeHabitToast && (
+        <div
+          role="status"
+          aria-live="polite"
+          onMouseEnter={() => setHabitToastHovered(true)}
+          onMouseLeave={() => setHabitToastHovered(false)}
+          className="fixed bottom-5 right-5 z-50 flex max-w-[540px] items-center gap-2.5 rounded-full border py-2 pl-3.5 pr-2.5 text-[12.5px] shadow-xl backdrop-blur-md"
+          style={{
+            background: 'color-mix(in srgb, var(--bg-elevated) 94%, transparent)',
+            borderColor: 'var(--border-strong)'
+          }}
+        >
+          <span aria-hidden="true" className="shrink-0">
+            ✨
+          </span>
+          <span
+            className="min-w-0 truncate font-medium"
+            style={{ color: 'var(--text-primary)' }}
+            title={activeHabitToast.reason || activeHabitToast.title}
+          >
+            {activeHabitToast.title}
+          </span>
+          <div className="ml-1 flex shrink-0 items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                setHabitToastHovered(false)
+                void acceptHabitSuggestion(activeHabitToast.id)
+              }}
+              className="rounded-full px-3 py-1 text-[12px] font-semibold transition hover:opacity-90"
+              style={{ background: 'var(--accent)', color: '#fff' }}
+            >
+              Always do this
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setHabitToastHovered(false)
+                void dismissHabitSuggestion(activeHabitToast.id)
+              }}
+              className="rounded-full px-2.5 py-1 text-[12px] font-medium transition hover:bg-[var(--bg-hover)]"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              Not now
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setHabitToastHovered(false)
+                setActiveHabitToast(null)
+              }}
+              className="flex h-6 w-6 items-center justify-center rounded-full transition hover:bg-[var(--bg-hover)]"
+              style={{ color: 'var(--text-muted)' }}
+              title="Hide for now"
+              aria-label="Hide suggestion"
+            >
+              <X size={13} />
+            </button>
+          </div>
         </div>
       )}
     </>
