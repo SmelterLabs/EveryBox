@@ -619,7 +619,8 @@ export class GlassmailDB {
       `ALTER TABLE folders ADD COLUMN mute_badge INTEGER DEFAULT 0`,
       `ALTER TABLE folders ADD COLUMN sort_order INTEGER DEFAULT 0`,
       `ALTER TABLE folders ADD COLUMN is_selectable INTEGER DEFAULT 1`,
-      `ALTER TABLE folders ADD COLUMN sync_enabled INTEGER DEFAULT 1`
+      `ALTER TABLE folders ADD COLUMN sync_enabled INTEGER DEFAULT 1`,
+      `ALTER TABLE folders ADD COLUMN last_synced_at INTEGER`
     ]
     for (const sql of folderMigrations) {
       try {
@@ -1078,6 +1079,27 @@ export class GlassmailDB {
       .prepare('SELECT * FROM folders WHERE account_id = ? AND (LOWER(name) = LOWER(?) OR LOWER(path) = LOWER(?)) LIMIT 1')
       .get(accountId, folderName, folderName) as Record<string, unknown> | undefined
     return row ? this.mapFolder(row) : null
+  }
+
+  markFolderSynced(folderId: string, syncedAt = Date.now()): void {
+    this.db.prepare('UPDATE folders SET last_synced_at = ? WHERE id = ?').run(syncedAt, folderId)
+  }
+
+  listFoldersDueForBackfill(accountId: string, staleBeforeMs: number, limit: number): Folder[] {
+    const rows = this.db
+      .prepare(`
+        SELECT * FROM folders
+        WHERE account_id = ?
+          AND role = 'custom'
+          AND COALESCE(is_selectable, 1) = 1
+          AND COALESCE(is_hidden, 0) = 0
+          AND COALESCE(sync_enabled, 1) = 1
+          AND (last_synced_at IS NULL OR last_synced_at < ?)
+        ORDER BY (last_synced_at IS NOT NULL) ASC, last_synced_at ASC, total_count DESC, name ASC
+        LIMIT ?
+      `)
+      .all(accountId, staleBeforeMs, limit) as Record<string, unknown>[]
+    return rows.map((r) => this.mapFolder(r))
   }
 
   upsertFolder(f: Folder): void {
