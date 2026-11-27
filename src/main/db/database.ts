@@ -11,12 +11,18 @@ import type {
   CreateReminderPayload,
   EmailAddress,
   Folder,
+  HabitActionType,
+  HabitEvent,
+  HabitSuggestion,
+  HabitSuggestionKind,
   ImplicitCalendarEvent,
   MailboxId,
   Message,
   ParsedSearchQuery,
   Reminder,
   ScheduledEmail,
+  SenderPreference,
+  SenderProfile,
   Snippet,
   SubscriptionGroup,
   ThreadAIBundle,
@@ -407,7 +413,8 @@ export class GlassmailDB {
         actions_json TEXT NOT NULL,
         run_count INTEGER DEFAULT 0,
         last_run_at INTEGER,
-        created_at INTEGER NOT NULL
+        created_at INTEGER NOT NULL,
+        source TEXT NOT NULL DEFAULT 'manual'
       );
 
       CREATE TABLE IF NOT EXISTS autopilot_logs (
@@ -417,8 +424,63 @@ export class GlassmailDB {
         thread_id TEXT,
         thread_subject TEXT,
         action_summary TEXT NOT NULL,
+        action_type TEXT,
         undo_action TEXT,
+        undone_at INTEGER,
         created_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS user_habit_events (
+        id TEXT PRIMARY KEY,
+        sender_email TEXT NOT NULL,
+        sender_domain TEXT NOT NULL,
+        bundle TEXT,
+        action TEXT NOT NULL,
+        folder_name TEXT,
+        had_opened INTEGER NOT NULL DEFAULT 0,
+        thread_id TEXT,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_user_habit_events_sender_date
+        ON user_habit_events(sender_email, created_at);
+      CREATE INDEX IF NOT EXISTS idx_user_habit_events_bundle_date
+        ON user_habit_events(bundle, created_at);
+
+      CREATE TABLE IF NOT EXISTS sender_profiles (
+        sender_email TEXT PRIMARY KEY,
+        sender_domain TEXT NOT NULL,
+        display_name TEXT NOT NULL DEFAULT '',
+        total_seen INTEGER NOT NULL DEFAULT 0,
+        replied_count INTEGER NOT NULL DEFAULT 0,
+        starred_count INTEGER NOT NULL DEFAULT 0,
+        archived_unread_count INTEGER NOT NULL DEFAULT 0,
+        trashed_unread_count INTEGER NOT NULL DEFAULT 0,
+        draft_accepted_count INTEGER NOT NULL DEFAULT 0,
+        draft_dismissed_count INTEGER NOT NULL DEFAULT 0,
+        moved_folders_json TEXT NOT NULL DEFAULT '{}',
+        preference TEXT NOT NULL DEFAULT 'normal',
+        preference_locked INTEGER NOT NULL DEFAULT 0,
+        last_replied_at INTEGER,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS habit_suggestions (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        pattern_key TEXT NOT NULL UNIQUE,
+        sender_email TEXT,
+        sender_domain TEXT,
+        bundle TEXT,
+        target_folder TEXT,
+        title TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        rule_prompt TEXT NOT NULL,
+        sample_count INTEGER NOT NULL DEFAULT 3,
+        confidence REAL NOT NULL DEFAULT 0.9,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at INTEGER NOT NULL,
+        resolved_at INTEGER
       );
 
       CREATE TABLE IF NOT EXISTS voice_profiles (
@@ -478,6 +540,21 @@ export class GlassmailDB {
     }
     try {
       this.db.exec(`ALTER TABLE thread_predrafts ADD COLUMN source TEXT NOT NULL DEFAULT 'auto'`)
+    } catch {
+      // Column already exists
+    }
+    try {
+      this.db.exec(`ALTER TABLE autopilot_rules ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'`)
+    } catch {
+      // Column already exists
+    }
+    try {
+      this.db.exec(`ALTER TABLE autopilot_logs ADD COLUMN action_type TEXT`)
+    } catch {
+      // Column already exists
+    }
+    try {
+      this.db.exec(`ALTER TABLE autopilot_logs ADD COLUMN undone_at INTEGER`)
     } catch {
       // Column already exists
     }
@@ -2723,21 +2800,23 @@ export class GlassmailDB {
       actions: JSON.parse(String(r.actions_json || '[]')),
       runCount: Number(r.run_count || 0),
       lastRunAt: r.last_run_at ? Number(r.last_run_at) : null,
-      createdAt: Number(r.created_at)
+      createdAt: Number(r.created_at),
+      source: r.source === 'learned' ? 'learned' : 'manual'
     }))
   }
 
   upsertAutopilotRule(rule: AutopilotRule): void {
     this.db
       .prepare(`
-        INSERT INTO autopilot_rules (id, name, prompt, enabled, conditions_json, actions_json, run_count, last_run_at, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO autopilot_rules (id, name, prompt, enabled, conditions_json, actions_json, run_count, last_run_at, created_at, source)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           name = excluded.name,
           prompt = excluded.prompt,
           enabled = excluded.enabled,
           conditions_json = excluded.conditions_json,
-          actions_json = excluded.actions_json
+          actions_json = excluded.actions_json,
+          source = excluded.source
       `)
       .run(
         rule.id,
@@ -2748,7 +2827,8 @@ export class GlassmailDB {
         JSON.stringify(rule.actions),
         rule.runCount || 0,
         rule.lastRunAt || null,
-        rule.createdAt
+        rule.createdAt,
+        rule.source === 'learned' ? 'learned' : 'manual'
       )
   }
 
@@ -2766,27 +2846,40 @@ export class GlassmailDB {
     this.db.prepare('DELETE FROM autopilot_rules WHERE id = ?').run(id)
   }
 
-  listAutopilotLogs(limit = 50): AutopilotLogEntry[] {
-    const rows = this.db
-      .prepare('SELECT * FROM autopilot_logs ORDER BY created_at DESC LIMIT ?')
-      .all(limit) as Record<string, unknown>[]
-    return rows.map((r) => ({
+  private mapAutopilotLog(r: Record<string, unknown>): AutopilotLogEntry {
+    return {
       id: String(r.id),
       ruleId: r.rule_id ? String(r.rule_id) : undefined,
       ruleName: String(r.rule_name),
       threadId: r.thread_id ? String(r.thread_id) : undefined,
       threadSubject: r.thread_subject ? String(r.thread_subject) : undefined,
       actionSummary: String(r.action_summary),
+      actionType: r.action_type ? String(r.action_type) : undefined,
       undoAction: (r.undo_action as AutopilotLogEntry['undoAction']) || null,
+      undoneAt: r.undone_at !== null && r.undone_at !== undefined ? Number(r.undone_at) : null,
       createdAt: Number(r.created_at)
-    }))
+    }
+  }
+
+  listAutopilotLogs(limit = 50): AutopilotLogEntry[] {
+    const rows = this.db
+      .prepare('SELECT * FROM autopilot_logs ORDER BY created_at DESC LIMIT ?')
+      .all(limit) as Record<string, unknown>[]
+    return rows.map((r) => this.mapAutopilotLog(r))
+  }
+
+  getAutopilotLog(id: string): AutopilotLogEntry | null {
+    const row = this.db
+      .prepare('SELECT * FROM autopilot_logs WHERE id = ?')
+      .get(id) as Record<string, unknown> | undefined
+    return row ? this.mapAutopilotLog(row) : null
   }
 
   addAutopilotLog(entry: AutopilotLogEntry): void {
     this.db
       .prepare(`
-        INSERT INTO autopilot_logs (id, rule_id, rule_name, thread_id, thread_subject, action_summary, undo_action, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO autopilot_logs (id, rule_id, rule_name, thread_id, thread_subject, action_summary, action_type, undo_action, undone_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .run(
         entry.id,
@@ -2795,9 +2888,15 @@ export class GlassmailDB {
         entry.threadId || null,
         entry.threadSubject || null,
         entry.actionSummary,
+        entry.actionType || null,
         entry.undoAction || null,
+        entry.undoneAt ?? null,
         entry.createdAt
       )
+  }
+
+  markAutopilotLogUndone(id: string, undoneAt = Date.now()): void {
+    this.db.prepare('UPDATE autopilot_logs SET undone_at = ? WHERE id = ?').run(undoneAt, id)
   }
 
   deleteAutopilotLog(id: string): void {
@@ -2809,6 +2908,290 @@ export class GlassmailDB {
       .prepare('SELECT 1 AS ok FROM autopilot_logs WHERE rule_id = ? AND thread_id = ? LIMIT 1')
       .get(ruleId, threadId) as { ok: number } | undefined
     return Boolean(row?.ok)
+  }
+
+  // ---- Habit Learning & Rule Suggestions ----
+  private mapHabitEvent(r: Record<string, unknown>): HabitEvent {
+    return {
+      id: String(r.id),
+      senderEmail: String(r.sender_email),
+      senderDomain: String(r.sender_domain),
+      bundle: r.bundle ? (String(r.bundle) as ThreadAIBundle) : null,
+      action: String(r.action) as HabitActionType,
+      folderName: r.folder_name ? String(r.folder_name) : null,
+      hadOpened: Boolean(r.had_opened),
+      threadId: r.thread_id ? String(r.thread_id) : null,
+      createdAt: Number(r.created_at)
+    }
+  }
+
+  insertHabitEvent(event: HabitEvent): void {
+    this.db
+      .prepare(`
+        INSERT INTO user_habit_events (
+          id, sender_email, sender_domain, bundle, action, folder_name, had_opened, thread_id, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        event.id,
+        event.senderEmail.trim().toLowerCase(),
+        event.senderDomain.trim().toLowerCase(),
+        event.bundle ?? null,
+        event.action,
+        event.folderName ?? null,
+        event.hadOpened ? 1 : 0,
+        event.threadId ?? null,
+        event.createdAt
+      )
+  }
+
+  listRecentHabitEventsForSender(senderEmail: string, limit = 20): HabitEvent[] {
+    const normalized = senderEmail.trim().toLowerCase()
+    if (!normalized) return []
+    const rows = this.db
+      .prepare('SELECT * FROM user_habit_events WHERE sender_email = ? ORDER BY created_at DESC LIMIT ?')
+      .all(normalized, limit) as Record<string, unknown>[]
+    return rows.map((r) => this.mapHabitEvent(r))
+  }
+
+  listRecentHabitEventsForBundle(bundle: ThreadAIBundle, limit = 20): HabitEvent[] {
+    const rows = this.db
+      .prepare('SELECT * FROM user_habit_events WHERE bundle = ? ORDER BY created_at DESC LIMIT ?')
+      .all(bundle, limit) as Record<string, unknown>[]
+    return rows.map((r) => this.mapHabitEvent(r))
+  }
+
+  private mapSenderProfile(r: Record<string, unknown>): SenderProfile {
+    let movedFolders: Record<string, number> = {}
+    try {
+      const parsed = JSON.parse(String(r.moved_folders_json || '{}'))
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        movedFolders = parsed as Record<string, number>
+      }
+    } catch {
+      movedFolders = {}
+    }
+    const rawPref = String(r.preference || 'normal')
+    const preference: SenderPreference =
+      rawPref === 'vip' || rawPref === 'no_autodraft' ? rawPref : 'normal'
+    return {
+      senderEmail: String(r.sender_email),
+      senderDomain: String(r.sender_domain),
+      displayName: String(r.display_name || ''),
+      totalSeen: Number(r.total_seen || 0),
+      repliedCount: Number(r.replied_count || 0),
+      starredCount: Number(r.starred_count || 0),
+      archivedUnreadCount: Number(r.archived_unread_count || 0),
+      trashedUnreadCount: Number(r.trashed_unread_count || 0),
+      draftAcceptedCount: Number(r.draft_accepted_count || 0),
+      draftDismissedCount: Number(r.draft_dismissed_count || 0),
+      movedFolders,
+      preference,
+      preferenceLocked: Boolean(r.preference_locked),
+      lastRepliedAt:
+        r.last_replied_at !== null && r.last_replied_at !== undefined ? Number(r.last_replied_at) : null,
+      updatedAt: Number(r.updated_at || 0)
+    }
+  }
+
+  getSenderProfile(senderEmail: string): SenderProfile | null {
+    const normalized = senderEmail.trim().toLowerCase()
+    if (!normalized) return null
+    const row = this.db
+      .prepare('SELECT * FROM sender_profiles WHERE sender_email = ?')
+      .get(normalized) as Record<string, unknown> | undefined
+    return row ? this.mapSenderProfile(row) : null
+  }
+
+  upsertSenderProfile(profile: SenderProfile): void {
+    const normalized = profile.senderEmail.trim().toLowerCase()
+    if (!normalized) return
+    const domain =
+      profile.senderDomain?.trim().toLowerCase() ||
+      (normalized.includes('@') ? normalized.split('@')[1] : '')
+    this.db
+      .prepare(`
+        INSERT INTO sender_profiles (
+          sender_email, sender_domain, display_name, total_seen, replied_count, starred_count,
+          archived_unread_count, trashed_unread_count, draft_accepted_count, draft_dismissed_count,
+          moved_folders_json, preference, preference_locked, last_replied_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(sender_email) DO UPDATE SET
+          sender_domain = excluded.sender_domain,
+          display_name = excluded.display_name,
+          total_seen = excluded.total_seen,
+          replied_count = excluded.replied_count,
+          starred_count = excluded.starred_count,
+          archived_unread_count = excluded.archived_unread_count,
+          trashed_unread_count = excluded.trashed_unread_count,
+          draft_accepted_count = excluded.draft_accepted_count,
+          draft_dismissed_count = excluded.draft_dismissed_count,
+          moved_folders_json = excluded.moved_folders_json,
+          preference = excluded.preference,
+          preference_locked = excluded.preference_locked,
+          last_replied_at = excluded.last_replied_at,
+          updated_at = excluded.updated_at
+      `)
+      .run(
+        normalized,
+        domain,
+        profile.displayName || '',
+        profile.totalSeen || 0,
+        profile.repliedCount || 0,
+        profile.starredCount || 0,
+        profile.archivedUnreadCount || 0,
+        profile.trashedUnreadCount || 0,
+        profile.draftAcceptedCount || 0,
+        profile.draftDismissedCount || 0,
+        JSON.stringify(profile.movedFolders || {}),
+        profile.preference || 'normal',
+        profile.preferenceLocked ? 1 : 0,
+        profile.lastRepliedAt ?? null,
+        profile.updatedAt || Date.now()
+      )
+  }
+
+  listSenderProfiles(limit = 200): SenderProfile[] {
+    const rows = this.db
+      .prepare('SELECT * FROM sender_profiles ORDER BY updated_at DESC LIMIT ?')
+      .all(limit) as Record<string, unknown>[]
+    return rows.map((r) => this.mapSenderProfile(r))
+  }
+
+  setSenderPreference(
+    senderEmail: string,
+    preference: SenderPreference,
+    locked = true
+  ): SenderProfile {
+    const normalized = senderEmail.trim().toLowerCase()
+    const now = Date.now()
+    const existing = this.getSenderProfile(normalized)
+    if (existing) {
+      const updated: SenderProfile = {
+        ...existing,
+        preference,
+        preferenceLocked: locked,
+        updatedAt: now
+      }
+      this.upsertSenderProfile(updated)
+      return updated
+    }
+    const domain = normalized.includes('@') ? normalized.split('@')[1] : ''
+    const created: SenderProfile = {
+      senderEmail: normalized,
+      senderDomain: domain,
+      displayName: '',
+      totalSeen: 0,
+      repliedCount: 0,
+      starredCount: 0,
+      archivedUnreadCount: 0,
+      trashedUnreadCount: 0,
+      draftAcceptedCount: 0,
+      draftDismissedCount: 0,
+      movedFolders: {},
+      preference,
+      preferenceLocked: locked,
+      lastRepliedAt: null,
+      updatedAt: now
+    }
+    this.upsertSenderProfile(created)
+    return created
+  }
+
+  private mapHabitSuggestion(r: Record<string, unknown>): HabitSuggestion {
+    const rawStatus = String(r.status || 'pending')
+    const status: HabitSuggestion['status'] =
+      rawStatus === 'accepted' || rawStatus === 'dismissed' ? rawStatus : 'pending'
+    return {
+      id: String(r.id),
+      kind: String(r.kind) as HabitSuggestionKind,
+      patternKey: String(r.pattern_key),
+      senderEmail: r.sender_email ? String(r.sender_email) : undefined,
+      senderDomain: r.sender_domain ? String(r.sender_domain) : undefined,
+      bundle: r.bundle ? (String(r.bundle) as ThreadAIBundle) : undefined,
+      targetFolder: r.target_folder ? String(r.target_folder) : undefined,
+      title: String(r.title),
+      reason: String(r.reason),
+      rulePrompt: String(r.rule_prompt),
+      sampleCount: Number(r.sample_count || 3),
+      confidence: Number(r.confidence || 0.9),
+      status,
+      createdAt: Number(r.created_at),
+      resolvedAt:
+        r.resolved_at !== null && r.resolved_at !== undefined ? Number(r.resolved_at) : null
+    }
+  }
+
+  upsertHabitSuggestion(suggestion: HabitSuggestion): void {
+    this.db
+      .prepare(`
+        INSERT INTO habit_suggestions (
+          id, kind, pattern_key, sender_email, sender_domain, bundle, target_folder,
+          title, reason, rule_prompt, sample_count, confidence, status, created_at, resolved_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(pattern_key) DO UPDATE SET
+          title = excluded.title,
+          reason = excluded.reason,
+          rule_prompt = excluded.rule_prompt,
+          sample_count = excluded.sample_count,
+          confidence = excluded.confidence,
+          status = excluded.status,
+          resolved_at = excluded.resolved_at
+      `)
+      .run(
+        suggestion.id,
+        suggestion.kind,
+        suggestion.patternKey,
+        suggestion.senderEmail ?? null,
+        suggestion.senderDomain ?? null,
+        suggestion.bundle ?? null,
+        suggestion.targetFolder ?? null,
+        suggestion.title,
+        suggestion.reason,
+        suggestion.rulePrompt,
+        suggestion.sampleCount,
+        suggestion.confidence,
+        suggestion.status,
+        suggestion.createdAt,
+        suggestion.resolvedAt ?? null
+      )
+  }
+
+  getHabitSuggestion(id: string): HabitSuggestion | null {
+    const row = this.db
+      .prepare('SELECT * FROM habit_suggestions WHERE id = ?')
+      .get(id) as Record<string, unknown> | undefined
+    return row ? this.mapHabitSuggestion(row) : null
+  }
+
+  getHabitSuggestionByPatternKey(patternKey: string): HabitSuggestion | null {
+    const row = this.db
+      .prepare('SELECT * FROM habit_suggestions WHERE pattern_key = ?')
+      .get(patternKey) as Record<string, unknown> | undefined
+    return row ? this.mapHabitSuggestion(row) : null
+  }
+
+  listHabitSuggestions(status?: 'pending' | 'accepted' | 'dismissed' | 'all'): HabitSuggestion[] {
+    if (!status || status === 'all') {
+      const rows = this.db
+        .prepare('SELECT * FROM habit_suggestions ORDER BY created_at DESC')
+        .all() as Record<string, unknown>[]
+      return rows.map((r) => this.mapHabitSuggestion(r))
+    }
+    const rows = this.db
+      .prepare('SELECT * FROM habit_suggestions WHERE status = ? ORDER BY created_at DESC')
+      .all(status) as Record<string, unknown>[]
+    return rows.map((r) => this.mapHabitSuggestion(r))
+  }
+
+  updateHabitSuggestionStatus(
+    id: string,
+    status: 'pending' | 'accepted' | 'dismissed',
+    resolvedAt: number | null = status === 'pending' ? null : Date.now()
+  ): void {
+    this.db
+      .prepare('UPDATE habit_suggestions SET status = ?, resolved_at = ? WHERE id = ?')
+      .run(status, resolvedAt, id)
   }
 
   // ---- Voice Profiles ----

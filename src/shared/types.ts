@@ -447,6 +447,7 @@ export interface AutopilotRule {
   runCount: number
   lastRunAt?: number | null
   createdAt: number
+  source?: 'manual' | 'learned'
 }
 
 export interface AutopilotLogEntry {
@@ -456,7 +457,9 @@ export interface AutopilotLogEntry {
   threadId?: string
   threadSubject?: string
   actionSummary: string
+  actionType?: string
   undoAction?: 'restoreInbox' | 'markUnread' | 'unstar' | null
+  undoneAt?: number | null
   createdAt: number
 }
 
@@ -592,6 +595,91 @@ export interface DecisionAIIpcAPI {
     threadId: string
     event: ImplicitCalendarEvent
   }) => Promise<{ ok: boolean; id?: string; error?: string }>
+}
+
+export type HabitActionType =
+  | 'archive'
+  | 'trash'
+  | 'move_folder'
+  | 'star'
+  | 'reply'
+  | 'draft_accepted'
+  | 'draft_dismissed'
+
+export type SenderPreference = 'normal' | 'vip' | 'no_autodraft'
+
+export interface HabitEvent {
+  id: string
+  senderEmail: string
+  senderDomain: string
+  bundle?: ThreadAIBundle | null
+  action: HabitActionType
+  folderName?: string | null
+  hadOpened: boolean
+  threadId?: string | null
+  createdAt: number
+}
+
+export interface SenderProfile {
+  senderEmail: string
+  senderDomain: string
+  displayName: string
+  totalSeen: number
+  repliedCount: number
+  starredCount: number
+  archivedUnreadCount: number
+  trashedUnreadCount: number
+  draftAcceptedCount: number
+  draftDismissedCount: number
+  movedFolders: Record<string, number>
+  preference: SenderPreference
+  preferenceLocked: boolean
+  lastRepliedAt?: number | null
+  updatedAt: number
+}
+
+export type HabitSuggestionKind =
+  | 'sender_archive'
+  | 'sender_trash'
+  | 'sender_move'
+  | 'bundle_archive'
+  | 'bundle_move'
+
+export interface HabitSuggestion {
+  id: string
+  kind: HabitSuggestionKind
+  patternKey: string
+  senderEmail?: string
+  senderDomain?: string
+  bundle?: ThreadAIBundle
+  targetFolder?: string
+  title: string
+  reason: string
+  rulePrompt: string
+  sampleCount: number
+  confidence: number
+  status: 'pending' | 'accepted' | 'dismissed'
+  createdAt: number
+  resolvedAt?: number | null
+}
+
+/**
+ * Habit Learning & Rule Suggestions IPC contract to be implemented on `GlassmailAPI`
+ * in `src/preload/index.ts` and `src/main/index.ts`.
+ */
+export interface HabitLearningIpcAPI {
+  listHabitSuggestions: (status?: 'pending' | 'accepted' | 'dismissed' | 'all') => Promise<HabitSuggestion[]>
+  acceptHabitSuggestion: (
+    suggestionId: string
+  ) => Promise<{ ok: boolean; rule?: AutopilotRule; error?: string }>
+  dismissHabitSuggestion: (suggestionId: string) => Promise<{ ok: boolean }>
+  listSenderProfiles: (limit?: number) => Promise<SenderProfile[]>
+  setSenderPreference: (
+    senderEmail: string,
+    preference: SenderPreference,
+    locked?: boolean
+  ) => Promise<{ ok: boolean; profile?: SenderProfile }>
+  undoAutopilotLog: (logId: string) => Promise<{ ok: boolean; error?: string }>
 }
 
 export interface ParsedSearchQuery {
