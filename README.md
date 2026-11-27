@@ -13,6 +13,9 @@
     <img src="https://img.shields.io/badge/Agents-Built--in%20MCP%20Server-111827?style=flat-square" alt="MCP Server" />
     <a href="https://github.com/SmelterLabs/EveryBox/actions/workflows/ci.yml"><img src="https://github.com/SmelterLabs/EveryBox/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   </p>
+
+  <br />
+  <img src="docs/screenshots/inbox.png" alt="EveryBox Unified Inbox & Today Brief" width="100%" />
 </div>
 
 ---
@@ -23,10 +26,37 @@ Most modern email apps force an ugly trade-off: **pay \$20–\$40/month** to han
 
 **EveryBox takes a different path:**
 
-- **One Calm Workspace for Every Hat You Wear** — Combine multiple Gmail and IMAP/SMTP accounts alongside a unified calendar, then filter *both* mail and calendar together with 1-click account toggles and `Ctrl+1..9` Workspaces.
+- **One Calm Workspace for Every Hat You Wear** — Combine multiple Gmail, IMAP/SMTP, and Classic Outlook accounts alongside a unified calendar, then filter *both* mail and calendar together with 1-click account toggles and `Ctrl+1..9` Workspaces.
 - **Private AI Without a Monthly AI Tax** — Run AI triage, thread summaries, natural-language search, and voice-matched drafts directly on your own PC via **Ollama / LM Studio / local OpenAI-compatible servers**, connect your existing **Claude CLI / Codex CLI / Antigravity CLI subscriptions** so you aren't double-paying for AI, or plug in your own API keys (Anthropic, Gemini, OpenAI, Grok). Zero third-party cloud mail proxy sits between you and your inbox.
-- **Built for Windows & Classic Outlook Refugees** — Local-first SQLite + FTS5 speed, Windows DPAPI credential encryption, a familiar **Classic Outlook UI mode**, built-in local calendars for IMAP accounts, and **1-click Classic Outlook calendar import**.
+- **Your Voice, for Every Scenario** — Train distinct **Voice Personas** (`Personal`, `Business`, `Customer`, `Colleague`, `Executive`, or `Custom`) directly from your own sent mail so AI drafts actually sound like *you* — with the right tone, greeting, and sign-off for whoever you're emailing.
+- **Built for Windows & Classic Outlook Refugees** — Local-first SQLite + FTS5 speed, Windows DPAPI credential encryption, a familiar **Classic Outlook UI mode**, live Classic Outlook COM/MAPI bridge, built-in local calendars for IMAP accounts, and **1-click Classic Outlook calendar import**.
 - **Agent-Ready by Design (Local MCP Server)** — Give Claude Desktop, Cursor, or your own local AI agents safe, read-only access to your unified inbox and calendar via EveryBox's built-in **Model Context Protocol (MCP)** server — with `<email_content>` prompt-injection wrapping and per-account, per-folder, and per-sender privacy controls.
+
+---
+
+## Inside EveryBox
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <strong>Autopilot Rules &amp; Voice Personas</strong><br />
+      Plain-English AI rules, background VIP pre-drafts, 2FA auto-clean, and learned writing voices for Personal, Customer, Colleague, and Executive email.<br /><br />
+      <img src="docs/screenshots/autopilot.png" alt="EveryBox Autopilot and Voice Personas" width="100%" />
+    </td>
+    <td width="50%" valign="top">
+      <strong>Combined Multi-Account Calendar</strong><br />
+      Day / Week / Month views obeying your sidebar account focus toggles, with two-way Google Calendar, CalDAV/ICS, and 1-click Outlook import.<br /><br />
+      <img src="docs/screenshots/calendar.png" alt="EveryBox Combined Calendar" width="100%" />
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" valign="top">
+      <strong>Classic Outlook UI Mode (1-Click Switch)</strong><br />
+      Prefer Classic Outlook's familiar ribbon, favorites, Focused/Other split, and reading pane? Switch UI themes anytime — with AI Summary and AI Assistant built right in.<br /><br />
+      <img src="docs/screenshots/outlook-classic.png" alt="EveryBox Classic Outlook UI Theme" width="100%" />
+    </td>
+  </tr>
+</table>
 
 ---
 
@@ -34,45 +64,54 @@ Most modern email apps force an ugly trade-off: **pay \$20–\$40/month** to han
 
 | Persona / Workflow | How EveryBox Makes It Effortless |
 | :--- | :--- |
-| **Multi-Entity Founder / Fractional Exec** | Create Workspaces (`Ctrl+1` Personal, `Ctrl+2` Company A, `Ctrl+3` Client B). Toggle one account or any subset and watch both your inbox and combined calendar filter instantly. Train distinct **Voice Profiles** per account so replies always match the right tone. |
-| **Classic Outlook Escape Hatch** | Switch the UI theme to **Classic Outlook**, import your local *"Calendar (This computer only)"* folders in one click via Windows COM/MAPI, and keep legacy IMAP accounts (Network Solutions, GoDaddy, Fastmail, cPanel) fast and offline-ready. |
-| **5-Minute Morning Triage** | Open **Assistant** for a structured Today Brief (`Needs You`, `Worth a Look`, `Updates`), jump into full-window keyboard **Triage** (`T`, then `E` Archive / `H` Snooze / `R` Reply / `J` Next), and approve AI pre-drafted replies for VIP senders. |
+| **Multi-Entity Founder / Fractional Exec** | Create Workspaces (`Ctrl+1` Personal, `Ctrl+2` Company A, `Ctrl+3` Client B). Toggle one account or any subset and watch both your inbox and combined calendar filter instantly. Switch **Voice Personas** per account so replies always match the right role. |
+| **Classic Outlook Escape Hatch** | Switch the UI theme to **Classic Outlook**, bridge live Classic Outlook Desktop stores or import local *"Calendar (This computer only)"* folders in one click via Windows COM/MAPI, and keep legacy IMAP accounts (Network Solutions, GoDaddy, Fastmail, cPanel) fast and offline-ready. |
+| **5-Minute Morning Triage** | Open the **Today Brief** (`Needs You`, `Worth a Look`, `Updates`, plus today's schedule & 2FA codes), jump into full-window keyboard **Triage** (`T`, then `E` Archive / `H` Snooze / `R` Reply / `J` Next), and approve AI pre-drafted replies for VIP senders. |
 | **Local-AI & Subscription Purist** | Point EveryBox at your local Ollama / LM Studio model (with automatic GPU detection) or connect your existing **Claude / Codex / Antigravity CLI subscription** for \$0 extra API cost. Tracking pixels and remote images are blocked by default, suspicious senders get scam warnings, and expired 2FA codes auto-clean themselves. |
 | **AI Agent & MCP Power User** | Connect Claude Desktop, Cursor, or custom local agents to EveryBox's local MCP server (`npm run mcp`). Ask *"What am I waiting on from vendors this week?"* or *"Prep me for tomorrow's meetings"* across all accounts without handing raw Gmail OAuth tokens to every agent. |
-| **Hands-Off Autopilot Organizer** | Write plain-English **Autopilot Rules** with conditions, actions, VIP auto-pre-drafting, an undoable audit log, and `onlyIfNoReply` follow-up reminders so nothing slips through the cracks. |
+| **Hands-Off Autopilot Organizer** | Write plain-English **Autopilot Rules** with conditions, actions, VIP auto-pre-drafting, an undoable audit log, and conditional `onlyIfNoReply` follow-up reminders so nothing slips through the cracks. |
 
 ---
 
 ## Feature Highlights
 
 ### Multi-Account Mail & Focus
-- **Multi-Gmail + IMAP/SMTP:** Native Gmail OAuth2 API sync plus universal IMAP/SMTP (`imapflow` + `nodemailer`).
+- **Multi-Gmail + IMAP/SMTP + Classic Outlook COM:** Native Gmail OAuth2 API sync, universal IMAP/SMTP (`imapflow` + `nodemailer`) with built-in provider presets, and live Windows Classic Outlook COM/MAPI bridging.
 - **Workspaces & Focus Toggles:** View all accounts, solo one account, or select any custom subset (`Ctrl+1..9`).
 - **People vs. Updates Split:** Separates real human conversations from newsletters, receipts, and automated noise.
-- **Built-in Utilities:** 1-click **2FA code copy pills**, **Waiting On You / Waiting On Others** tracking, **Snooze**, **Send Later**, **Undo Send**, **Snippets** (`Alt+Ctrl+S`), Markdown composer, and 1-click **Subscriptions Unsubscribe**.
-- **Themes & Layouts:** 5 color themes (`Light`, `Paper`, `Dark`, `Black`, `Graphite`) plus `EveryBox`, `Classic Outlook`, and `Gmail` UI layouts.
+- **Themes & UI Layouts:** 5 color themes (`Light`, `Paper`, `Dark`, `Black`, `Graphite`) plus `EveryBox`, `Classic Outlook`, and `Gmail` UI shells.
 
 ### Combined Calendar
 - **Unified Multi-Account Grid:** Day / Week / Month views obeying your active account focus toggles.
-- **Two-Way Google Calendar + CalDAV + ICS Feeds:** Full Google Calendar sync, optional CalDAV/ICS subscriptions, inline `.ics` email invite RSVPs, and meeting-link extraction.
+- **Two-Way Google Calendar + CalDAV + ICS Feeds:** Full Google Calendar sync, optional CalDAV/ICS subscriptions, inline `.ics` email invite RSVPs, and meeting-link extraction (`Join` buttons right in your Today Brief).
 - **Local SQLite Calendars + Outlook Import:** Every IMAP account gets a built-in local calendar out of the box, with deduplicated **1-click Classic Outlook COM/MAPI import** and standard `.ics` import/export.
 
-### Private AI, Voice Profiles & Autopilot
+### Private AI, Voice Personas & Autopilot
 - **Flexible AI Backends (\$0 Extra Cost):** Run 100% locally via **Ollama**, **LM Studio**, or any local OpenAI-compatible server; bridge your existing **Claude CLI**, **Codex CLI**, or **Antigravity CLI** subscriptions; or bring your own API keys (Anthropic, Gemini, OpenAI, Grok).
-- **Voice-Matched Drafting:** Learns your writing style per account (`personal`, `business`, `customer`, `colleague`, `executive`, `custom`) and can automatically pre-draft replies to VIP senders.
-- **Natural-Language Search & Summaries:** Query locally with plain English (`"pdf from maya last week"`), get instant thread gists + action items + key dates, and chat with your inbox in **Assistant**.
-- **Autopilot Rules Engine:** Natural-language rules with full execution logs and one-click undo.
+- **Voice Personas (Per Scenario & Account):** Scan your own sent emails to learn distinct writing styles — **Personal**, **Business (General)**, **Customer**, **Colleague**, **Executive**, or **Custom** — complete with your greeting, sign-off, and tone, plus optional recipient/domain filtering.
+- **Vision / Image-Aware AI:** Reads embedded images and screenshots inside email threads when summarizing or drafting replies.
+- **Natural-Language Search & Summaries:** Query locally with plain English (`"pdf from maya last week"`), get instant thread gists + action items + key dates, and chat with your inbox in **AI Assistant**.
+- **Autopilot Rules Engine:** Describe rules in plain English, auto-pre-draft replies for VIP senders, and review or undo every action in the audit log.
+
+### Little Details That Make a Big Difference
+- **Pop-Out Thread Windows:** Pop any email thread out into its own independent window to reference side-by-side while composing or working.
+- **Conditional "Only If No Reply" Reminders:** Set follow-up reminders on any thread that automatically cancel themselves if the recipient replies before your deadline.
+- **1-Click 2FA Code Copy Pills + Auto-Clean:** Surface sign-in codes right in the thread list and Today Brief, copy in one click, and auto-archive expired codes after a configurable window.
+- **Visual Account Identity:** Customize each account with its own color, icon (briefcase, home, rocket, shield, etc.), row style (`gradient`, `bar`, `dot`), and custom sidebar order.
+- **Per-Pane Zoom & Reader Width:** Independently zoom panes and toggle Narrow / Comfortable / Wide reading widths for ultrawide monitors.
+- **Customizable Keyboard Shortcuts:** Rebind shortcuts to match your Gmail or Outlook muscle memory, with an in-app cheat sheet.
+- **Everyday Polish:** Waiting On You / Waiting On Others tracking, Snooze, Send Later, Undo Send, Snippets (`Alt+Ctrl+S`), Markdown composer, auto-linkified plain-text URLs, multilingual AI responses, and 1-click Subscriptions Unsubscribe.
 
 ### Privacy & Security First
 - **100% Local Database:** All synced mail, calendar events, and FTS5 search indexes stay on your machine (`%APPDATA%\everybox\`).
 - **Encrypted Credentials:** Passwords and OAuth tokens are encrypted at rest with Windows **DPAPI** (`Electron safeStorage`).
-- **Inbox Hygiene:** Tracking-pixel stripping, remote-image blocking with trusted-sender allowlists, scam warnings, and automatic 2FA code cleanup.
+- **Inbox Hygiene:** Tracking-pixel stripping, remote-image blocking with trusted-sender allowlists, and scam warnings.
 
 ---
 
 ## Quick Start
 
-> **Try it immediately with Demo Data:** On first launch (before you connect any real accounts), EveryBox automatically seeds realistic demo accounts, threads, and calendar events so you can explore the UI, Workspaces, Triage, Calendar, and AI workflows right away. Demo data clears automatically as soon as you connect your first real account.
+> **Try it immediately with Demo Data:** On first launch (before you connect any real accounts), EveryBox automatically seeds realistic demo accounts, threads, and calendar events so you can explore the UI, Workspaces, Triage, Calendar, Voice Personas, and AI workflows right away. Demo data clears automatically as soon as you connect your first real account.
 
 ### Prerequisites
 - **Windows 10 / 11**
