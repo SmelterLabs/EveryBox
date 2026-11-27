@@ -37,8 +37,13 @@ export class SyncManager {
   constructor(
     private db: GlassmailDB,
     private secrets: SecretStore,
-    private onSyncUpdate: () => void
+    private onSyncUpdate: () => void,
+    private onThreadsSynced?: (threadIds: string[]) => void
   ) {}
+
+  setOnThreadsSynced(cb: (threadIds: string[]) => void): void {
+    this.onThreadsSynced = cb
+  }
 
   startBackgroundLoop(): void {
     if (this.timer) return
@@ -106,6 +111,7 @@ export class SyncManager {
     }
 
     this.inFlight.add(accountId)
+    this.db.beginSyncThreadCapture(accountId)
     this.db.updateAccountSyncState(accountId, 'syncing')
     this.onSyncUpdate()
 
@@ -133,10 +139,15 @@ export class SyncManager {
         synced = res.synced
       }
 
+      const touchedThreadIds = this.db.endSyncThreadCapture(accountId)
       this.db.updateAccountSyncState(accountId, 'idle')
       this.onSyncUpdate()
+      if (touchedThreadIds.length > 0) {
+        this.onThreadsSynced?.(touchedThreadIds)
+      }
       return { ok: true, synced }
     } catch (err) {
+      this.db.endSyncThreadCapture(accountId)
       const nextErrors = (account.syncConsecutiveErrors || 0) + 1
       const errNow = Date.now()
       if (account.provider === 'gmail') {
@@ -216,6 +227,7 @@ export class SyncManager {
         threadId.split('|')[1] || msgId
       )
       this.onSyncUpdate()
+      this.onThreadsSynced?.([threadId])
       return { ok: true }
     }
 
@@ -285,7 +297,9 @@ export class SyncManager {
         if (this.isRateLimitBackoff(account)) return
         const folder = this.db.getFolderByName(account.id, folderName)
         if (!folder) return
+        let touched: string[] = []
         try {
+          this.db.beginSyncThreadCapture(account.id)
           if (account.provider === 'gmail') {
             if (!settings.googleOAuthClientId || !settings.googleOAuthClientSecret) return
             const auth = getAuthorizedGoogleClient(
@@ -317,6 +331,11 @@ export class SyncManager {
             }
           }
           console.error('[EveryBox syncFolder error]', account.email, folderName, err)
+        } finally {
+          touched = this.db.endSyncThreadCapture(account.id)
+          if (touched.length > 0) {
+            this.onThreadsSynced?.(touched)
+          }
         }
       })
     )
