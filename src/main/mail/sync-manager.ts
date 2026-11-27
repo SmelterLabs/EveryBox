@@ -55,6 +55,7 @@ export interface ThreadMutationSnapshot {
 export class SyncManager {
   private timer: NodeJS.Timeout | null = null
   private inFlight = new Set<string>()
+  private inFlightFolders = new Set<string>()
   private pendingRemoteMutations = new Map<string, number>()
   private recentFolderMutations = new Map<
     string,
@@ -352,6 +353,9 @@ export class SyncManager {
         if (this.isRateLimitBackoff(account)) return
         const folder = this.db.getFolderByName(account.id, folderName)
         if (!folder) return
+        const folderLockKey = `${account.id}|${(folder.path || folder.remoteId || folder.name).toLowerCase()}`
+        if (this.inFlightFolders.has(folderLockKey)) return
+        this.inFlightFolders.add(folderLockKey)
         let touched: string[] = []
         try {
           this.db.beginSyncThreadCapture(account.id)
@@ -387,6 +391,7 @@ export class SyncManager {
           }
           console.error('[EveryBox syncFolder error]', account.email, folderName, err)
         } finally {
+          this.inFlightFolders.delete(folderLockKey)
           touched = this.db.endSyncThreadCapture(account.id)
           if (touched.length > 0) {
             this.onThreadsSynced?.(touched)
