@@ -14,6 +14,13 @@ import type {
   DecisionAISettings,
   DecisionProviderTestResult,
   Folder,
+  FolderCreateInput,
+  FolderCrudIpcAPI,
+  FolderDeleteInput,
+  FolderDeletePreview,
+  FolderMutationResult,
+  FolderPrefsInput,
+  FolderRenameInput,
   HabitLearningIpcAPI,
   HabitSuggestion,
   ImplicitCalendarEvent,
@@ -104,6 +111,18 @@ const api = {
 
   // Mail
   listFolders: (accountIds?: string[]): Promise<Folder[]> => ipcRenderer.invoke('folders:list', accountIds),
+  createFolder: (input: FolderCreateInput): Promise<FolderMutationResult> =>
+    ipcRenderer.invoke('folders:create', input),
+  renameFolder: (input: FolderRenameInput): Promise<FolderMutationResult> =>
+    ipcRenderer.invoke('folders:rename', input),
+  deleteFolder: (input: FolderDeleteInput): Promise<FolderMutationResult> =>
+    ipcRenderer.invoke('folders:delete', input),
+  getFolderDeletePreview: (folderId: string): Promise<FolderDeletePreview | null> =>
+    ipcRenderer.invoke('folders:delete-preview', folderId),
+  updateFolderPrefs: (input: FolderPrefsInput): Promise<FolderMutationResult> =>
+    ipcRenderer.invoke('folders:update-prefs', input),
+  syncSingleFolder: (accountId: string, folderPath: string): Promise<{ ok: boolean; synced: number }> =>
+    ipcRenderer.invoke('folders:sync-one', accountId, folderPath),
   getMailboxCounts: (accountIds?: string[]): Promise<Record<string, number>> =>
     ipcRenderer.invoke('mail:counts', accountIds),
   listThreads: (opts: {
@@ -357,9 +376,11 @@ const api = {
 }
 
 export type GlassmailAPI = typeof api
-// Compile-time checks that GlassmailAPI satisfies DecisionAIIpcAPI and HabitLearningIpcAPI
+// Compile-time checks that GlassmailAPI satisfies DecisionAIIpcAPI, HabitLearningIpcAPI, and FolderCrudIpcAPI
 const _decisionApiCheck: DecisionAIIpcAPI = api
 void _decisionApiCheck
 const _habitApiCheck: HabitLearningIpcAPI = api
 void _habitApiCheck
+const _folderCrudApiCheck: FolderCrudIpcAPI = api
+void _folderCrudApiCheck
 contextBridge.exposeInMainWorld('glassmail', api)

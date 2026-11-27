@@ -40,6 +40,10 @@ import type {
   CreateReminderPayload,
   DecisionAISettings,
   Folder,
+  FolderCreateInput,
+  FolderDeleteInput,
+  FolderPrefsInput,
+  FolderRenameInput,
   HabitActionType,
   ImplicitCalendarEvent,
   MailboxId,
@@ -538,6 +542,32 @@ function registerIpc(): void {
 
   // ---- Mail Queries & Actions ----
   ipcMain.handle('folders:list', (_, accountIds?: string[]) => db.listFolders(accountIds))
+  ipcMain.handle('folders:create', async (_, input: FolderCreateInput) => {
+    const res = await syncManager.createFolder(input)
+    if (res.ok) broadcastDataUpdated()
+    return res
+  })
+  ipcMain.handle('folders:rename', async (_, input: FolderRenameInput) => {
+    const res = await syncManager.renameFolder(input)
+    if (res.ok) broadcastDataUpdated()
+    return res
+  })
+  ipcMain.handle('folders:delete', async (_, input: FolderDeleteInput) => {
+    const res = await syncManager.deleteFolder(input)
+    if (res.ok) broadcastDataUpdated()
+    return res
+  })
+  ipcMain.handle('folders:delete-preview', (_, folderId: string) => syncManager.getFolderDeletePreview(folderId))
+  ipcMain.handle('folders:update-prefs', async (_, input: FolderPrefsInput) => {
+    const res = await syncManager.updateFolderPrefs(input)
+    if (res.ok) broadcastDataUpdated()
+    return res
+  })
+  ipcMain.handle('folders:sync-one', async (_, accountId: string, folderPath: string) => {
+    const res = await syncManager.syncFolder(folderPath, [accountId])
+    broadcastDataUpdated()
+    return res
+  })
   ipcMain.handle('mail:counts', (_, accountIds?: string[]) => db.getMailboxCounts(accountIds))
   ipcMain.handle(
     'mail:list-threads',
@@ -1270,7 +1300,7 @@ function registerIpc(): void {
     broadcastDataUpdated()
     return { ok: true }
   })
-  ipcMain.handle('autopilot:run-now', () => runAutopilotPass(db, secrets, broadcastDataUpdated))
+  ipcMain.handle('autopilot:run-now', () => runAutopilotPass(db, secrets, broadcastDataUpdated, syncManager))
   ipcMain.handle('mail:waiting-on-you', (_, accountIds?: string[], useAI?: boolean) =>
     getWaitingOnYouItems(db, secrets, accountIds, Boolean(useAI))
   )
@@ -1478,10 +1508,10 @@ app.whenReady().then(() => {
 
   // Run Autopilot rules & optional background pre-drafts on startup and every 3 minutes
   setTimeout(() => {
-    void runAutopilotPass(db, secrets, broadcastDataUpdated)
+    void runAutopilotPass(db, secrets, broadcastDataUpdated, syncManager)
   }, 10_000)
   setInterval(() => {
-    void runAutopilotPass(db, secrets, broadcastDataUpdated)
+    void runAutopilotPass(db, secrets, broadcastDataUpdated, syncManager)
   }, 3 * 60_000)
 
   app.on('activate', () => {
