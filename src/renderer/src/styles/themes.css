@@ -317,3 +317,29 @@ textarea:focus-visible,
   animation-timing-function: linear;
   animation-fill-mode: forwards;
 }
+
+/* Calendar split-pane handle & event card polish across all themes */
+.cal-splitter-grip {
+  background: var(--border-strong);
+  opacity: 0.7;
+}
+
+.cal-splitter:hover,
+.cal-splitter[data-resizing="true"] {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.cal-splitter:hover .cal-splitter-grip,
+.cal-splitter[data-resizing="true"] .cal-splitter-grip {
+  background: var(--accent);
+  opacity: 1;
+  width: 48px;
+}
+
+.cal-event-chip {
+  transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.cal-event-chip:hover {
+  filter: brightness(1.06);
+}

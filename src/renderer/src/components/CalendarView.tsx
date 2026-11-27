@@ -1,137 +1,65 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Calendar as CalendarIcon,
   Check,
   ChevronLeft,
   ChevronRight,
-  Clock,
   Copy,
   Download,
-  ExternalLink,
-  FileText,
   Layers,
   MapPin,
+  Maximize2,
   Paperclip,
   Plus,
   RefreshCw,
   Trash2,
   Upload,
-  Users,
   Video,
   X
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { usePaneZoom } from '../hooks/usePaneZoom'
+import { AccountBadge } from './AccountIcon'
 import { ContextMenu, type ContextMenuItem, type ContextMenuState } from './ContextMenu'
+import { EventDetailPane } from './calendar/EventDetailPane'
+import { EventDetailModal } from './calendar/EventDetailModal'
+import {
+  addDays,
+  extractMeetingUrl,
+  formatAgendaPlainText,
+  formatTimeShort,
+  isSameDay,
+  layoutDayTimedEvents,
+  mergeDuplicateEvents,
+  startOfDay,
+  type MergedCalendarEvent,
+  type RichCalendarEvent
+} from './calendar/eventUtils'
 import type { CalendarEvent, OutlookCalendarInfo } from '../../../shared/types'
 
 type CalMode = 'day' | 'week' | 'month'
 
-interface MergedCalendarEvent {
-  primary: CalendarEvent
-  occurrences: { accountId: string; email: string; color: string; calendarName: string }[]
+const HOUR_HEIGHT = 56
+const HOURS = Array.from({ length: 24 }, (_, i) => i)
+const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const DEFAULT_PANE_HEIGHT_PCT = 44
+const MIN_PANE_HEIGHT_PCT = 22
+const MAX_PANE_HEIGHT_PCT = 72
+
+function formatHourLabel(hour: number): string {
+  if (hour === 0) return '12 AM'
+  if (hour < 12) return `${hour} AM`
+  if (hour === 12) return '12 PM'
+  return `${hour - 12} PM`
 }
 
-function formatDuration(startAt: number, endAt: number): string {
-  const mins = Math.max(0, Math.round((endAt - startAt) / 60_000))
-  if (mins < 60) return `${mins} min`
-  const h = Math.floor(mins / 60)
-  const m = mins % 60
-  return m > 0 ? `${h} hr ${m} min` : `${h} hr${h === 1 ? '' : 's'}`
-}
-
-function formatAgendaText(raw: string): string {
-  return raw
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>/gi, '\n\n')
-    .replace(/<\/div>/gi, '\n')
-    .replace(/<li[^>]*>/gi, '• ')
-    .replace(/<\/li>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
-}
-
-function mergeDuplicateEvents(
-  list: CalendarEvent[],
-  accountPriority: Map<string, number>
-): MergedCalendarEvent[] {
-  const rankOf = (accountId: string) =>
-    accountPriority.has(accountId) ? accountPriority.get(accountId)! : Number.MAX_SAFE_INTEGER
-
-  const map = new Map<string, MergedCalendarEvent>()
-  for (const ev of list) {
-    const key = `${ev.title.trim().toLowerCase()}|${ev.startAt}|${ev.endAt}|${ev.allDay ? '1' : '0'}`
-    const existing = map.get(key)
-    const occ = {
-      accountId: ev.accountId,
-      email: ev.accountEmail,
-      color: ev.accountColor,
-      calendarName: ev.calendarName
-    }
-    if (!existing) {
-      map.set(key, { primary: ev, occurrences: [occ] })
-    } else {
-      // Highest-priority account (lowest index in sidebar) leads; break ties by richness/writable
-      const curRank = rankOf(existing.primary.accountId)
-      const newRank = rankOf(ev.accountId)
-      const richness = (e: CalendarEvent) =>
-        (e.readOnly ? 0 : 4) +
-        (e.meetingUrl ? 2 : 0) +
-        (e.description ? 1 : 0) +
-        ((e.attachments?.length || 0) > 0 ? 1 : 0)
-
-      if (newRank < curRank || (newRank === curRank && richness(ev) > richness(existing.primary))) {
-        // Carry over meetingUrl / description / attachments if the winner is missing them
-        existing.primary = {
-          ...ev,
-          meetingUrl: ev.meetingUrl || existing.primary.meetingUrl,
-          description: ev.description || existing.primary.description,
-          attendees: ev.attendees.length >= existing.primary.attendees.length ? ev.attendees : existing.primary.attendees,
-          attachments:
-            (ev.attachments?.length || 0) >= (existing.primary.attachments?.length || 0)
-              ? ev.attachments
-              : existing.primary.attachments
-        }
-      } else {
-        existing.primary = {
-          ...existing.primary,
-          meetingUrl: existing.primary.meetingUrl || ev.meetingUrl,
-          description: existing.primary.description || ev.description,
-          attendees: existing.primary.attendees.length >= ev.attendees.length ? existing.primary.attendees : ev.attendees,
-          attachments:
-            (existing.primary.attachments?.length || 0) >= (ev.attachments?.length || 0)
-              ? existing.primary.attachments
-              : ev.attachments
-        }
-      }
-      if (!existing.occurrences.some((o) => o.email === occ.email && o.color === occ.color)) {
-        existing.occurrences.push(occ)
-      }
-    }
+function getLocalTzShort(): string {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZoneName: 'short' }).formatToParts(new Date())
+    return parts.find((p) => p.type === 'timeZoneName')?.value || ''
+  } catch {
+    return ''
   }
-
-  for (const entry of map.values()) {
-    entry.occurrences.sort((a, b) => rankOf(a.accountId) - rankOf(b.accountId))
-  }
-  return Array.from(map.values())
-}
-
-function startOfDay(d: Date): Date {
-  const copy = new Date(d)
-  copy.setHours(0, 0, 0, 0)
-  return copy
-}
-
-function addDays(d: Date, n: number): Date {
-  const copy = new Date(d)
-  copy.setDate(copy.getDate() + n)
-  return copy
 }
 
 export const CalendarView: React.FC = () => {
@@ -144,13 +72,20 @@ export const CalendarView: React.FC = () => {
     showToast,
     refreshTodayEvents
   } = useAppStore()
+
   const [mode, setMode] = useState<CalMode>('week')
   const [anchor, setAnchor] = useState<Date>(() => startOfDay(new Date()))
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [syncing, setSyncing] = useState(false)
   const [selectedEvent, setSelectedEvent] = useState<MergedCalendarEvent | null>(null)
+  const [detailModalOpen, setDetailModalOpen] = useState(false)
+  const [paneHeightPct, setPaneHeightPct] = useState(DEFAULT_PANE_HEIGHT_PCT)
+  const [isResizingPane, setIsResizingPane] = useState(false)
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [mergeDuplicates, setMergeDuplicates] = useState(true)
+  const [now, setNow] = useState(() => new Date())
+
+  // Modals
   const [createOpen, setCreateOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [importAccountId, setImportAccountId] = useState('')
@@ -163,11 +98,6 @@ export const CalendarView: React.FC = () => {
   const [importingIcs, setImportingIcs] = useState(false)
   const [exportingIcs, setExportingIcs] = useState(false)
 
-  const imapAccounts = useMemo(() => accounts.filter((a) => a.provider === 'imap' && !a.isDemo), [accounts])
-  const importTargetAccounts = imapAccounts.length > 0 ? imapAccounts : accounts
-  const accountPriority = useMemo(() => new Map(accounts.map((a, idx) => [a.id, idx])), [accounts])
-  const rankOf = (id: string) => (accountPriority.has(id) ? accountPriority.get(id)! : Number.MAX_SAFE_INTEGER)
-
   // Create form state
   const [title, setTitle] = useState('')
   const [accountId, setAccountId] = useState('')
@@ -176,6 +106,78 @@ export const CalendarView: React.FC = () => {
   const [endTime, setEndTime] = useState('11:00')
   const [location, setLocation] = useState('')
   const [description, setDescription] = useState('')
+
+  const splitContainerRef = useRef<HTMLDivElement | null>(null)
+  const timeGridScrollRef = useRef<HTMLDivElement | null>(null)
+  const hasAutoScrolledRef = useRef(false)
+  const pendingSelectTimerRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (pendingSelectTimerRef.current !== null) {
+        window.clearTimeout(pendingSelectTimerRef.current)
+      }
+    }
+  }, [])
+
+  const imapAccounts = useMemo(() => accounts.filter((a) => a.provider === 'imap' && !a.isDemo), [accounts])
+  const importTargetAccounts = imapAccounts.length > 0 ? imapAccounts : accounts
+  const accountPriority = useMemo(() => new Map(accounts.map((a, idx) => [a.id, idx])), [accounts])
+  const rankOf = useCallback(
+    (id: string) => (accountPriority.has(id) ? accountPriority.get(id)! : Number.MAX_SAFE_INTEGER),
+    [accountPriority]
+  )
+  const tzShort = useMemo(() => getLocalTzShort(), [])
+
+  const { ref: zoomRef, zoom, zoomBadge } = usePaneZoom<HTMLDivElement>('calendar')
+
+  // Live current-time clock for the time needle
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(new Date()), 60_000)
+    return () => window.clearInterval(id)
+  }, [])
+
+  // Auto-scroll time grid to working hours (~7:30 AM or 1.5h before now)
+  useEffect(() => {
+    if (mode === 'month') {
+      hasAutoScrolledRef.current = false
+      return
+    }
+    const el = timeGridScrollRef.current
+    if (!el || hasAutoScrolledRef.current) return
+    const currentHour = new Date().getHours()
+    const targetHour = currentHour >= 7 && currentHour <= 20 ? Math.max(0, currentHour - 1.5) : 7.5
+    el.scrollTop = Math.round(targetHour * HOUR_HEIGHT)
+    hasAutoScrolledRef.current = true
+  }, [mode])
+
+  // Keyboard shortcuts: Escape closes modals first, then bottom details pane
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      if (contextMenu) {
+        setContextMenu(null)
+        return
+      }
+      if (createOpen) {
+        setCreateOpen(false)
+        return
+      }
+      if (importOpen) {
+        setImportOpen(false)
+        return
+      }
+      if (detailModalOpen) {
+        setDetailModalOpen(false)
+        return
+      }
+      if (selectedEvent) {
+        setSelectedEvent(null)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [contextMenu, createOpen, importOpen, detailModalOpen, selectedEvent])
 
   useEffect(() => {
     if (!accountId && accounts.length > 0) {
@@ -199,26 +201,192 @@ export const CalendarView: React.FC = () => {
     clearCalendarDraft()
   }, [pendingCalendarDraft, clearCalendarDraft])
 
+  const { start, end, days } = useMemo(() => {
+    if (mode === 'day') {
+      const s = startOfDay(anchor)
+      return { start: s, end: addDays(s, 1), days: [s] }
+    }
+    if (mode === 'week') {
+      const s = addDays(startOfDay(anchor), -anchor.getDay())
+      const d = Array.from({ length: 7 }, (_, i) => addDays(s, i))
+      return { start: s, end: addDays(s, 7), days: d }
+    }
+    const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1)
+    const last = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0)
+    const s = addDays(first, -first.getDay())
+    const totalCells = first.getDay() + last.getDate() > 35 ? 42 : 35
+    const d = Array.from({ length: totalCells }, (_, i) => addDays(s, i))
+    return { start: s, end: addDays(s, totalCells), days: d }
+  }, [mode, anchor])
+
+  const loadEvents = useCallback(async () => {
+    const filterIds = activeAccountIds.length > 0 ? activeAccountIds : undefined
+    const list = await window.glassmail.listCalendarEvents(start.getTime(), end.getTime(), filterIds)
+    setEvents(list)
+  }, [start, end, activeAccountIds])
+
+  useEffect(() => {
+    void loadEvents()
+  }, [loadEvents])
+
+  useEffect(() => {
+    const unsub = window.glassmail.onDataUpdated(() => {
+      void loadEvents()
+    })
+    return unsub
+  }, [loadEvents])
+
+  const handleCopy = useCallback(
+    async (text: string, message: string) => {
+      await window.glassmail.copyText(text, message)
+      showToast(message, undefined, 2400)
+    },
+    [showToast]
+  )
+
+  const handleOpenExternal = useCallback((url: string) => {
+    void window.glassmail.openExternal(url)
+  }, [])
+
+  const openDuplicateEvent = useCallback(
+    (item: MergedCalendarEvent) => {
+      const ev = item.primary
+      const s = new Date(ev.startAt)
+      const en = new Date(ev.endAt)
+      const pad2 = (n: number) => String(n).padStart(2, '0')
+      setTitle(ev.title)
+      setAccountId(ev.accountId || activeAccountIds[0] || accounts[0]?.id || '')
+      setDateStr(`${s.getFullYear()}-${pad2(s.getMonth() + 1)}-${pad2(s.getDate())}`)
+      setStartTime(`${pad2(s.getHours())}:${pad2(s.getMinutes())}`)
+      setEndTime(`${pad2(en.getHours())}:${pad2(en.getMinutes())}`)
+      setLocation(ev.location || '')
+      setDescription(ev.descriptionHtml || ev.description ? formatAgendaPlainText(ev.descriptionHtml || ev.description || '') : '')
+      setCreateOpen(true)
+    },
+    [accounts, activeAccountIds]
+  )
+
+  const handleDeleteEvent = useCallback(
+    async (item: MergedCalendarEvent) => {
+      const ev = item.primary
+      const ok = window.confirm(`Delete "${ev.title}"?`)
+      if (!ok) return
+      const res = await window.glassmail.deleteCalendarEvent(ev.id)
+      if (res.ok) {
+        if (selectedEvent?.primary.id === ev.id) {
+          setSelectedEvent(null)
+          setDetailModalOpen(false)
+        }
+        await loadEvents()
+        await refreshTodayEvents()
+        showToast('Deleted event')
+      } else {
+        showToast(res.error || 'Could not delete event')
+      }
+    },
+    [loadEvents, refreshTodayEvents, selectedEvent, showToast]
+  )
+
+  const openCreateAtSlot = useCallback(
+    (day: Date, hour = 10) => {
+      const pad2 = (n: number) => String(n).padStart(2, '0')
+      const clampedStart = Math.max(0, Math.min(23, hour))
+      const clampedEnd = Math.min(23, clampedStart + 1)
+      setTitle('')
+      setLocation('')
+      setDescription('')
+      setDateStr(`${day.getFullYear()}-${pad2(day.getMonth() + 1)}-${pad2(day.getDate())}`)
+      setStartTime(`${pad2(clampedStart)}:00`)
+      setEndTime(clampedStart === 23 ? '23:55' : `${pad2(clampedEnd)}:00`)
+      setCreateOpen(true)
+    },
+    []
+  )
+
+  // Single-click selects & opens bottom details pane (brief delay only when pane is closed
+  // so a double-click on a lower-viewport event isn't occluded before click 2 lands);
+  // double-click immediately promotes to the full detail modal.
+  const handleSelectEvent = useCallback(
+    (item: MergedCalendarEvent) => {
+      if (pendingSelectTimerRef.current !== null) {
+        window.clearTimeout(pendingSelectTimerRef.current)
+        pendingSelectTimerRef.current = null
+      }
+      if (selectedEvent !== null) {
+        setSelectedEvent(item)
+        return
+      }
+      pendingSelectTimerRef.current = window.setTimeout(() => {
+        pendingSelectTimerRef.current = null
+        setSelectedEvent(item)
+      }, 190)
+    },
+    [selectedEvent]
+  )
+
+  const handleOpenEventModal = useCallback((item: MergedCalendarEvent) => {
+    if (pendingSelectTimerRef.current !== null) {
+      window.clearTimeout(pendingSelectTimerRef.current)
+      pendingSelectTimerRef.current = null
+    }
+    setSelectedEvent(item)
+    setDetailModalOpen(true)
+  }, [])
+
+  // Drag-to-resize bottom details pane
+  const handleStartResizePane = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault()
+      const container = splitContainerRef.current
+      if (!container) return
+      const startY = e.clientY
+      const startPct = paneHeightPct
+      const containerHeight = container.getBoundingClientRect().height
+      if (containerHeight <= 0) return
+
+      setIsResizingPane(true)
+      document.body.style.cursor = 'row-resize'
+      document.body.style.userSelect = 'none'
+
+      const onMove = (moveEvt: MouseEvent) => {
+        const deltaY = (startY - moveEvt.clientY) / (zoom || 1)
+        const deltaPct = (deltaY / (containerHeight / (zoom || 1))) * 100
+        const nextPct = Math.max(MIN_PANE_HEIGHT_PCT, Math.min(MAX_PANE_HEIGHT_PCT, startPct + deltaPct))
+        setPaneHeightPct(nextPct)
+      }
+
+      const onUp = () => {
+        setIsResizingPane(false)
+        document.body.style.cursor = ''
+        document.body.style.userSelect = ''
+        window.removeEventListener('mousemove', onMove)
+        window.removeEventListener('mouseup', onUp)
+      }
+
+      window.addEventListener('mousemove', onMove)
+      window.addEventListener('mouseup', onUp)
+    },
+    [paneHeightPct, zoom]
+  )
+
   const openEventContextMenu = (e: React.MouseEvent, item: MergedCalendarEvent) => {
     e.preventDefault()
     e.stopPropagation()
     const ev = item.primary
+    const meetingUrl = extractMeetingUrl(ev)
     const items: ContextMenuItem[] = []
 
-    if (ev.meetingUrl) {
+    if (meetingUrl) {
       items.push(
         {
           label: 'Join meeting',
           icon: <Video size={13} />,
-          onClick: () => void window.glassmail.openExternal(ev.meetingUrl!)
+          onClick: () => handleOpenExternal(meetingUrl)
         },
         {
           label: 'Copy meeting link',
           icon: <Copy size={13} />,
-          onClick: async () => {
-            await window.glassmail.copyText(ev.meetingUrl!, 'Copied meeting link')
-            showToast('Copied meeting link', undefined, 2500)
-          }
+          onClick: () => void handleCopy(meetingUrl, 'Copied meeting link')
         },
         { type: 'separator' }
       )
@@ -226,34 +394,27 @@ export const CalendarView: React.FC = () => {
 
     items.push(
       {
-        label: 'View details',
+        label: 'View in details pane',
         icon: <CalendarIcon size={13} />,
-        onClick: () => setSelectedEvent(item)
+        onClick: () => {
+          setSelectedEvent(item)
+          setDetailModalOpen(false)
+        }
+      },
+      {
+        label: 'Open in full window',
+        icon: <Maximize2 size={13} />,
+        onClick: () => handleOpenEventModal(item)
       },
       {
         label: 'Duplicate event…',
         icon: <Plus size={13} />,
-        onClick: () => {
-          const s = new Date(ev.startAt)
-          const en = new Date(ev.endAt)
-          const pad2 = (n: number) => String(n).padStart(2, '0')
-          setTitle(ev.title)
-          setAccountId(ev.accountId || activeAccountIds[0] || accounts[0]?.id || '')
-          setDateStr(`${s.getFullYear()}-${pad2(s.getMonth() + 1)}-${pad2(s.getDate())}`)
-          setStartTime(`${pad2(s.getHours())}:${pad2(s.getMinutes())}`)
-          setEndTime(`${pad2(en.getHours())}:${pad2(en.getMinutes())}`)
-          setLocation(ev.location || '')
-          setDescription(ev.description ? formatAgendaText(ev.description) : '')
-          setCreateOpen(true)
-        }
+        onClick: () => openDuplicateEvent(item)
       },
       {
         label: 'Copy title',
         icon: <Copy size={13} />,
-        onClick: async () => {
-          await window.glassmail.copyText(ev.title, 'Copied event title')
-          showToast('Copied event title', undefined, 2500)
-        }
+        onClick: () => void handleCopy(ev.title, 'Copied event title')
       }
     )
 
@@ -261,10 +422,7 @@ export const CalendarView: React.FC = () => {
       items.push({
         label: 'Copy location',
         icon: <MapPin size={13} />,
-        onClick: async () => {
-          await window.glassmail.copyText(ev.location!, 'Copied location')
-          showToast('Copied location', undefined, 2500)
-        }
+        onClick: () => void handleCopy(ev.location!, 'Copied location')
       })
     }
 
@@ -275,61 +433,13 @@ export const CalendarView: React.FC = () => {
           label: 'Delete event',
           icon: <Trash2 size={13} />,
           danger: true,
-          onClick: async () => {
-            const ok = window.confirm(`Delete "${ev.title}"?`)
-            if (!ok) return
-            const res = await window.glassmail.deleteCalendarEvent(ev.id)
-            if (res.ok) {
-              if (selectedEvent?.primary.id === ev.id) setSelectedEvent(null)
-              await loadEvents()
-              await refreshTodayEvents()
-              showToast('Deleted event')
-            } else {
-              showToast(res.error || 'Could not delete event')
-            }
-          }
+          onClick: () => void handleDeleteEvent(item)
         }
       )
     }
 
     setContextMenu({ x: e.clientX, y: e.clientY, items })
   }
-
-  const getRange = (): { start: Date; end: Date; days: Date[] } => {
-    if (mode === 'day') {
-      const start = startOfDay(anchor)
-      return { start, end: addDays(start, 1), days: [start] }
-    }
-    if (mode === 'week') {
-      const dayOfWeek = anchor.getDay()
-      const start = addDays(startOfDay(anchor), -dayOfWeek)
-      const days = Array.from({ length: 7 }, (_, i) => addDays(start, i))
-      return { start, end: addDays(start, 7), days }
-    }
-    const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1)
-    const start = addDays(first, -first.getDay())
-    const days = Array.from({ length: 35 }, (_, i) => addDays(start, i))
-    return { start, end: addDays(start, 35), days }
-  }
-
-  const { start, end, days } = getRange()
-
-  const loadEvents = async () => {
-    const filterIds = activeAccountIds.length > 0 ? activeAccountIds : undefined
-    const list = await window.glassmail.listCalendarEvents(start.getTime(), end.getTime(), filterIds)
-    setEvents(list)
-  }
-
-  useEffect(() => {
-    void loadEvents()
-  }, [mode, anchor.getTime(), activeAccountIds.join(',')])
-
-  useEffect(() => {
-    const unsub = window.glassmail.onDataUpdated(() => {
-      void loadEvents()
-    })
-    return unsub
-  }, [mode, anchor.getTime(), activeAccountIds.join(',')])
 
   const handleSync = async () => {
     setSyncing(true)
@@ -469,8 +579,103 @@ export const CalendarView: React.FC = () => {
     else setAnchor((d) => new Date(d.getFullYear(), d.getMonth() + dir, 1))
   }
 
-  const todayStr = new Date().toDateString()
-  const { ref: zoomRef, zoom, zoomBadge } = usePaneZoom<HTMLDivElement>('calendar')
+  const headerTitle = useMemo(() => {
+    if (mode === 'day') {
+      return anchor.toLocaleDateString('en-US', {
+        weekday: 'long',
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric'
+      })
+    }
+    if (mode === 'week') {
+      const firstDay = days[0]
+      const lastDay = days[days.length - 1]
+      if (firstDay.getMonth() === lastDay.getMonth()) {
+        return `${firstDay.toLocaleDateString('en-US', { month: 'long' })} ${firstDay.getDate()} – ${lastDay.getDate()}, ${lastDay.getFullYear()}`
+      }
+      if (firstDay.getFullYear() === lastDay.getFullYear()) {
+        return `${firstDay.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${lastDay.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${lastDay.getFullYear()}`
+      }
+      return `${firstDay.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} – ${lastDay.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+    }
+    return anchor.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+  }, [mode, anchor, days])
+
+  // Precompute per-day all-day and timed events
+  const dayBuckets = useMemo(() => {
+    return days.map((d) => {
+      const dayStart = startOfDay(d).getTime()
+      const dayEnd = dayStart + 86_400_000
+      const rawDayEvents = events.filter((ev) => ev.endAt > dayStart && ev.startAt < dayEnd) as RichCalendarEvent[]
+      const combined: MergedCalendarEvent[] = mergeDuplicates
+        ? mergeDuplicateEvents(rawDayEvents, accountPriority)
+        : rawDayEvents.map((ev) => ({
+            primary: ev,
+            occurrences: [
+              {
+                accountId: ev.accountId,
+                email: ev.accountEmail,
+                color: ev.accountColor,
+                calendarName: ev.calendarName,
+                icon: ev.accountIcon
+              }
+            ]
+          }))
+
+      const allDayEvents = combined
+        .filter((item) => item.primary.allDay)
+        .sort((a, b) => {
+          const ra = rankOf(a.primary.accountId)
+          const rb = rankOf(b.primary.accountId)
+          if (ra !== rb) return ra - rb
+          return a.primary.title.localeCompare(b.primary.title)
+        })
+
+      const timedEvents = combined
+        .filter((item) => !item.primary.allDay)
+        .sort((a, b) => {
+          if (a.primary.startAt !== b.primary.startAt) return a.primary.startAt - b.primary.startAt
+          const ra = rankOf(a.primary.accountId)
+          const rb = rankOf(b.primary.accountId)
+          if (ra !== rb) return ra - rb
+          return a.primary.title.localeCompare(b.primary.title)
+        })
+
+      const positioned = layoutDayTimedEvents(timedEvents, dayStart, HOUR_HEIGHT)
+
+      return {
+        date: d,
+        dayStart,
+        isToday: isSameDay(d, now),
+        isCurrentMonth: d.getMonth() === anchor.getMonth(),
+        allDayEvents,
+        timedEvents,
+        positioned
+      }
+    })
+  }, [days, events, mergeDuplicates, accountPriority, rankOf, now, anchor])
+
+  // Keep selectedEvent fresh from post-merge dayBuckets on background sync so merged
+  // fields (meetingUrl, descriptionHtml, organizer, htmlLink, attendees, attachments, occurrences) are preserved.
+  useEffect(() => {
+    if (!selectedEvent) return
+    const targetId = selectedEvent.primary.id
+    for (const bucket of dayBuckets) {
+      const match =
+        bucket.allDayEvents.find((m) => m.primary.id === targetId) ||
+        bucket.timedEvents.find((m) => m.primary.id === targetId)
+      if (match) {
+        setSelectedEvent(match)
+        return
+      }
+    }
+  }, [dayBuckets])
+
+  const anyAllDay = useMemo(() => dayBuckets.some((b) => b.allDayEvents.length > 0), [dayBuckets])
+  const todayVisible = useMemo(() => dayBuckets.some((b) => b.isToday), [dayBuckets])
+  const nowMinutes = now.getHours() * 60 + now.getMinutes()
+  const nowTopPx = (nowMinutes / 60) * HOUR_HEIGHT
 
   return (
     <div
@@ -479,879 +684,1067 @@ export const CalendarView: React.FC = () => {
       style={{ background: 'var(--bg-main)' }}
     >
       {zoomBadge}
-      <div className="flex min-h-0 flex-1 flex-col" style={{ zoom }}>
-      {/* Calendar Header */}
-      <div
-        className="flex flex-wrap items-center justify-between gap-3 border-b px-6 py-3"
-        style={{ borderColor: 'var(--border-subtle)' }}
-      >
-        <div className="flex items-center gap-3">
-          <h2 className="text-[16px] font-semibold">
-            {anchor.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-          </h2>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => stepAnchor(-1)}
-              className="rounded-lg p-1.5 hover:bg-[var(--bg-hover)]"
-              title="Previous"
-            >
-              <ChevronLeft size={15} />
-            </button>
-            <button
-              onClick={() => setAnchor(startOfDay(new Date()))}
-              className="rounded-lg border px-2.5 py-1 text-[12px] font-medium hover:bg-[var(--bg-hover)]"
-              style={{ borderColor: 'var(--border-strong)' }}
-            >
-              Today
-            </button>
-            <button
-              onClick={() => stepAnchor(1)}
-              className="rounded-lg p-1.5 hover:bg-[var(--bg-hover)]"
-              title="Next"
-            >
-              <ChevronRight size={15} />
-            </button>
-          </div>
 
-          {activeAccountIds.length > 0 && (
-            <div className="flex items-center gap-1.5 text-[11.5px]">
-              <span style={{ color: 'var(--text-muted)' }}>Filtered:</span>
-              {activeAccountIds.map((id) => {
-                const a = accounts.find((x) => x.id === id)
-                if (!a) return null
-                return (
-                  <span
-                    key={id}
-                    className="inline-flex items-center gap-1 rounded-full px-2 py-0.5"
-                    style={{ background: 'var(--bg-elevated)' }}
-                  >
-                    <span className="h-1.5 w-1.5 rounded-full" style={{ background: a.color }} />
-                    {a.name}
-                  </span>
-                )
-              })}
+      <div className="flex min-h-0 flex-1 flex-col" style={{ zoom }}>
+        {/* Calm, Precision Calendar Toolbar */}
+        <header
+          className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b px-5 py-2.5"
+          style={{ borderColor: 'var(--border-subtle)', background: 'var(--bg-main)' }}
+        >
+          <div className="flex min-w-0 items-center gap-3">
+            {/* Segmented Prev / Today / Next */}
+            <div
+              className="inline-flex items-center overflow-hidden rounded-lg border"
+              style={{ borderColor: 'var(--border-strong)', background: 'var(--bg-list)' }}
+            >
               <button
-                onClick={() => void selectAllAccounts()}
-                className="font-medium hover:underline"
-                style={{ color: 'var(--accent-text)' }}
+                type="button"
+                onClick={() => stepAnchor(-1)}
+                className="px-2 py-1.5 transition hover:bg-[var(--bg-hover)]"
+                style={{ color: 'var(--text-secondary)' }}
+                title="Previous"
+                aria-label="Previous period"
               >
-                Show all
+                <ChevronLeft size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setAnchor(startOfDay(new Date()))}
+                className="border-x px-2.5 py-1 text-[12px] font-medium transition hover:bg-[var(--bg-hover)]"
+                style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-primary)' }}
+              >
+                Today
+              </button>
+              <button
+                type="button"
+                onClick={() => stepAnchor(1)}
+                className="px-2 py-1.5 transition hover:bg-[var(--bg-hover)]"
+                style={{ color: 'var(--text-secondary)' }}
+                title="Next"
+                aria-label="Next period"
+              >
+                <ChevronRight size={14} />
               </button>
             </div>
+
+            <h2
+              className="truncate text-[15.5px] font-semibold tracking-[-0.015em] tabular-nums"
+              style={{ color: 'var(--text-primary)' }}
+            >
+              {headerTitle}
+            </h2>
+
+            {activeAccountIds.length > 0 && (
+              <div className="hidden items-center gap-1.5 text-[11.5px] xl:flex">
+                <span style={{ color: 'var(--text-muted)' }}>Filtered:</span>
+                {activeAccountIds.map((id) => {
+                  const a = accounts.find((x) => x.id === id)
+                  if (!a) return null
+                  return (
+                    <span
+                      key={id}
+                      className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium"
+                      style={{
+                        background: 'var(--bg-elevated)',
+                        borderColor: 'var(--border-subtle)',
+                        color: 'var(--text-primary)'
+                      }}
+                    >
+                      <AccountBadge icon={a.icon} color={a.color} size="xs" />
+                      {a.name}
+                    </span>
+                  )
+                })}
+                <button
+                  type="button"
+                  onClick={() => void selectAllAccounts()}
+                  className="font-medium hover:underline"
+                  style={{ color: 'var(--accent-text)' }}
+                >
+                  Show all
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="flex shrink-0 items-center gap-2">
+            {/* Day / Week / Month Segmented Control */}
+            <div
+              className="flex rounded-lg border p-0.5"
+              style={{ borderColor: 'var(--border-strong)', background: 'var(--bg-list)' }}
+              role="tablist"
+              aria-label="Calendar view mode"
+            >
+              {(['day', 'week', 'month'] as CalMode[]).map((m) => {
+                const active = mode === m
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setMode(m)}
+                    className={`rounded-md px-2.5 py-1 text-[12px] font-medium capitalize transition ${
+                      active ? 'shadow-sm' : ''
+                    }`}
+                    style={{
+                      background: active ? 'var(--bg-elevated)' : 'transparent',
+                      color: active ? 'var(--text-primary)' : 'var(--text-muted)'
+                    }}
+                  >
+                    {m}
+                  </button>
+                )
+              })}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setMergeDuplicates((v) => !v)}
+              className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[12px] font-medium transition hover:bg-[var(--bg-hover)]"
+              style={{
+                borderColor: mergeDuplicates
+                  ? 'color-mix(in srgb, var(--accent) 45%, var(--border-strong))'
+                  : 'var(--border-strong)',
+                color: mergeDuplicates ? 'var(--accent-text)' : 'var(--text-secondary)',
+                background: mergeDuplicates ? 'var(--accent-soft)' : 'transparent'
+              }}
+              title="Combine duplicate events that appear across multiple connected accounts"
+            >
+              <Layers size={13} />
+              <span className="hidden sm:inline">{mergeDuplicates ? 'Merged' : 'Raw'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void handleSync()}
+              className="rounded-lg border p-1.5 transition hover:bg-[var(--bg-hover)]"
+              style={{ borderColor: 'var(--border-strong)', color: 'var(--text-secondary)' }}
+              title="Sync calendars"
+              aria-label="Sync calendars"
+            >
+              <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setImportOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[12px] font-medium transition hover:bg-[var(--bg-hover)]"
+              style={{ borderColor: 'var(--border-strong)', color: 'var(--text-secondary)' }}
+              title="Import from Outlook or .ics, or export calendar"
+            >
+              <Upload size={13} />
+              <span className="hidden md:inline">Import / Export</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => openCreateAtSlot(anchor, 10)}
+              className="inline-flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-[12.5px] font-semibold text-white shadow-sm transition hover:brightness-110 active:scale-[0.99]"
+              style={{ background: 'var(--accent)' }}
+            >
+              <Plus size={14} /> New event
+            </button>
+          </div>
+        </header>
+
+        {/* Main Split Container: Calendar Grid (Top) + Docked Event Details Pane (Bottom) */}
+        <div ref={splitContainerRef} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          {/* Calendar Surface */}
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            {mode === 'month' ? (
+              /* ===================== MONTH VIEW ===================== */
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                {/* Weekday Header Strip */}
+                <div
+                  className="grid shrink-0 grid-cols-7 border-b"
+                  style={{ borderColor: 'var(--border-subtle)', background: 'var(--bg-list)' }}
+                >
+                  {WEEKDAY_LABELS.map((dayName) => (
+                    <div
+                      key={dayName}
+                      className="px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.05em]"
+                      style={{ color: 'var(--text-muted)' }}
+                    >
+                      {dayName}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Month Cells Grid */}
+                <div
+                  className="grid min-h-0 flex-1 grid-cols-7 overflow-y-auto"
+                  style={{
+                    gridTemplateRows: `repeat(${dayBuckets.length / 7}, minmax(108px, 1fr))`
+                  }}
+                >
+                  {dayBuckets.map((bucket) => {
+                    const allItems = [...bucket.allDayEvents, ...bucket.timedEvents]
+                    return (
+                      <div
+                        key={bucket.dayStart}
+                        onDoubleClick={(e) => {
+                          if (e.target === e.currentTarget) openCreateAtSlot(bucket.date, 10)
+                        }}
+                        className="flex min-h-0 flex-col border-r border-b p-1.5 transition-colors"
+                        style={{
+                          borderColor: 'var(--border-subtle)',
+                          background: bucket.isToday
+                            ? 'color-mix(in srgb, var(--accent) 5%, var(--bg-main))'
+                            : bucket.isCurrentMonth
+                              ? 'var(--bg-main)'
+                              : 'var(--bg-list)'
+                        }}
+                      >
+                        <div className="mb-1 flex items-center justify-between px-0.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAnchor(startOfDay(bucket.date))
+                              setMode('day')
+                            }}
+                            title="Open day view"
+                            className="flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-[12px] font-semibold tabular-nums transition hover:bg-[var(--bg-hover)]"
+                            style={{
+                              background: bucket.isToday ? 'var(--accent)' : 'transparent',
+                              color: bucket.isToday
+                                ? '#ffffff'
+                                : bucket.isCurrentMonth
+                                  ? 'var(--text-primary)'
+                                  : 'var(--text-muted)',
+                              opacity: bucket.isCurrentMonth || bucket.isToday ? 1 : 0.6
+                            }}
+                          >
+                            {bucket.date.getDate()}
+                          </button>
+                          {allItems.length > 0 && (
+                            <span
+                              className="text-[10px] font-medium tabular-nums"
+                              style={{ color: 'var(--text-muted)', opacity: 0.7 }}
+                            >
+                              {allItems.length}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-0.5">
+                          {allItems.map((item) => {
+                            const ev = item.primary
+                            const isSelected = selectedEvent?.primary.id === ev.id
+                            const hasVideo = Boolean(extractMeetingUrl(ev))
+                            const isCancelled = ev.status === 'cancelled'
+                            return (
+                              <button
+                                key={ev.id}
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleSelectEvent(item)
+                                }}
+                                onDoubleClick={(e) => {
+                                  e.stopPropagation()
+                                  handleOpenEventModal(item)
+                                }}
+                                onContextMenu={(e) => openEventContextMenu(e, item)}
+                                className="cal-event-chip flex w-full items-center gap-1.5 rounded-md border-l-[3px] px-1.5 py-1 text-left text-[11px]"
+                                style={{
+                                  borderLeftColor: ev.accountColor,
+                                  background: isSelected
+                                    ? 'var(--bg-selected)'
+                                    : ev.allDay
+                                      ? `color-mix(in srgb, ${ev.accountColor} 15%, var(--bg-elevated))`
+                                      : `color-mix(in srgb, ${ev.accountColor} 9%, var(--bg-elevated))`,
+                                  boxShadow: isSelected ? 'inset 0 0 0 1.5px var(--accent)' : 'none',
+                                  opacity: isCancelled ? 0.58 : bucket.isCurrentMonth ? 1 : 0.75
+                                }}
+                                title={
+                                  ev.allDay
+                                    ? `${ev.title} · All day`
+                                    : `${formatTimeShort(ev.startAt)} ${ev.title}`
+                                }
+                              >
+                                {!ev.allDay && (
+                                  <span
+                                    className="shrink-0 text-[10px] font-medium tabular-nums"
+                                    style={{ color: 'var(--text-muted)' }}
+                                  >
+                                    {formatTimeShort(ev.startAt).replace(':00', '')}
+                                  </span>
+                                )}
+                                <span
+                                  className={`min-w-0 flex-1 truncate font-medium ${
+                                    isCancelled ? 'line-through' : ''
+                                  }`}
+                                  style={{ color: 'var(--text-primary)' }}
+                                >
+                                  {ev.title}
+                                </span>
+                                {hasVideo && (
+                                  <Video
+                                    size={10}
+                                    className="shrink-0"
+                                    style={{ color: 'var(--accent-text)' }}
+                                  />
+                                )}
+                                {item.occurrences.length > 1 && (
+                                  <span className="flex shrink-0 items-center gap-0.5">
+                                    {item.occurrences.map((o, idx) => (
+                                      <span
+                                        key={`${o.email}-${idx}`}
+                                        className="h-1.5 w-1.5 rounded-full"
+                                        style={{ background: o.color }}
+                                      />
+                                    ))}
+                                  </span>
+                                )}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ) : (
+              /* ===================== DAY & WEEK TIME GRID ===================== */
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                {/* Sticky Day Column Headers */}
+                <div
+                  className="flex shrink-0 border-b"
+                  style={{ borderColor: 'var(--border-subtle)', background: 'var(--bg-list)' }}
+                >
+                  <div
+                    className="flex w-[62px] shrink-0 items-end justify-end border-r pr-2.5 pb-2 text-[10px] font-medium tabular-nums"
+                    style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }}
+                  >
+                    {tzShort}
+                  </div>
+                  <div
+                    className={`grid flex-1 ${mode === 'day' ? 'grid-cols-1' : 'grid-cols-7'}`}
+                  >
+                    {dayBuckets.map((bucket) => (
+                      <div
+                        key={bucket.dayStart}
+                        className="flex items-center justify-between border-r px-3 py-2 last:border-r-0"
+                        style={{
+                          borderColor: 'var(--border-subtle)',
+                          background: bucket.isToday
+                            ? 'color-mix(in srgb, var(--accent) 6%, var(--bg-list))'
+                            : 'transparent'
+                        }}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="text-[11px] font-semibold uppercase tracking-[0.05em]"
+                            style={{
+                              color: bucket.isToday ? 'var(--accent-text)' : 'var(--text-muted)'
+                            }}
+                          >
+                            {bucket.date.toLocaleDateString('en-US', { weekday: 'short' })}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (mode === 'week') {
+                                setAnchor(startOfDay(bucket.date))
+                                setMode('day')
+                              }
+                            }}
+                            title={mode === 'week' ? 'Open day view' : undefined}
+                            className={`flex h-7 min-w-7 items-center justify-center rounded-full px-1.5 text-[13px] font-semibold tabular-nums transition ${
+                              mode === 'week' ? 'hover:bg-[var(--bg-hover)]' : ''
+                            }`}
+                            style={{
+                              background: bucket.isToday ? 'var(--accent)' : 'transparent',
+                              color: bucket.isToday ? '#ffffff' : 'var(--text-primary)'
+                            }}
+                          >
+                            {bucket.date.getDate()}
+                          </button>
+                        </div>
+                        {bucket.timedEvents.length + bucket.allDayEvents.length > 0 && (
+                          <span
+                            className="text-[10.5px] font-medium tabular-nums"
+                            style={{ color: 'var(--text-muted)' }}
+                          >
+                            {bucket.timedEvents.length + bucket.allDayEvents.length}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Sticky All-Day Row */}
+                {anyAllDay && (
+                  <div
+                    className="flex shrink-0 border-b"
+                    style={{ borderColor: 'var(--border-subtle)', background: 'var(--bg-list)' }}
+                  >
+                    <div
+                      className="flex w-[62px] shrink-0 items-center justify-end border-r pr-2.5 text-[10px] font-medium"
+                      style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }}
+                    >
+                      All day
+                    </div>
+                    <div
+                      className={`grid flex-1 ${mode === 'day' ? 'grid-cols-1' : 'grid-cols-7'}`}
+                    >
+                      {dayBuckets.map((bucket) => (
+                        <div
+                          key={bucket.dayStart}
+                          className="flex max-h-[84px] flex-col gap-1 overflow-y-auto border-r p-1.5 last:border-r-0"
+                          style={{
+                            borderColor: 'var(--border-subtle)',
+                            background: bucket.isToday
+                              ? 'color-mix(in srgb, var(--accent) 4%, var(--bg-list))'
+                              : 'transparent'
+                          }}
+                        >
+                          {bucket.allDayEvents.map((item) => {
+                            const ev = item.primary
+                            const isSelected = selectedEvent?.primary.id === ev.id
+                            return (
+                              <button
+                                key={ev.id}
+                                type="button"
+                                onClick={() => handleSelectEvent(item)}
+                                onDoubleClick={() => handleOpenEventModal(item)}
+                                onContextMenu={(e) => openEventContextMenu(e, item)}
+                                className="cal-event-chip inline-flex w-full items-center gap-1.5 rounded-md border-l-[3px] px-2 py-1 text-left text-[11px] font-medium"
+                                style={{
+                                  borderLeftColor: ev.accountColor,
+                                  background: isSelected
+                                    ? 'var(--bg-selected)'
+                                    : `color-mix(in srgb, ${ev.accountColor} 14%, var(--bg-elevated))`,
+                                  boxShadow: isSelected ? 'inset 0 0 0 1.5px var(--accent)' : 'none',
+                                  color: 'var(--text-primary)'
+                                }}
+                                title={
+                                  item.occurrences.length > 1
+                                    ? `${ev.title} · All day (${item.occurrences.map((o) => o.email).join(', ')})`
+                                    : `${ev.title} · All day`
+                                }
+                              >
+                                <span className="truncate">{ev.title}</span>
+                                {item.occurrences.length > 1 && (
+                                  <span className="ml-auto flex shrink-0 items-center gap-0.5">
+                                    {item.occurrences.map((o, idx) => (
+                                      <span
+                                        key={`${o.email}-${idx}`}
+                                        className="h-1.5 w-1.5 rounded-full"
+                                        style={{ background: o.color }}
+                                      />
+                                    ))}
+                                  </span>
+                                )}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Scrollable 24-Hour Time Grid */}
+                <div ref={timeGridScrollRef} className="min-h-0 flex-1 overflow-y-auto">
+                  <div
+                    className="relative flex"
+                    style={{ height: `${HOURS.length * HOUR_HEIGHT}px` }}
+                  >
+                    {/* Left Hour Gutter */}
+                    <div
+                      className="relative w-[62px] shrink-0 select-none border-r"
+                      style={{ borderColor: 'var(--border-subtle)', background: 'var(--bg-list)' }}
+                    >
+                      {HOURS.map((h) => (
+                        <div
+                          key={h}
+                          className="absolute right-2.5 text-[10.5px] font-medium tabular-nums"
+                          style={{
+                            top: `${h * HOUR_HEIGHT - 7}px`,
+                            color: 'var(--text-muted)',
+                            opacity: h === 0 ? 0 : 0.85
+                          }}
+                        >
+                          {formatHourLabel(h)}
+                        </div>
+                      ))}
+
+                      {/* Current Time Pill in Gutter */}
+                      {todayVisible && (
+                        <div
+                          className="pointer-events-none absolute right-1.5 z-20 -translate-y-1/2 rounded px-1 py-0.5 text-[9.5px] font-semibold tabular-nums text-white"
+                          style={{
+                            top: `${nowTopPx}px`,
+                            background: 'var(--accent)'
+                          }}
+                        >
+                          {now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).replace(/\s?[AP]M$/i, '')}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Day Columns */}
+                    <div
+                      className={`relative grid flex-1 ${mode === 'day' ? 'grid-cols-1' : 'grid-cols-7'}`}
+                    >
+                      {dayBuckets.map((bucket) => (
+                        <div
+                          key={bucket.dayStart}
+                          className="relative border-r last:border-r-0"
+                          style={{
+                            borderColor: 'var(--border-subtle)',
+                            background: bucket.isToday
+                              ? 'color-mix(in srgb, var(--accent) 3%, var(--bg-main))'
+                              : 'var(--bg-main)'
+                          }}
+                        >
+                          {/* Hour & Half-Hour Gridlines (clickable to create event at that hour) */}
+                          {HOURS.map((h) => (
+                            <div
+                              key={h}
+                              onDoubleClick={() => openCreateAtSlot(bucket.date, h)}
+                              className="group relative border-b"
+                              style={{
+                                height: `${HOUR_HEIGHT}px`,
+                                borderColor: 'var(--border-subtle)'
+                              }}
+                              title={`Double-click to add event at ${formatHourLabel(h)}`}
+                            >
+                              <div
+                                className="pointer-events-none absolute right-0 left-0 border-b border-dashed"
+                                style={{
+                                  top: `${HOUR_HEIGHT / 2}px`,
+                                  borderColor: 'var(--border-subtle)',
+                                  opacity: 0.45
+                                }}
+                              />
+                            </div>
+                          ))}
+
+                          {/* Current-Time Needle on Today's Column */}
+                          {bucket.isToday && (
+                            <div
+                              className="pointer-events-none absolute right-0 left-0 z-20 flex items-center"
+                              style={{ top: `${nowTopPx}px` }}
+                            >
+                              <span
+                                className="-ml-[4px] h-[8px] w-[8px] shrink-0 rounded-full"
+                                style={{ background: 'var(--accent)' }}
+                              />
+                              <div
+                                className="h-[1.5px] flex-1"
+                                style={{ background: 'var(--accent)' }}
+                              />
+                            </div>
+                          )}
+
+                          {/* Positioned Event Cards */}
+                          {bucket.positioned.map(({ item, topPx, heightPx, col, colCount }) => {
+                            const ev = item.primary
+                            const isSelected = selectedEvent?.primary.id === ev.id
+                            const hasVideo = Boolean(extractMeetingUrl(ev))
+                            const isCompact = heightPx < 42
+                            const isTall = heightPx >= 72
+                            const isCancelled = ev.status === 'cancelled'
+                            const widthPct = 100 / colCount
+                            const leftPct = col * widthPct
+
+                            return (
+                              <button
+                                key={ev.id}
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleSelectEvent(item)
+                                }}
+                                onDoubleClick={(e) => {
+                                  e.stopPropagation()
+                                  handleOpenEventModal(item)
+                                }}
+                                onContextMenu={(e) => openEventContextMenu(e, item)}
+                                className="cal-event-chip absolute z-10 overflow-hidden rounded-lg border-l-[3px] px-2 py-1 text-left"
+                                style={{
+                                  top: `${topPx}px`,
+                                  height: `${heightPx}px`,
+                                  left: `calc(${leftPct}% + 2px)`,
+                                  width: `calc(${widthPct}% - 5px)`,
+                                  borderLeftColor: ev.accountColor,
+                                  background: isSelected
+                                    ? 'var(--bg-selected)'
+                                    : `color-mix(in srgb, ${ev.accountColor} 12%, var(--bg-elevated))`,
+                                  boxShadow: isSelected
+                                    ? 'inset 0 0 0 1.5px var(--accent)'
+                                    : 'inset 0 0 0 1px var(--border-subtle)',
+                                  opacity: isCancelled ? 0.58 : 1
+                                }}
+                                title={
+                                  item.occurrences.length > 1
+                                    ? `${ev.title} · ${formatTimeShort(ev.startAt)} – ${formatTimeShort(ev.endAt)} (${item.occurrences.map((o) => o.email).join(', ')})`
+                                    : `${ev.title} · ${formatTimeShort(ev.startAt)} – ${formatTimeShort(ev.endAt)}`
+                                }
+                              >
+                                {isCompact ? (
+                                  <div className="flex h-full items-center justify-between gap-1">
+                                    <div className="flex min-w-0 items-center gap-1.5">
+                                      <span
+                                        className={`truncate text-[11.5px] font-semibold leading-none ${
+                                          isCancelled ? 'line-through' : ''
+                                        }`}
+                                        style={{ color: 'var(--text-primary)' }}
+                                      >
+                                        {ev.title}
+                                      </span>
+                                      <span
+                                        className="shrink-0 text-[10px] tabular-nums"
+                                        style={{ color: 'var(--text-muted)' }}
+                                      >
+                                        {formatTimeShort(ev.startAt)}
+                                      </span>
+                                    </div>
+                                    {hasVideo && (
+                                      <Video
+                                        size={10}
+                                        className="shrink-0"
+                                        style={{ color: 'var(--accent-text)' }}
+                                      />
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className="flex h-full flex-col">
+                                    <div className="flex items-start justify-between gap-1">
+                                      <span
+                                        className={`truncate text-[12px] font-semibold leading-tight ${
+                                          isCancelled ? 'line-through' : ''
+                                        }`}
+                                        style={{ color: 'var(--text-primary)' }}
+                                      >
+                                        {ev.title}
+                                      </span>
+                                      <span className="flex shrink-0 items-center gap-1 pt-0.5">
+                                        {hasVideo && (
+                                          <Video size={11} style={{ color: 'var(--accent-text)' }} />
+                                        )}
+                                        {(ev.attachments?.length || 0) > 0 && (
+                                          <Paperclip size={10} style={{ color: 'var(--text-muted)' }} />
+                                        )}
+                                        {item.occurrences.length > 1 && (
+                                          <span className="flex items-center gap-0.5">
+                                            {item.occurrences.map((o, idx) => (
+                                              <span
+                                                key={`${o.email}-${idx}`}
+                                                className="h-1.5 w-1.5 rounded-full"
+                                                style={{ background: o.color }}
+                                              />
+                                            ))}
+                                          </span>
+                                        )}
+                                      </span>
+                                    </div>
+                                    <div
+                                      className="mt-0.5 truncate text-[10.5px] tabular-nums"
+                                      style={{ color: 'var(--text-secondary)' }}
+                                    >
+                                      {formatTimeShort(ev.startAt)} – {formatTimeShort(ev.endAt)}
+                                    </div>
+                                    {isTall && ev.location && (
+                                      <div
+                                        className="mt-0.5 truncate text-[10.5px]"
+                                        style={{ color: 'var(--text-muted)' }}
+                                      >
+                                        {ev.location}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Single-Click Docked Bottom-Half Details Pane */}
+          {selectedEvent && (
+            <EventDetailPane
+              item={selectedEvent}
+              heightPercent={paneHeightPct}
+              isResizing={isResizingPane}
+              onStartResize={handleStartResizePane}
+              onResetResize={() => setPaneHeightPct(DEFAULT_PANE_HEIGHT_PCT)}
+              onExpandModal={() => setDetailModalOpen(true)}
+              onDuplicate={openDuplicateEvent}
+              onDelete={(item) => void handleDeleteEvent(item)}
+              onClose={() => {
+                setSelectedEvent(null)
+                setDetailModalOpen(false)
+              }}
+              onCopy={(text, msg) => void handleCopy(text, msg)}
+              onOpenExternal={handleOpenExternal}
+            />
           )}
         </div>
 
-        <div className="flex items-center gap-2">
-          <div className="flex rounded-lg border p-0.5" style={{ borderColor: 'var(--border-strong)' }}>
-            {(['day', 'week', 'month'] as CalMode[]).map((m) => (
-              <button
-                key={m}
-                onClick={() => setMode(m)}
-                className="rounded-md px-2.5 py-1 text-[12px] font-medium capitalize transition"
-                style={{
-                  background: mode === m ? 'var(--bg-elevated)' : 'transparent',
-                  color: mode === m ? 'var(--text-primary)' : 'var(--text-muted)'
-                }}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
+        {/* Double-Click / Expand Full Event Details Modal */}
+        {selectedEvent && detailModalOpen && (
+          <EventDetailModal
+            item={selectedEvent}
+            onClose={() => setDetailModalOpen(false)}
+            onDuplicate={openDuplicateEvent}
+            onDelete={(item) => void handleDeleteEvent(item)}
+            onCopy={(text, msg) => void handleCopy(text, msg)}
+            onOpenExternal={handleOpenExternal}
+          />
+        )}
 
-          <button
-            onClick={() => setMergeDuplicates((v) => !v)}
-            className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[12px] font-medium transition hover:bg-[var(--bg-hover)]"
-            style={{
-              borderColor: mergeDuplicates ? 'var(--accent)' : 'var(--border-strong)',
-              color: mergeDuplicates ? 'var(--accent-text)' : 'var(--text-secondary)',
-              background: mergeDuplicates ? 'var(--accent-soft)' : 'transparent'
-            }}
-            title="Combine duplicate events that appear across multiple connected accounts"
+        {/* Import / Export Modal */}
+        {importOpen && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4"
+            onClick={() => setImportOpen(false)}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Import and Export Calendars"
           >
-            <Layers size={13} /> {mergeDuplicates ? 'Merged' : 'Raw'}
-          </button>
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-lg space-y-4 rounded-2xl border p-5 shadow-2xl"
+              style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-strong)' }}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-[15.5px] font-semibold tracking-[-0.01em]">
+                    Import &amp; Export Calendars
+                  </h3>
+                  <p className="mt-0.5 text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                    Bring in local Outlook calendars or standard .ics files, or export a backup.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setImportOpen(false)}
+                  className="rounded-lg p-1.5 transition hover:bg-[var(--bg-hover)]"
+                  style={{ color: 'var(--text-secondary)' }}
+                  title="Close"
+                >
+                  <X size={15} />
+                </button>
+              </div>
 
-          <button
-            onClick={() => void handleSync()}
-            className="rounded-lg border p-1.5 hover:bg-[var(--bg-hover)]"
-            style={{ borderColor: 'var(--border-strong)' }}
-            title="Sync calendars"
-          >
-            <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />
-          </button>
+              {/* Target Account Picker */}
+              <div>
+                <label className="mb-1 block text-[11.5px] font-medium" style={{ color: 'var(--text-muted)' }}>
+                  Import events into account
+                </label>
+                <select
+                  value={importAccountId}
+                  onChange={(e) => setImportAccountId(e.target.value)}
+                  className="w-full rounded-lg border px-3 py-2 text-[12.5px] outline-none"
+                  style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
+                >
+                  {importTargetAccounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name} ({a.email})
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                  {imapAccounts.length > 0
+                    ? 'Showing IMAP / local accounts only — Gmail accounts sync Google Calendar automatically.'
+                    : 'Imported events are stored locally on this PC.'}
+                </p>
+              </div>
 
-          <button
-            onClick={() => setImportOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[12px] font-medium transition hover:bg-[var(--bg-hover)]"
-            style={{ borderColor: 'var(--border-strong)' }}
-            title="Import from Outlook or .ics, or export calendar"
-          >
-            <Upload size={13} /> Import / Export
-          </button>
+              {importStatus && (
+                <div
+                  className="flex items-center gap-2 rounded-lg border px-3 py-2 text-[12px]"
+                  style={{
+                    background: 'var(--bg-main)',
+                    borderColor: 'var(--success)',
+                    color: 'var(--text-primary)'
+                  }}
+                >
+                  <Check size={14} style={{ color: 'var(--success)' }} className="shrink-0" />
+                  <span>{importStatus}</span>
+                </div>
+              )}
 
-          <button
-            onClick={() => setCreateOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-semibold text-white transition hover:opacity-90"
-            style={{ background: 'var(--accent)' }}
-          >
-            <Plus size={14} /> New event
-          </button>
-        </div>
-      </div>
-
-      {/* Calendar Grid */}
-      <div className="flex-1 overflow-y-auto p-4">
-        <div
-          className={`grid h-full gap-2 ${
-            mode === 'day' ? 'grid-cols-1' : 'grid-cols-7'
-          }`}
-        >
-          {days.map((d) => {
-            const isToday = d.toDateString() === todayStr
-            const dayStart = startOfDay(d).getTime()
-            const dayEnd = dayStart + 86400_000
-            const rawDayEvents = events.filter((ev) => ev.endAt > dayStart && ev.startAt < dayEnd)
-            const combinedDayEvents: MergedCalendarEvent[] = mergeDuplicates
-              ? mergeDuplicateEvents(rawDayEvents, accountPriority)
-              : rawDayEvents.map((ev) => ({
-                  primary: ev,
-                  occurrences: [
-                    {
-                      accountId: ev.accountId,
-                      email: ev.accountEmail,
-                      color: ev.accountColor,
-                      calendarName: ev.calendarName
-                    }
-                  ]
-                }))
-
-            // 1. All-day events live strictly in the top bar, ordered by account priority
-            const allDayEvents = combinedDayEvents
-              .filter((item) => item.primary.allDay)
-              .sort((a, b) => {
-                const ra = rankOf(a.primary.accountId)
-                const rb = rankOf(b.primary.accountId)
-                if (ra !== rb) return ra - rb
-                return a.primary.title.localeCompare(b.primary.title)
-              })
-
-            // 2. Timed events live in the schedule below: ordered by hour slot -> account priority -> exact start time
-            const timedEvents = combinedDayEvents
-              .filter((item) => !item.primary.allDay)
-              .sort((a, b) => {
-                const hourA = new Date(a.primary.startAt).getHours()
-                const hourB = new Date(b.primary.startAt).getHours()
-                if (hourA !== hourB) return hourA - hourB
-                const ra = rankOf(a.primary.accountId)
-                const rb = rankOf(b.primary.accountId)
-                if (ra !== rb) return ra - rb
-                if (a.primary.startAt !== b.primary.startAt) return a.primary.startAt - b.primary.startAt
-                return a.primary.title.localeCompare(b.primary.title)
-              })
-
-            return (
+              {/* Classic Outlook Desktop (Windows) */}
               <div
-                key={dayStart}
-                className="flex min-h-[150px] flex-col rounded-xl border p-2.5"
-                style={{
-                  background: isToday ? 'var(--bg-elevated)' : 'var(--bg-list)',
-                  borderColor: isToday ? 'var(--accent)' : 'var(--border-subtle)'
-                }}
+                className="space-y-2.5 rounded-xl border p-3.5"
+                style={{ background: 'var(--bg-main)', borderColor: 'var(--border-subtle)' }}
               >
-                <div className="mb-2 flex items-center justify-between">
-                  <span className="text-[11px] font-medium uppercase" style={{ color: 'var(--text-muted)' }}>
-                    {d.toLocaleDateString('en-US', { weekday: 'short' })}
-                  </span>
-                  <span
-                    className="flex h-6 w-6 items-center justify-center rounded-full text-[12px] font-semibold"
-                    style={{
-                      background: isToday ? 'var(--accent)' : 'transparent',
-                      color: isToday ? '#fff' : 'var(--text-primary)'
-                    }}
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[13px] font-semibold">Import from Classic Outlook (Windows)</div>
+                    <div className="text-[11.5px]" style={{ color: 'var(--text-muted)' }}>
+                      Reads local &ldquo;This computer only&rdquo; and Outlook Desktop calendars directly. Safe to re-run
+                      without duplicates.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void handleScanOutlook()}
+                    disabled={scanningOutlook}
+                    className="shrink-0 rounded-lg px-3 py-1.5 text-[12px] font-semibold text-white transition hover:brightness-110 disabled:opacity-50"
+                    style={{ background: 'var(--accent)' }}
                   >
-                    {d.getDate()}
-                  </span>
+                    {scanningOutlook ? 'Scanning…' : outlookCalendars ? 'Rescan' : 'Scan Outlook'}
+                  </button>
                 </div>
 
-                {/* Dedicated All-Day Top Bar */}
-                {allDayEvents.length > 0 && (
+                {outlookError && (
                   <div
-                    className="mb-2 flex flex-wrap gap-1 border-b pb-2"
-                    style={{ borderColor: 'var(--border-subtle)' }}
+                    className="rounded-lg border px-3 py-2 text-[11.5px]"
+                    style={{ borderColor: 'var(--border-strong)', color: 'var(--text-secondary)' }}
                   >
-                    {allDayEvents.map((item) => {
-                      const ev = item.primary
+                    {outlookError}
+                  </div>
+                )}
+
+                {outlookCalendars && outlookCalendars.length > 0 && (
+                  <div className="max-h-44 space-y-1.5 overflow-y-auto pt-1">
+                    {outlookCalendars.map((cal) => {
+                      const done = importedFolders[cal.folderPath]
                       return (
-                        <button
-                          key={ev.id}
-                          onClick={() => setSelectedEvent(item)}
-                          onContextMenu={(e) => openEventContextMenu(e, item)}
-                          className="inline-flex max-w-full items-center gap-1 rounded-md border-l-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium transition hover:brightness-110"
-                          style={{
-                            background: 'var(--bg-main)',
-                            borderLeftColor: ev.accountColor,
-                            flex: allDayEvents.length === 1 ? '1 1 100%' : '1 1 46%'
-                          }}
-                          title={
-                            item.occurrences.length > 1
-                              ? `${ev.title} · All day (${item.occurrences.map((o) => o.email).join(', ')})`
-                              : `${ev.title} · All day`
-                          }
+                        <div
+                          key={cal.folderPath}
+                          className="flex items-center justify-between gap-2 rounded-lg border px-3 py-2"
+                          style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
                         >
-                          <span className="truncate">{ev.title}</span>
-                          {item.occurrences.length > 1 && (
-                            <span className="ml-auto flex shrink-0 items-center gap-0.5">
-                              {item.occurrences.map((o, idx) => (
-                                <span
-                                  key={`${o.email}-${idx}`}
-                                  className="h-1.5 w-1.5 rounded-full"
-                                  style={{ background: o.color }}
-                                />
-                              ))}
-                            </span>
+                          <div className="min-w-0">
+                            <div className="truncate text-[12.5px] font-medium">{cal.folderName}</div>
+                            <div className="truncate text-[11px] tabular-nums" style={{ color: 'var(--text-muted)' }}>
+                              {cal.storeName} · {cal.itemCount} item{cal.itemCount === 1 ? '' : 's'}
+                            </div>
+                          </div>
+                          {done ? (
+                            <button
+                              type="button"
+                              onClick={() => void handleImportOutlook(cal.folderPath)}
+                              disabled={importingFolder !== null}
+                              className="inline-flex shrink-0 items-center gap-1 rounded-lg border px-2.5 py-1 text-[11.5px] font-medium transition hover:opacity-80 disabled:opacity-50"
+                              style={{
+                                borderColor: 'var(--success)',
+                                color: 'var(--success)',
+                                background: 'transparent'
+                              }}
+                              title={`Imported into ${done.targetName}. Click to re-import.`}
+                            >
+                              <Check size={12} />
+                              {done.count === 0 ? 'Imported (0)' : `Imported (${done.count})`}
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => void handleImportOutlook(cal.folderPath)}
+                              disabled={importingFolder !== null}
+                              className="shrink-0 rounded-lg border px-2.5 py-1 text-[11.5px] font-semibold transition hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                              style={{ borderColor: 'var(--border-strong)' }}
+                            >
+                              {importingFolder === cal.folderPath ? 'Importing…' : 'Import'}
+                            </button>
                           )}
-                        </button>
+                        </div>
                       )
                     })}
                   </div>
                 )}
-
-                {/* Timed Schedule Events */}
-                <div className="flex-1 space-y-1.5 overflow-y-auto">
-                  {timedEvents.map((item) => {
-                    const ev = item.primary
-                    return (
-                      <button
-                        key={ev.id}
-                        onClick={() => setSelectedEvent(item)}
-                        onContextMenu={(e) => openEventContextMenu(e, item)}
-                        className="block w-full rounded-lg border-l-[3px] px-2 py-1.5 text-left transition hover:brightness-110"
-                        style={{
-                          background: 'var(--bg-main)',
-                          borderLeftColor: ev.accountColor
-                        }}
-                        title={
-                          item.occurrences.length > 1
-                            ? `${ev.title} (${item.occurrences.map((o) => o.email).join(', ')})`
-                            : ev.title
-                        }
-                      >
-                        <div className="flex items-center justify-between gap-1">
-                          <div className="truncate text-[12px] font-semibold">{ev.title}</div>
-                          {item.occurrences.length > 1 && (
-                            <span className="flex shrink-0 items-center gap-0.5">
-                              {item.occurrences.map((o, idx) => (
-                                <span
-                                  key={`${o.email}-${idx}`}
-                                  className="h-1.5 w-1.5 rounded-full"
-                                  style={{ background: o.color }}
-                                />
-                              ))}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center justify-between gap-1 text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
-                          <span className="truncate">
-                            {new Date(ev.startAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                            {' – '}
-                            {new Date(ev.endAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                          </span>
-                          {(ev.attachments?.length || 0) > 0 && <Paperclip size={10} className="shrink-0" />}
-                        </div>
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-
-      {/* Selected Event Details Modal (~50% window) */}
-      {selectedEvent && (() => {
-        const ev = selectedEvent.primary
-        const agendaText = ev.description ? formatAgendaText(ev.description) : ''
-        const attachments = ev.attachments || []
-        const locationIsUrl = Boolean(ev.location && /^https?:\/\//i.test(ev.location.trim()))
-        return (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6"
-            onClick={() => setSelectedEvent(null)}
-          >
-            <div
-              onClick={(e) => e.stopPropagation()}
-              className="flex h-[78vh] max-h-[88vh] w-[70vw] min-w-[640px] max-w-[1100px] flex-col overflow-hidden rounded-2xl border shadow-2xl"
-              style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-strong)' }}
-            >
-              {/* Color Accent Top Bar */}
-              <div className="h-1.5 w-full shrink-0" style={{ background: ev.accountColor }} />
-
-              {/* Header */}
-              <div
-                className="flex items-start justify-between gap-4 border-b px-6 py-4"
-                style={{ borderColor: 'var(--border-subtle)' }}
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: ev.accountColor }} />
-                    <h3 className="text-[18px] font-semibold leading-snug">{ev.title}</h3>
-                    <span
-                      className="rounded-full px-2 py-0.5 text-[10.5px] font-medium capitalize"
-                      style={{ background: 'var(--bg-main)', color: 'var(--text-muted)' }}
-                    >
-                      {ev.status}
-                    </span>
-                  </div>
-                  <div className="mt-1.5 flex flex-wrap items-center gap-3 text-[13px]" style={{ color: 'var(--text-secondary)' }}>
-                    <span className="inline-flex items-center gap-1.5">
-                      <Clock size={14} style={{ color: 'var(--text-muted)' }} />
-                      {ev.allDay
-                        ? `${new Date(ev.startAt).toLocaleDateString([], {
-                            weekday: 'long',
-                            month: 'long',
-                            day: 'numeric',
-                            year: 'numeric'
-                          })} · All day`
-                        : `${new Date(ev.startAt).toLocaleDateString([], {
-                            weekday: 'long',
-                            month: 'long',
-                            day: 'numeric'
-                          })}, ${new Date(ev.startAt).toLocaleTimeString([], {
-                            hour: 'numeric',
-                            minute: '2-digit'
-                          })} – ${new Date(ev.endAt).toLocaleTimeString([], {
-                            hour: 'numeric',
-                            minute: '2-digit'
-                          })} (${formatDuration(ev.startAt, ev.endAt)})`}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex shrink-0 items-center gap-2">
-                  {ev.meetingUrl && (
-                    <button
-                      onClick={() => void window.glassmail.openExternal(ev.meetingUrl!)}
-                      className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-[12.5px] font-semibold text-white transition hover:opacity-90"
-                      style={{ background: 'var(--accent)' }}
-                    >
-                      <Video size={14} /> Join meeting
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setSelectedEvent(null)}
-                    className="rounded-lg p-1.5 hover:bg-[var(--bg-hover)]"
-                    title="Close"
-                  >
-                    <X size={16} />
-                  </button>
-                </div>
               </div>
 
-              {/* Scrollable Detail Body */}
-              <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
-                {/* Location & Calendars */}
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div
-                    className="rounded-xl border p-3.5"
-                    style={{ background: 'var(--bg-main)', borderColor: 'var(--border-subtle)' }}
-                  >
-                    <div className="mb-1.5 flex items-center gap-1.5 text-[11.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
-                      <MapPin size={12} /> Location
-                    </div>
-                    {ev.location ? (
-                      <div className="flex items-start justify-between gap-2 text-[13px]">
-                        {locationIsUrl ? (
-                          <button
-                            onClick={() => void window.glassmail.openExternal(ev.location!)}
-                            className="inline-flex items-center gap-1 text-left hover:underline"
-                            style={{ color: 'var(--accent-text)' }}
-                          >
-                            <span className="break-all">{ev.location}</span>
-                            <ExternalLink size={12} className="shrink-0" />
-                          </button>
-                        ) : (
-                          <span className="break-words">{ev.location}</span>
-                        )}
-                        <button
-                          onClick={async () => {
-                            await window.glassmail.copyText(ev.location!, 'Copied location')
-                            showToast('Copied location')
-                          }}
-                          className="shrink-0 rounded p-1 hover:bg-[var(--bg-hover)]"
-                          style={{ color: 'var(--text-muted)' }}
-                          title="Copy location"
-                        >
-                          <Copy size={12} />
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="text-[12.5px]" style={{ color: 'var(--text-muted)' }}>
-                        No location specified
-                      </div>
-                    )}
-                  </div>
-
-                  <div
-                    className="rounded-xl border p-3.5"
-                    style={{ background: 'var(--bg-main)', borderColor: 'var(--border-subtle)' }}
-                  >
-                    <div className="mb-1.5 flex items-center gap-1.5 text-[11.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
-                      <CalendarIcon size={12} /> Calendar{selectedEvent.occurrences.length > 1 ? 's' : ''}
-                    </div>
-                    <div className="space-y-1.5 text-[12.5px]">
-                      {selectedEvent.occurrences.map((occ, idx) => (
-                        <div key={`${occ.email}-${idx}`} className="flex items-center gap-2">
-                          <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: occ.color }} />
-                          <span className="truncate font-medium">{occ.calendarName}</span>
-                          <span className="truncate text-[11.5px]" style={{ color: 'var(--text-muted)' }}>
-                            ({occ.email})
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Agenda / Notes */}
-                <div
-                  className="rounded-xl border p-4"
-                  style={{ background: 'var(--bg-main)', borderColor: 'var(--border-subtle)' }}
-                >
-                  <div className="mb-2 flex items-center gap-1.5 text-[11.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
-                    <FileText size={12} /> Agenda &amp; Notes
-                  </div>
-                  {agendaText ? (
-                    <div className="whitespace-pre-wrap break-words text-[13px] leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-                      {agendaText.split(/(https?:\/\/[^\s<>"]+)/g).map((part, i) =>
-                        /^https?:\/\//i.test(part) ? (
-                          <button
-                            key={i}
-                            type="button"
-                            onClick={() => void window.glassmail.openExternal(part)}
-                            className="inline break-all underline hover:opacity-80"
-                            style={{ color: 'var(--accent-text)' }}
-                          >
-                            {part}
-                          </button>
-                        ) : (
-                          <React.Fragment key={i}>{part}</React.Fragment>
-                        )
-                      )}
-                    </div>
-                  ) : (
-                    <div className="text-[12.5px]" style={{ color: 'var(--text-muted)' }}>
-                      No agenda or description included.
-                    </div>
-                  )}
-                </div>
-
-                {/* Attendees */}
-                {ev.attendees.length > 0 && (
-                  <div
-                    className="rounded-xl border p-4"
-                    style={{ background: 'var(--bg-main)', borderColor: 'var(--border-subtle)' }}
-                  >
-                    <div className="mb-2.5 flex items-center justify-between">
-                      <span className="flex items-center gap-1.5 text-[11.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
-                        <Users size={12} /> Attendees ({ev.attendees.length})
-                      </span>
-                    </div>
-                    <div className="grid max-h-44 grid-cols-1 gap-1.5 overflow-y-auto sm:grid-cols-2">
-                      {ev.attendees.map((att, idx) => {
-                        const label = att.name || att.email
-                        const rsvp =
-                          att.status === 'accepted'
-                            ? { text: 'Accepted', color: 'var(--success)' }
-                            : att.status === 'declined'
-                              ? { text: 'Declined', color: 'var(--danger)' }
-                              : att.status === 'tentative'
-                                ? { text: 'Maybe', color: 'var(--accent-text)' }
-                                : null
-                        return (
-                          <div
-                            key={`${att.email}-${idx}`}
-                            className="flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-[12px]"
-                            style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
-                          >
-                            <div className="min-w-0">
-                              <div className="truncate font-medium">{label}</div>
-                              {att.name && att.email && (
-                                <div className="truncate text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
-                                  {att.email}
-                                </div>
-                              )}
-                            </div>
-                            {rsvp && (
-                              <span className="shrink-0 text-[10.5px] font-semibold" style={{ color: rsvp.color }}>
-                                {rsvp.text}
-                              </span>
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* Attachments */}
-                <div
-                  className="rounded-xl border p-4"
-                  style={{ background: 'var(--bg-main)', borderColor: 'var(--border-subtle)' }}
-                >
-                  <div className="mb-2 flex items-center gap-1.5 text-[11.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
-                    <Paperclip size={12} /> Attachments ({attachments.length})
-                  </div>
-                  {attachments.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
-                      {attachments.map((att, idx) => (
-                        <button
-                          key={`${att.fileUrl}-${idx}`}
-                          type="button"
-                          onClick={() => void window.glassmail.openExternal(att.fileUrl)}
-                          className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-[12.5px] font-medium transition hover:bg-[var(--bg-hover)]"
-                          style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-strong)' }}
-                        >
-                          <Paperclip size={13} style={{ color: 'var(--accent)' }} />
-                          <span className="max-w-[260px] truncate">{att.title}</span>
-                          <ExternalLink size={12} style={{ color: 'var(--text-muted)' }} />
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-[12.5px]" style={{ color: 'var(--text-muted)' }}>
-                      No attachments on this event.
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Footer */}
-              <div
-                className="flex shrink-0 items-center justify-between border-t px-6 py-3.5"
-                style={{ borderColor: 'var(--border-subtle)' }}
-              >
-                {!ev.readOnly ? (
-                  <button
-                    onClick={async () => {
-                      await window.glassmail.deleteCalendarEvent(ev.id)
-                      setSelectedEvent(null)
-                      await loadEvents()
-                      await refreshTodayEvents()
-                      showToast('Deleted event')
-                    }}
-                    className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-medium hover:bg-[var(--bg-hover)]"
-                    style={{ color: 'var(--danger)' }}
-                  >
-                    <Trash2 size={14} /> Delete event
-                  </button>
-                ) : (
-                  <span className="text-[11.5px]" style={{ color: 'var(--text-muted)' }}>
-                    Read-only calendar event
-                  </span>
-                )}
-                <button
-                  onClick={() => setSelectedEvent(null)}
-                  className="rounded-lg px-4 py-1.5 text-[12.5px] font-semibold text-white transition hover:opacity-90"
-                  style={{ background: 'var(--accent)' }}
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        )
-      })()}
-
-      {/* Import / Export Modal */}
-      {importOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4"
-          onClick={() => setImportOpen(false)}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-lg space-y-4 rounded-2xl border p-5 shadow-2xl"
-            style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-strong)' }}
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-[15px] font-semibold">Import &amp; Export Calendars</h3>
-                <p className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
-                  Bring in local Outlook calendars or standard .ics files, or export a backup.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setImportOpen(false)}
-                className="rounded p-1 hover:bg-[var(--bg-hover)]"
-              >
-                <X size={15} />
-              </button>
-            </div>
-
-            {/* Target Account Picker */}
-            <div>
-              <label className="mb-1 block text-[11.5px] font-medium" style={{ color: 'var(--text-muted)' }}>
-                Import events into account
-              </label>
-              <select
-                value={importAccountId}
-                onChange={(e) => setImportAccountId(e.target.value)}
-                className="w-full rounded-lg border px-3 py-2 text-[12.5px] outline-none"
-                style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
-              >
-                {importTargetAccounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name} ({a.email})
-                  </option>
-                ))}
-              </select>
-              <p className="mt-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                {imapAccounts.length > 0
-                  ? 'Showing IMAP / local accounts only — Gmail accounts sync Google Calendar automatically.'
-                  : 'Imported events are stored locally on this PC.'}
-              </p>
-            </div>
-
-            {importStatus && (
-              <div
-                className="flex items-center gap-2 rounded-lg border px-3 py-2 text-[12px]"
-                style={{
-                  background: 'var(--bg-main)',
-                  borderColor: 'var(--success)',
-                  color: 'var(--text-primary)'
-                }}
-              >
-                <Check size={14} style={{ color: 'var(--success)' }} className="shrink-0" />
-                <span>{importStatus}</span>
-              </div>
-            )}
-
-            {/* 1. Classic Outlook Desktop (Windows) */}
-            <div
-              className="space-y-2.5 rounded-xl border p-3.5"
-              style={{ background: 'var(--bg-main)', borderColor: 'var(--border-subtle)' }}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <div className="text-[13px] font-semibold">Import from Classic Outlook (Windows)</div>
-                  <div className="text-[11.5px]" style={{ color: 'var(--text-muted)' }}>
-                    Reads local &ldquo;This computer only&rdquo; and Outlook Desktop calendars directly. Safe to re-run
-                    without duplicates.
-                  </div>
-                </div>
+              {/* Universal .ics File Import & Export */}
+              <div className="grid grid-cols-2 gap-2.5">
                 <button
                   type="button"
-                  onClick={() => void handleScanOutlook()}
-                  disabled={scanningOutlook}
-                  className="shrink-0 rounded-lg px-3 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
-                  style={{ background: 'var(--accent)' }}
+                  onClick={() => void handleImportIcs()}
+                  disabled={importingIcs || !importAccountId}
+                  className="flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-[12.5px] font-semibold transition hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                  style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
                 >
-                  {scanningOutlook ? 'Scanning…' : outlookCalendars ? 'Rescan' : 'Scan Outlook'}
+                  <Upload size={14} /> {importingIcs ? 'Importing…' : 'Import .ics File'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleExportIcs()}
+                  disabled={exportingIcs}
+                  className="flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-[12.5px] font-semibold transition hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                  style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
+                >
+                  <Download size={14} /> {exportingIcs ? 'Exporting…' : 'Export .ics Backup'}
                 </button>
               </div>
 
-              {outlookError && (
-                <div className="rounded-lg border px-3 py-2 text-[11.5px]" style={{ borderColor: 'var(--border-strong)', color: 'var(--text-secondary)' }}>
-                  {outlookError}
-                </div>
-              )}
-
-              {outlookCalendars && outlookCalendars.length > 0 && (
-                <div className="max-h-44 space-y-1.5 overflow-y-auto pt-1">
-                  {outlookCalendars.map((cal) => {
-                    const done = importedFolders[cal.folderPath]
-                    return (
-                      <div
-                        key={cal.folderPath}
-                        className="flex items-center justify-between gap-2 rounded-lg border px-3 py-2"
-                        style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
-                      >
-                        <div className="min-w-0">
-                          <div className="truncate text-[12.5px] font-medium">{cal.folderName}</div>
-                          <div className="truncate text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                            {cal.storeName} · {cal.itemCount} item{cal.itemCount === 1 ? '' : 's'}
-                          </div>
-                        </div>
-                        {done ? (
-                          <button
-                            type="button"
-                            onClick={() => void handleImportOutlook(cal.folderPath)}
-                            disabled={importingFolder !== null}
-                            className="inline-flex shrink-0 items-center gap-1 rounded-lg border px-2.5 py-1 text-[11.5px] font-medium transition hover:opacity-80 disabled:opacity-50"
-                            style={{
-                              borderColor: 'var(--success)',
-                              color: 'var(--success)',
-                              background: 'transparent'
-                            }}
-                            title={`Imported into ${done.targetName}. Click to re-import.`}
-                          >
-                            <Check size={12} />
-                            {done.count === 0 ? 'Imported (0)' : `Imported (${done.count})`}
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => void handleImportOutlook(cal.folderPath)}
-                            disabled={importingFolder !== null}
-                            className="shrink-0 rounded-lg border px-2.5 py-1 text-[11.5px] font-semibold transition hover:bg-[var(--bg-hover)] disabled:opacity-50"
-                            style={{ borderColor: 'var(--border-strong)' }}
-                          >
-                            {importingFolder === cal.folderPath ? 'Importing…' : 'Import'}
-                          </button>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* 2. Universal .ics File Import & Export */}
-            <div className="grid grid-cols-2 gap-2.5">
-              <button
-                type="button"
-                onClick={() => void handleImportIcs()}
-                disabled={importingIcs || !importAccountId}
-                className="flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-[12.5px] font-semibold transition hover:bg-[var(--bg-hover)] disabled:opacity-50"
-                style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
-              >
-                <Upload size={14} /> {importingIcs ? 'Importing…' : 'Import .ics File'}
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleExportIcs()}
-                disabled={exportingIcs}
-                className="flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-[12.5px] font-semibold transition hover:bg-[var(--bg-hover)] disabled:opacity-50"
-                style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
-              >
-                <Download size={14} /> {exportingIcs ? 'Exporting…' : 'Export .ics Backup'}
-              </button>
-            </div>
-
-            {/* Modal Footer */}
-            <div className="flex justify-end border-t pt-3" style={{ borderColor: 'var(--border-subtle)' }}>
-              <button
-                type="button"
-                onClick={() => setImportOpen(false)}
-                className="rounded-lg px-4 py-1.5 text-[12.5px] font-semibold text-white transition hover:opacity-90"
-                style={{ background: 'var(--accent)' }}
-              >
-                Done
-              </button>
+              <div className="flex justify-end border-t pt-3" style={{ borderColor: 'var(--border-subtle)' }}>
+                <button
+                  type="button"
+                  onClick={() => setImportOpen(false)}
+                  className="rounded-xl px-4 py-1.5 text-[12.5px] font-semibold text-white transition hover:brightness-110"
+                  style={{ background: 'var(--accent)' }}
+                >
+                  Done
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Create Event Modal */}
-      {createOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          onClick={() => setCreateOpen(false)}
-        >
-          <form
-            onSubmit={(e) => void handleCreate(e)}
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md space-y-3.5 rounded-2xl border p-5 shadow-2xl"
-            style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-strong)' }}
+        {/* Create Event Modal */}
+        {createOpen && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4"
+            onClick={() => setCreateOpen(false)}
+            role="dialog"
+            aria-modal="true"
+            aria-label="New Calendar Event"
           >
-            <div className="flex items-center justify-between">
-              <h3 className="text-[15px] font-semibold">New Calendar Event</h3>
-              <button type="button" onClick={() => setCreateOpen(false)} className="rounded p-1 hover:bg-[var(--bg-hover)]">
-                <X size={15} />
-              </button>
-            </div>
+            <form
+              onSubmit={(e) => void handleCreate(e)}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-md space-y-3.5 rounded-2xl border p-5 shadow-2xl"
+              style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-strong)' }}
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="text-[15.5px] font-semibold tracking-[-0.01em]">New Calendar Event</h3>
+                <button
+                  type="button"
+                  onClick={() => setCreateOpen(false)}
+                  className="rounded-lg p-1.5 transition hover:bg-[var(--bg-hover)]"
+                  style={{ color: 'var(--text-secondary)' }}
+                  title="Close"
+                >
+                  <X size={15} />
+                </button>
+              </div>
 
-            <input
-              required
-              placeholder="Event title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="w-full rounded-lg border bg-transparent px-3 py-2 text-[13px] outline-none"
-              style={{ borderColor: 'var(--border-strong)' }}
-            />
+              <div>
+                <label className="mb-1 block text-[11.5px] font-medium" style={{ color: 'var(--text-muted)' }}>
+                  Title
+                </label>
+                <input
+                  required
+                  autoFocus
+                  placeholder="Event title"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  className="w-full rounded-lg border px-3 py-2 text-[13px] outline-none"
+                  style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
+                />
+              </div>
 
-            <div>
-              <label className="mb-1 block text-[11.5px]" style={{ color: 'var(--text-muted)' }}>
-                Account / Calendar
-              </label>
-              <select
-                value={accountId}
-                onChange={(e) => setAccountId(e.target.value)}
-                className="w-full rounded-lg border px-3 py-2 text-[13px] outline-none"
-                style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
-              >
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name} ({a.email})
-                  </option>
-                ))}
-              </select>
-            </div>
+              <div>
+                <label className="mb-1 block text-[11.5px] font-medium" style={{ color: 'var(--text-muted)' }}>
+                  Account / Calendar
+                </label>
+                <select
+                  value={accountId}
+                  onChange={(e) => setAccountId(e.target.value)}
+                  className="w-full rounded-lg border px-3 py-2 text-[13px] outline-none"
+                  style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
+                >
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name} ({a.email})
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-            <div className="grid grid-cols-3 gap-2">
-              <input
-                type="date"
-                value={dateStr}
-                onChange={(e) => setDateStr(e.target.value)}
-                className="rounded-lg border bg-transparent px-2.5 py-2 text-[12.5px] outline-none"
-                style={{ borderColor: 'var(--border-strong)' }}
-              />
-              <input
-                type="time"
-                value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
-                className="rounded-lg border bg-transparent px-2.5 py-2 text-[12.5px] outline-none"
-                style={{ borderColor: 'var(--border-strong)' }}
-              />
-              <input
-                type="time"
-                value={endTime}
-                onChange={(e) => setEndTime(e.target.value)}
-                className="rounded-lg border bg-transparent px-2.5 py-2 text-[12.5px] outline-none"
-                style={{ borderColor: 'var(--border-strong)' }}
-              />
-            </div>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="mb-1 block text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
+                    Date
+                  </label>
+                  <input
+                    type="date"
+                    value={dateStr}
+                    onChange={(e) => setDateStr(e.target.value)}
+                    className="w-full rounded-lg border px-2.5 py-2 text-[12.5px] tabular-nums outline-none"
+                    style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
+                    Start
+                  </label>
+                  <input
+                    type="time"
+                    value={startTime}
+                    onChange={(e) => setStartTime(e.target.value)}
+                    className="w-full rounded-lg border px-2.5 py-2 text-[12.5px] tabular-nums outline-none"
+                    style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
+                    End
+                  </label>
+                  <input
+                    type="time"
+                    value={endTime}
+                    onChange={(e) => setEndTime(e.target.value)}
+                    className="w-full rounded-lg border px-2.5 py-2 text-[12.5px] tabular-nums outline-none"
+                    style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
+                  />
+                </div>
+              </div>
 
-            <input
-              placeholder="Location or meeting link (optional)"
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              className="w-full rounded-lg border bg-transparent px-3 py-2 text-[13px] outline-none"
-              style={{ borderColor: 'var(--border-strong)' }}
-            />
+              <div>
+                <label className="mb-1 block text-[11.5px] font-medium" style={{ color: 'var(--text-muted)' }}>
+                  Location or meeting link
+                </label>
+                <input
+                  placeholder="Optional"
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  className="w-full rounded-lg border px-3 py-2 text-[13px] outline-none"
+                  style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
+                />
+              </div>
 
-            <textarea
-              rows={2}
-              placeholder="Notes (optional)"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="w-full rounded-lg border bg-transparent px-3 py-2 text-[13px] outline-none"
-              style={{ borderColor: 'var(--border-strong)' }}
-            />
+              <div>
+                <label className="mb-1 block text-[11.5px] font-medium" style={{ color: 'var(--text-muted)' }}>
+                  Notes
+                </label>
+                <textarea
+                  rows={3}
+                  placeholder="Agenda or notes (optional)"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  className="w-full rounded-lg border px-3 py-2 text-[13px] outline-none"
+                  style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
+                />
+              </div>
 
-            <div className="flex justify-end gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => setCreateOpen(false)}
-                className="rounded-lg px-3.5 py-1.5 text-[12.5px] hover:bg-[var(--bg-hover)]"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="rounded-lg px-4 py-1.5 text-[12.5px] font-semibold text-white"
-                style={{ background: 'var(--accent)' }}
-              >
-                Save event
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
+              <div className="flex justify-end gap-2 border-t pt-3" style={{ borderColor: 'var(--border-subtle)' }}>
+                <button
+                  type="button"
+                  onClick={() => setCreateOpen(false)}
+                  className="rounded-lg px-3.5 py-1.5 text-[12.5px] font-medium transition hover:bg-[var(--bg-hover)]"
+                  style={{ color: 'var(--text-secondary)' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-xl px-4 py-1.5 text-[12.5px] font-semibold text-white transition hover:brightness-110"
+                  style={{ background: 'var(--accent)' }}
+                >
+                  Save event
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
       </div>
+
       <ContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} />
     </div>
   )

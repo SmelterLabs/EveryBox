@@ -7,12 +7,19 @@ import { promisify } from 'util'
 import type { GlassmailDB } from '../db/database'
 import type {
   Account,
+  CalendarInvite,
   EmailAddress,
   Folder,
   Message,
   OutlookStoreInfo,
   SendEmailPayload
 } from '../../shared/types'
+import {
+  cleanExtractedUrl,
+  extractMeetingUrl,
+  normalizeAttendeeStatus,
+  normalizeEventDescription
+} from '../calendar/calendar-utils'
 import {
   classifyCategory,
   detectScamWarning,
@@ -248,6 +255,21 @@ interface RawComFolder {
   unreadCount: number
 }
 
+interface RawComMeetingInvite {
+  uid?: string
+  summary?: string
+  location?: string
+  description?: string
+  startIso?: string
+  endIso?: string
+  allDay?: boolean
+  organizerName?: string
+  organizerEmail?: string
+  onlineMeetingUrl?: string
+  method?: string
+  attendees?: { name?: string; email?: string; type?: number; status?: number }[]
+}
+
 interface RawComMessage {
   entryId: string
   conversationId?: string
@@ -268,6 +290,7 @@ interface RawComMessage {
   isDraft: boolean
   hasAttachments?: boolean
   attachments?: { filename: string; size: number; index: number }[]
+  meetingInvite?: RawComMeetingInvite | null
   isOther: boolean
   cached?: boolean
 }
@@ -330,8 +353,10 @@ function Read-FolderMessages($folder, $role, $folderLabel, $limit, $outList) {
     foreach ($item in $items) {
       if ($taken -ge $limit) { break }
       try {
-        # 43 = olMail
-        if ($item.Class -ne 43) { continue }
+        # 43 = olMail; 53 = olMeetingRequest; 54 = olMeetingCancellation; 55-57 = olMeetingResponse*
+        $cls = [int]$item.Class
+        $isMeetingItem = ($cls -in @(53, 54, 55, 56, 57))
+        if ($cls -ne 43 -and -not $isMeetingItem) { continue }
         $taken++
         $entryId = [string]$item.EntryID
 
@@ -437,6 +462,81 @@ function Read-FolderMessages($folder, $role, $folderLabel, $limit, $outList) {
           }
         } catch {}
 
+        $meetingInviteObj = $null
+        if ($isMeetingItem) {
+          try {
+            $appt = $item.GetAssociatedAppointment($false)
+            if ($null -ne $appt) {
+              $mUid = ''
+              try { $mUid = [string]$appt.GlobalAppointmentID } catch {}
+              $mStart = ''
+              try { $mStart = ([DateTime]$appt.Start).ToUniversalTime().ToString('o') } catch {}
+              $mEnd = ''
+              try { $mEnd = ([DateTime]$appt.End).ToUniversalTime().ToString('o') } catch {}
+              $mOrgName = ''
+              $mOrgEmail = ''
+              try { $mOrgName = [string]$appt.Organizer } catch {}
+              try {
+                $oe = $appt.GetOrganizer()
+                if ($null -ne $oe) {
+                  try { $mOrgEmail = [string]$oe.PropertyAccessor.GetProperty('http://schemas.microsoft.com/mapi/proptag/0x39FE001E') } catch {}
+                  if (-not $mOrgEmail) {
+                    try { $ex = $oe.GetExchangeUser(); if ($null -ne $ex) { $mOrgEmail = [string]$ex.PrimarySmtpAddress } } catch {}
+                  }
+                }
+              } catch {}
+              $mUrl = ''
+              foreach ($pu in @(
+                'http://schemas.microsoft.com/mapi/string/{00020329-0000-0000-C000-000000000046}/SkypeTeamsMeetingUrl',
+                'http://schemas.microsoft.com/mapi/string/{00020329-0000-0000-C000-000000000046}/OnlineMeetingExternalLink'
+              )) {
+                if (-not $mUrl) {
+                  try {
+                    $v = [string]$appt.PropertyAccessor.GetProperty($pu)
+                    if ($v -and $v -match '^https?://') { $mUrl = $v }
+                  } catch {}
+                }
+              }
+              $mAtts = New-Object System.Collections.ArrayList
+              try {
+                foreach ($mr in $appt.Recipients) {
+                  try {
+                    $ma = ''
+                    try { $ma = [string]$mr.PropertyAccessor.GetProperty('http://schemas.microsoft.com/mapi/proptag/0x39FE001E') } catch {}
+                    if (-not $ma) {
+                      try { $mex = $mr.AddressEntry.GetExchangeUser(); if ($null -ne $mex) { $ma = [string]$mex.PrimarySmtpAddress } } catch {}
+                    }
+                    if (-not $ma) { try { $ra = [string]$mr.Address; if ($ra -and -not $ra.StartsWith('/')) { $ma = $ra } } catch {} }
+                    $ms = 0; try { $ms = [int]$mr.MeetingResponseStatus } catch {}
+                    $mt = 1; try { $mt = [int]$mr.Type } catch {}
+                    $null = $mAtts.Add([PSCustomObject]@{ name = [string]$mr.Name; email = $ma; type = $mt; status = $ms })
+                  } catch {}
+                }
+              } catch {}
+              $mMethod = if ($cls -eq 54) { 'CANCEL' } elseif ($cls -eq 53) { 'REQUEST' } else { 'REPLY' }
+              $mBody = ''
+              try {
+                $mBody = [string]$appt.Body
+                if ($mBody.Length -gt 8000) { $mBody = $mBody.Substring(0, 8000) }
+              } catch {}
+              $meetingInviteObj = [PSCustomObject]@{
+                uid              = $mUid
+                summary          = [string]$appt.Subject
+                location         = [string]$appt.Location
+                description      = $mBody
+                startIso         = $mStart
+                endIso           = $mEnd
+                allDay           = [bool]$appt.AllDayEvent
+                organizerName    = $mOrgName
+                organizerEmail   = $mOrgEmail
+                onlineMeetingUrl = $mUrl
+                method           = $mMethod
+                attendees        = @($mAtts)
+              }
+            }
+          } catch {}
+        }
+
         $null = $outList.Add([PSCustomObject]@{
           entryId           = $entryId
           conversationId    = $convId
@@ -457,6 +557,7 @@ function Read-FolderMessages($folder, $role, $folderLabel, $limit, $outList) {
           isDraft           = ($role -eq 'drafts')
           hasAttachments    = $hasAtt
           attachments       = @($attList)
+          meetingInvite     = $meetingInviteObj
           isOther           = $isOther
           cached            = $false
         })
@@ -669,6 +770,44 @@ try {
         ? [m.attachments as { filename: string; size: number; index: number }]
         : []
 
+    let calendarInvite: CalendarInvite | undefined
+    if (m.meetingInvite && (m.meetingInvite.startIso || m.meetingInvite.summary)) {
+      const mi = m.meetingInvite
+      const rawAttList = Array.isArray(mi.attendees) ? mi.attendees : []
+      const normalized = normalizeEventDescription(mi.description || m.bodyText || '', m.bodyHtml || undefined)
+      const meetingUrl =
+        (mi.onlineMeetingUrl && /^https?:\/\//i.test(mi.onlineMeetingUrl)
+          ? cleanExtractedUrl(mi.onlineMeetingUrl)
+          : undefined) ||
+        extractMeetingUrl(`${mi.location || ''}\n${normalized.description}`, normalized.descriptionHtml)
+
+      calendarInvite = {
+        uid: mi.uid || m.entryId,
+        summary: mi.summary || m.subject || 'Calendar Invitation',
+        description: normalized.description || undefined,
+        descriptionHtml: normalized.descriptionHtml,
+        location: mi.location || undefined,
+        meetingUrl,
+        startIso: mi.startIso || new Date(dateMs).toISOString(),
+        endIso: mi.endIso || new Date(dateMs + 3600_000).toISOString(),
+        allDay: Boolean(mi.allDay),
+        organizerName: mi.organizerName || from.name || undefined,
+        organizerEmail: mi.organizerEmail || from.email || undefined,
+        attendees: rawAttList
+          .filter((a) => a.email || a.name)
+          .map((a) => ({
+            name: a.name || undefined,
+            email: a.email || '',
+            status: normalizeAttendeeStatus(a.status),
+            optional: a.type === 2 ? true : undefined,
+            organizer: a.status === 1 ? true : undefined
+          })),
+        method: mi.method,
+        status: mi.method === 'CANCEL' ? 'CANCELLED' : 'NEEDS-ACTION',
+        rawIcs: ''
+      }
+    }
+
     const msg: Message = {
       id: msgId,
       accountId: account.id,
@@ -704,7 +843,8 @@ try {
       })),
       signInCode,
       trackersBlocked,
-      scamWarning
+      scamWarning,
+      calendarInvite
     }
 
     db.upsertMessageAndThread(msg, remoteThreadId)

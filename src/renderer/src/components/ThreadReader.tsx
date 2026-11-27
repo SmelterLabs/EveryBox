@@ -17,6 +17,7 @@ import {
   Home,
   Inbox,
   Mail,
+  MapPin,
   Paperclip,
   RefreshCw,
   Reply,
@@ -28,6 +29,8 @@ import {
   Sparkles,
   Star,
   Trash2,
+  Users,
+  Video,
   X
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
@@ -1375,56 +1378,182 @@ export const ThreadReader: React.FC<{ isPopout?: boolean }> = ({ isPopout = fals
                   </div>
 
                   {/* .ics Calendar Invite Card */}
-                  {m.calendarInvite && (
-                    <div
-                      className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3.5"
-                      style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-strong)' }}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div
-                          className="flex h-9 w-9 items-center justify-center rounded-lg"
-                          style={{ background: 'var(--accent-soft)', color: 'var(--accent-text)' }}
-                        >
-                          <Calendar size={18} />
-                        </div>
-                        <div>
-                          <div className="text-[13px] font-semibold">{m.calendarInvite.summary}</div>
-                          <div className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>
-                            {new Date(m.calendarInvite.startIso).toLocaleString()}
-                            {m.calendarInvite.location ? ` · ${m.calendarInvite.location}` : ''}
+                  {m.calendarInvite && (() => {
+                    const inv = m.calendarInvite
+                    const startDt = new Date(inv.startIso)
+                    const endDt = new Date(inv.endIso)
+                    const timeLabel = inv.allDay
+                      ? `${startDt.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })} · All day`
+                      : formatImplicitEventTime(inv.startIso, inv.endIso)
+                    const locIsUrl = Boolean(inv.location && /^https?:\/\//i.test(inv.location.trim()))
+                    const organizerLabel = inv.organizerName || inv.organizerEmail
+                    const attendeeCount = inv.attendees?.length || 0
+                    const descPreview = inv.description?.trim()
+                    const isCancelled = inv.status === 'CANCELLED' || inv.method === 'CANCEL'
+                    return (
+                      <div
+                        className="mt-4 rounded-xl border p-3.5"
+                        style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-strong)' }}
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="flex min-w-0 flex-1 items-start gap-3">
+                            <div
+                              className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+                              style={{ background: 'var(--accent-soft)', color: 'var(--accent-text)' }}
+                            >
+                              <Calendar size={18} />
+                            </div>
+                            <div className="min-w-0 flex-1 space-y-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span
+                                  className={`text-[13px] font-semibold ${isCancelled ? 'line-through opacity-75' : ''}`}
+                                >
+                                  {inv.summary}
+                                </span>
+                                {isCancelled && (
+                                  <span
+                                    className="rounded-full px-2 py-0.5 text-[10.5px] font-semibold"
+                                    style={{ background: 'rgba(239,68,68,0.14)', color: 'var(--danger)' }}
+                                  >
+                                    Cancelled
+                                  </span>
+                                )}
+                                {inv.calendarEventId && !isCancelled && (
+                                  <span
+                                    className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-medium"
+                                    style={{ background: 'var(--accent-soft)', color: 'var(--accent-text)' }}
+                                  >
+                                    <Check size={10} /> On your calendar
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]" style={{ color: 'var(--text-secondary)' }}>
+                                <span className="inline-flex items-center gap-1">
+                                  <Clock size={12} style={{ color: 'var(--text-muted)' }} />
+                                  {timeLabel}
+                                </span>
+                                {organizerLabel && (
+                                  <span style={{ color: 'var(--text-muted)' }}>
+                                    Organizer: <span style={{ color: 'var(--text-secondary)' }}>{organizerLabel}</span>
+                                  </span>
+                                )}
+                              </div>
+                              {inv.location && (
+                                <div className="flex items-center gap-1.5 text-[12px]" style={{ color: 'var(--text-secondary)' }}>
+                                  <MapPin size={12} className="shrink-0" style={{ color: 'var(--text-muted)' }} />
+                                  {locIsUrl ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => void window.glassmail.openExternal(inv.location!.trim())}
+                                      className="truncate underline hover:opacity-80"
+                                      style={{ color: 'var(--accent-text)' }}
+                                    >
+                                      {inv.location}
+                                    </button>
+                                  ) : (
+                                    <span className="truncate">{inv.location}</span>
+                                  )}
+                                </div>
+                              )}
+                              {attendeeCount > 0 && (
+                                <div className="flex items-center gap-1.5 text-[11.5px]" style={{ color: 'var(--text-muted)' }}>
+                                  <Users size={12} className="shrink-0" />
+                                  <span className="truncate">
+                                    {attendeeCount} {attendeeCount === 1 ? 'attendee' : 'attendees'}:{' '}
+                                    {inv.attendees!
+                                      .slice(0, 4)
+                                      .map((a) => a.name || a.email)
+                                      .join(', ')}
+                                    {attendeeCount > 4 ? ` +${attendeeCount - 4} more` : ''}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                            {inv.meetingUrl && !isCancelled && (
+                              <button
+                                type="button"
+                                onClick={() => void window.glassmail.openExternal(inv.meetingUrl!)}
+                                className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90"
+                                style={{ background: 'var(--accent)' }}
+                              >
+                                <Video size={13} /> Join Meeting
+                              </button>
+                            )}
+                            {!isCancelled && !inv.calendarEventId && (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  await window.glassmail.createCalendarEvent({
+                                    accountId: m.accountId,
+                                    title: inv.summary,
+                                    location: inv.location,
+                                    description: inv.description,
+                                    startAt: startDt.getTime(),
+                                    endAt: endDt.getTime(),
+                                    allDay: Boolean(inv.allDay),
+                                    attendees: (inv.attendees || []).map((a) => a.email).filter(Boolean)
+                                  })
+                                  await refreshTodayEvents()
+                                  showToast('Added invite to your combined calendar')
+                                }}
+                                className="rounded-lg px-3 py-1.5 text-[12px] font-semibold transition hover:opacity-90"
+                                style={
+                                  inv.meetingUrl
+                                    ? {
+                                        background: 'var(--bg-main)',
+                                        color: 'var(--text-primary)',
+                                        border: '1px solid var(--border-strong)'
+                                      }
+                                    : { background: 'var(--accent)', color: '#ffffff' }
+                                }
+                              >
+                                Accept &amp; Add
+                              </button>
+                            )}
+                            {!isCancelled && (
+                              <button
+                                type="button"
+                                onClick={() => handleReply('reply', m)}
+                                className="rounded-lg border px-2.5 py-1.5 text-[12px] hover:bg-[var(--bg-hover)]"
+                                style={{ borderColor: 'var(--border-strong)' }}
+                              >
+                                Decline
+                              </button>
+                            )}
                           </div>
                         </div>
+                        {descPreview && (
+                          <div
+                            className="mt-2.5 max-h-28 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border px-3 py-2 text-[12px] leading-relaxed"
+                            style={{
+                              background: 'var(--bg-main)',
+                              borderColor: 'var(--border-subtle)',
+                              color: 'var(--text-secondary)'
+                            }}
+                          >
+                            {descPreview.slice(0, 600).split(/(https?:\/\/[^\s<>"]+)/g).map((part, idx) =>
+                              /^https?:\/\//i.test(part) ? (
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  onClick={() => void window.glassmail.openExternal(part)}
+                                  className="inline break-all underline hover:opacity-80"
+                                  style={{ color: 'var(--accent-text)' }}
+                                >
+                                  {part}
+                                </button>
+                              ) : (
+                                <React.Fragment key={idx}>{part}</React.Fragment>
+                              )
+                            )}
+                            {descPreview.length > 600 ? '…' : ''}
+                          </div>
+                        )}
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={async () => {
-                            await window.glassmail.createCalendarEvent({
-                              accountId: m.accountId,
-                              title: m.calendarInvite!.summary,
-                              location: m.calendarInvite!.location,
-                              description: m.calendarInvite!.description,
-                              startAt: new Date(m.calendarInvite!.startIso).getTime(),
-                              endAt: new Date(m.calendarInvite!.endIso).getTime(),
-                              allDay: false
-                            })
-                            await refreshTodayEvents()
-                            showToast('Added invite to your combined calendar')
-                          }}
-                          className="rounded-lg px-3 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90"
-                          style={{ background: 'var(--accent)' }}
-                        >
-                          Accept &amp; Add
-                        </button>
-                        <button
-                          onClick={() => handleReply('reply', m)}
-                          className="rounded-lg border px-2.5 py-1.5 text-[12px] hover:bg-[var(--bg-hover)]"
-                          style={{ borderColor: 'var(--border-strong)' }}
-                        >
-                          Decline
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                    )
+                  })()}
 
                   {/* Attachments (prominent, right above body like Outlook) */}
                   <AttachmentBar

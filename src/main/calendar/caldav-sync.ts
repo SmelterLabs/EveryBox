@@ -3,14 +3,9 @@ import { createDAVClient } from 'tsdav'
 import type { GlassmailDB } from '../db/database'
 import type { SecretStore } from '../security/secrets'
 import type { Account, CalendarEvent, CreateCalendarEventPayload } from '../../shared/types'
+import { extractIcsVEventDetails, extractMeetingUrl, normalizeEventDescription } from './calendar-utils'
 
-const MEETING_URL_REGEX =
-  /https?:\/\/(?:[\w.-]*zoom\.us\/j\/[^\s<>"]+|meet\.google\.com\/[a-z-]+|teams\.microsoft\.com\/l\/meetup-join\/[^\s<>"]+|[\w.-]*webex\.com\/[^\s<>"]+)/i
-
-export function extractMeetingUrl(text: string): string | undefined {
-  const match = text.match(MEETING_URL_REGEX)
-  return match ? match[0] : undefined
-}
+export { extractMeetingUrl }
 
 export function ingestIcsText(
   icsText: string,
@@ -29,17 +24,21 @@ export function ingestIcsText(
     const windowStart = Date.now() - 180 * 24 * 3600 * 1000
     const windowEnd = Date.now() + 365 * 24 * 3600 * 1000
 
+    // Process master/regular VEVENTs first, then RECURRENCE-ID override VEVENTs so overrides win cleanly.
+    const masters: ICAL.Component[] = []
+    const overrides: ICAL.Component[] = []
     for (const vevent of vevents) {
-      const ev = new ICAL.Event(vevent)
-      if (!ev.startDate) continue
-      const uid = ev.uid || `${ev.startDate.toJSDate().getTime()}-${ev.summary || 'event'}`
-      const meetingUrl = extractMeetingUrl(`${ev.location || ''}\n${ev.description || ''}`)
+      if (vevent.getFirstProperty('recurrence-id')) overrides.push(vevent)
+      else masters.push(vevent)
+    }
 
-      if (ev.isRecurring()) {
-        const durationMs =
-          ev.endDate && ev.startDate
-            ? Math.max(ev.endDate.toJSDate().getTime() - ev.startDate.toJSDate().getTime(), 15 * 60_000)
-            : 3600_000
+    for (const vevent of [...masters, ...overrides]) {
+      const details = extractIcsVEventDetails(vevent)
+      if (!details) continue
+      const ev = new ICAL.Event(vevent)
+
+      if (details.isRecurring && details.recurrenceIdMs === undefined) {
+        const durationMs = Math.max(details.endAt - details.startAt, 15 * 60_000)
         const iter = ev.iterator()
         let next = iter.next()
         let guard = 0
@@ -49,20 +48,24 @@ export function ingestIcsText(
           if (occStart > windowEnd) break
           if (occStart >= windowStart) {
             db.upsertCalendarEvent({
-              id: `${account.id}|${source}|${calendarId}|${uid}|${occStart}`,
+              id: `${account.id}|${source}|${calendarId}|${details.uid}|${occStart}`,
               accountId: account.id,
               calendarId,
               calendarName,
-              remoteId: uid,
-              title: ev.summary || '(No title)',
-              description: ev.description || '',
-              location: ev.location || '',
-              meetingUrl,
+              remoteId: details.uid,
+              title: details.title,
+              description: details.description,
+              descriptionHtml: details.descriptionHtml,
+              location: details.location,
+              meetingUrl: details.meetingUrl,
+              htmlLink: details.htmlLink,
+              organizer: details.organizer,
               startAt: occStart,
               endAt: occStart + durationMs,
-              allDay: ev.startDate.isDate,
-              attendees: [],
-              status: 'confirmed',
+              allDay: details.allDay,
+              attendees: details.attendees,
+              attachments: details.attachments,
+              status: details.status,
               source,
               readOnly
             })
@@ -71,23 +74,27 @@ export function ingestIcsText(
           next = iter.next()
         }
       } else {
-        const startAt = ev.startDate.toJSDate().getTime()
-        const endAt = ev.endDate ? ev.endDate.toJSDate().getTime() : startAt + 3600_000
+        const idSuffix =
+          details.recurrenceIdMs !== undefined ? `|${details.recurrenceIdMs}` : ''
         db.upsertCalendarEvent({
-          id: `${account.id}|${source}|${calendarId}|${uid}`,
+          id: `${account.id}|${source}|${calendarId}|${details.uid}${idSuffix}`,
           accountId: account.id,
           calendarId,
           calendarName,
-          remoteId: uid,
-          title: ev.summary || '(No title)',
-          description: ev.description || '',
-          location: ev.location || '',
-          meetingUrl,
-          startAt,
-          endAt,
-          allDay: ev.startDate.isDate,
-          attendees: [],
-          status: 'confirmed',
+          remoteId: details.uid,
+          title: details.title,
+          description: details.description,
+          descriptionHtml: details.descriptionHtml,
+          location: details.location,
+          meetingUrl: details.meetingUrl,
+          htmlLink: details.htmlLink,
+          organizer: details.organizer,
+          startAt: details.startAt,
+          endAt: details.endAt,
+          allDay: details.allDay,
+          attendees: details.attendees,
+          attachments: details.attachments,
+          status: details.status,
           source,
           readOnly
         })
@@ -128,6 +135,12 @@ export function exportEventsToIcs(events: CalendarEvent[]): string {
     lines.push(`SUMMARY:${escapeIcsText(ev.title || '(No title)')}`)
     if (ev.location) lines.push(`LOCATION:${escapeIcsText(ev.location)}`)
     if (ev.description) lines.push(`DESCRIPTION:${escapeIcsText(ev.description)}`)
+    if (ev.meetingUrl || ev.htmlLink) lines.push(`URL:${ev.meetingUrl || ev.htmlLink}`)
+    if (ev.organizer?.email) {
+      const cn = ev.organizer.name ? `;CN=${escapeIcsText(ev.organizer.name)}` : ''
+      lines.push(`ORGANIZER${cn}:mailto:${ev.organizer.email}`)
+    }
+    if (ev.status) lines.push(`STATUS:${ev.status.toUpperCase()}`)
     lines.push('END:VEVENT')
   }
 
@@ -216,20 +229,20 @@ export async function createCalDavEvent(
   const target = calendars.find((c) => c.url === payload.calendarId) || calendars[0]
   if (!target?.url) return { ok: false }
 
-  const uid = `glassmail-${Date.now()}@local`
+  const uid = `everybox-${Date.now()}@local`
   const fmt = (ms: number) => new Date(ms).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z'
   const iCalString = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//Glassmail Windows//EN',
+    'PRODID:-//EveryBox//Calendar//EN',
     'BEGIN:VEVENT',
     `UID:${uid}`,
     `DTSTAMP:${fmt(Date.now())}`,
     `DTSTART:${fmt(payload.startAt)}`,
     `DTEND:${fmt(payload.endAt)}`,
-    `SUMMARY:${payload.title}`,
-    ...(payload.location ? [`LOCATION:${payload.location}`] : []),
-    ...(payload.description ? [`DESCRIPTION:${payload.description.replace(/\n/g, '\\n')}`] : []),
+    `SUMMARY:${escapeIcsText(payload.title)}`,
+    ...(payload.location ? [`LOCATION:${escapeIcsText(payload.location)}`] : []),
+    ...(payload.description ? [`DESCRIPTION:${escapeIcsText(payload.description)}`] : []),
     'END:VEVENT',
     'END:VCALENDAR'
   ].join('\r\n')
@@ -241,6 +254,8 @@ export async function createCalDavEvent(
   })
 
   const id = `${account.id}|caldav|${target.url}|${uid}`
+  const { description, descriptionHtml } = normalizeEventDescription(payload.description || '')
+  const meetingUrl = extractMeetingUrl(`${payload.location || ''}\n${description}`, descriptionHtml)
   db.upsertCalendarEvent({
     id,
     accountId: account.id,
@@ -248,12 +263,15 @@ export async function createCalDavEvent(
     calendarName: String(target.displayName || 'CalDAV'),
     remoteId: uid,
     title: payload.title,
-    description: payload.description || '',
+    description,
+    descriptionHtml,
     location: payload.location || '',
+    meetingUrl,
+    organizer: { name: account.name || undefined, email: account.email },
     startAt: payload.startAt,
     endAt: payload.endAt,
     allDay: payload.allDay,
-    attendees: [],
+    attendees: (payload.attendees || []).map((email) => ({ email })),
     status: 'confirmed',
     source: 'caldav',
     readOnly: false

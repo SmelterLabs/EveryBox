@@ -1,5 +1,6 @@
 import ICAL from 'ical.js'
 import type { CalendarInvite, EmailAddress } from '../../shared/types'
+import { extractIcsVEventDetails } from '../calendar/calendar-utils'
 
 const AUTOMATED_LOCAL_PARTS = [
   'noreply',
@@ -240,27 +241,46 @@ export function parseListUnsubscribe(headerValue?: string): { url?: string; mail
   return { url, mailto }
 }
 
-export function parseIcsInvite(rawIcs: string): CalendarInvite | undefined {
+export function parseIcsInvite(rawIcs: string, accountEmail?: string): CalendarInvite | undefined {
   try {
     const jcal = ICAL.parse(rawIcs)
     const comp = new ICAL.Component(jcal)
     const vevent = comp.getFirstSubcomponent('vevent')
     if (!vevent) return undefined
-    const ev = new ICAL.Event(vevent)
-    const organizerProp = vevent.getFirstProperty('organizer')
-    const organizerVal = organizerProp ? String(organizerProp.getFirstValue() || '').replace(/^mailto:/i, '') : undefined
-    const organizerCn = organizerProp?.getParameter('cn') ? String(organizerProp.getParameter('cn')) : undefined
+    const details = extractIcsVEventDetails(vevent)
+    if (!details) return undefined
+
+    const methodVal = comp.getFirstPropertyValue('method')
+    const method = methodVal ? String(methodVal).toUpperCase() : undefined
+
+    let status: CalendarInvite['status'] = 'NEEDS-ACTION'
+    if (method === 'CANCEL' || details.status === 'cancelled') {
+      status = 'CANCELLED'
+    } else if (accountEmail) {
+      const selfAtt = details.attendees.find(
+        (a) => a.email && a.email.toLowerCase() === accountEmail.toLowerCase()
+      )
+      if (selfAtt?.status === 'accepted') status = 'ACCEPTED'
+      else if (selfAtt?.status === 'declined') status = 'DECLINED'
+      else if (selfAtt?.status === 'tentative') status = 'TENTATIVE'
+    }
 
     return {
-      uid: ev.uid || `ics-${Date.now()}`,
-      summary: ev.summary || 'Calendar Invitation',
-      description: ev.description || undefined,
-      location: ev.location || undefined,
-      startIso: ev.startDate ? ev.startDate.toJSDate().toISOString() : new Date().toISOString(),
-      endIso: ev.endDate ? ev.endDate.toJSDate().toISOString() : new Date(Date.now() + 3600000).toISOString(),
-      organizerEmail: organizerVal,
-      organizerName: organizerCn,
-      status: 'NEEDS-ACTION',
+      uid: details.uid || `ics-${Date.now()}`,
+      summary: details.title === '(No title)' ? 'Calendar Invitation' : details.title,
+      description: details.description || undefined,
+      descriptionHtml: details.descriptionHtml,
+      location: details.location || undefined,
+      meetingUrl: details.meetingUrl,
+      startIso: new Date(details.startAt).toISOString(),
+      endIso: new Date(details.endAt).toISOString(),
+      allDay: details.allDay,
+      organizerEmail: details.organizer?.email || undefined,
+      organizerName: details.organizer?.name || undefined,
+      attendees: details.attendees.length > 0 ? details.attendees : undefined,
+      attachments: details.attachments.length > 0 ? details.attachments : undefined,
+      method,
+      status,
       rawIcs
     }
   } catch {

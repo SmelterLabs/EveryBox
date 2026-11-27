@@ -309,8 +309,11 @@ export class GlassmailDB {
         remote_id TEXT NOT NULL,
         title TEXT NOT NULL,
         description TEXT DEFAULT '',
+        description_html TEXT,
         location TEXT DEFAULT '',
         meeting_url TEXT,
+        html_link TEXT,
+        organizer_json TEXT,
         start_at INTEGER NOT NULL,
         end_at INTEGER NOT NULL,
         all_day INTEGER DEFAULT 0,
@@ -500,6 +503,21 @@ export class GlassmailDB {
     // Safe additive schema migrations for existing user databases
     try {
       this.db.exec(`ALTER TABLE calendar_events ADD COLUMN attachments_json TEXT DEFAULT '[]'`)
+    } catch {
+      // Column already exists
+    }
+    try {
+      this.db.exec(`ALTER TABLE calendar_events ADD COLUMN description_html TEXT`)
+    } catch {
+      // Column already exists
+    }
+    try {
+      this.db.exec(`ALTER TABLE calendar_events ADD COLUMN organizer_json TEXT`)
+    } catch {
+      // Column already exists
+    }
+    try {
+      this.db.exec(`ALTER TABLE calendar_events ADD COLUMN html_link TEXT`)
     } catch {
       // Column already exists
     }
@@ -1612,7 +1630,12 @@ export class GlassmailDB {
         scamWarning: m.scam_warning ? String(m.scam_warning) : undefined,
         unsubscribeUrl: m.unsubscribe_url ? String(m.unsubscribe_url) : undefined,
         unsubscribeMailto: m.unsubscribe_mailto ? String(m.unsubscribe_mailto) : undefined,
-        calendarInvite: m.calendar_invite_json ? JSON.parse(String(m.calendar_invite_json)) : undefined
+        calendarInvite: m.calendar_invite_json
+          ? this.enrichCalendarInvite(
+              String(m.account_id),
+              JSON.parse(String(m.calendar_invite_json))
+            )
+          : undefined
       }
     })
 
@@ -2217,23 +2240,69 @@ export class GlassmailDB {
   }
 
   // ---- Calendar Events ----
+  private mapCalendarEventRow(r: Record<string, unknown>): CalendarEvent {
+    let organizer: CalendarEvent['organizer']
+    if (r.organizer_json) {
+      try {
+        const parsed = JSON.parse(String(r.organizer_json))
+        if (parsed && (parsed.email || parsed.name)) organizer = parsed
+      } catch {
+        // ignore malformed organizer json
+      }
+    }
+    return {
+      id: String(r.id),
+      accountId: String(r.account_id),
+      accountColor: String(r.account_color),
+      accountIcon: r.account_icon ? (String(r.account_icon) as CalendarEvent['accountIcon']) : undefined,
+      accountEmail: String(r.account_email),
+      calendarId: String(r.calendar_id),
+      calendarName: String(r.calendar_name),
+      remoteId: String(r.remote_id),
+      title: String(r.title),
+      description: r.description ? String(r.description) : undefined,
+      descriptionHtml: r.description_html ? String(r.description_html) : undefined,
+      location: r.location ? String(r.location) : undefined,
+      meetingUrl: r.meeting_url ? String(r.meeting_url) : undefined,
+      htmlLink: r.html_link ? String(r.html_link) : undefined,
+      organizer,
+      startAt: Number(r.start_at),
+      endAt: Number(r.end_at),
+      allDay: Boolean(r.all_day),
+      attendees: JSON.parse(String(r.attendees_json || '[]')),
+      attachments: JSON.parse(String(r.attachments_json || '[]')),
+      status: r.status as CalendarEvent['status'],
+      source: r.source as CalendarEvent['source'],
+      readOnly: Boolean(r.read_only)
+    }
+  }
+
   upsertCalendarEvent(ev: Omit<CalendarEvent, 'accountColor' | 'accountEmail'>): void {
+    const attendeesJson = JSON.stringify(ev.attendees || [])
+    const attachmentsJson = JSON.stringify(ev.attachments || [])
+    const organizerJson = ev.organizer && (ev.organizer.email || ev.organizer.name) ? JSON.stringify(ev.organizer) : null
+
     this.db
       .prepare(`
         INSERT INTO calendar_events (
-          id, account_id, calendar_id, calendar_name, remote_id, title, description,
-          location, meeting_url, start_at, end_at, all_day, attendees_json, attachments_json, status, source, read_only
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          id, account_id, calendar_id, calendar_name, remote_id, title, description, description_html,
+          location, meeting_url, html_link, organizer_json, start_at, end_at, all_day,
+          attendees_json, attachments_json, status, source, read_only
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
-          title = excluded.title,
-          description = excluded.description,
-          location = excluded.location,
-          meeting_url = excluded.meeting_url,
+          calendar_name = CASE WHEN excluded.calendar_name != '' THEN excluded.calendar_name ELSE calendar_events.calendar_name END,
+          title = CASE WHEN excluded.title != '' THEN excluded.title ELSE calendar_events.title END,
+          description = CASE WHEN excluded.description != '' THEN excluded.description ELSE calendar_events.description END,
+          description_html = COALESCE(NULLIF(excluded.description_html, ''), calendar_events.description_html),
+          location = CASE WHEN excluded.location != '' THEN excluded.location ELSE calendar_events.location END,
+          meeting_url = COALESCE(NULLIF(excluded.meeting_url, ''), calendar_events.meeting_url),
+          html_link = COALESCE(NULLIF(excluded.html_link, ''), calendar_events.html_link),
+          organizer_json = COALESCE(NULLIF(excluded.organizer_json, ''), calendar_events.organizer_json),
           start_at = excluded.start_at,
           end_at = excluded.end_at,
           all_day = excluded.all_day,
-          attendees_json = excluded.attendees_json,
-          attachments_json = excluded.attachments_json,
+          attendees_json = CASE WHEN excluded.attendees_json != '[]' THEN excluded.attendees_json ELSE calendar_events.attendees_json END,
+          attachments_json = CASE WHEN excluded.attachments_json != '[]' THEN excluded.attachments_json ELSE calendar_events.attachments_json END,
           status = excluded.status
       `)
       .run(
@@ -2244,13 +2313,16 @@ export class GlassmailDB {
         ev.remoteId,
         ev.title,
         ev.description ?? '',
+        ev.descriptionHtml ?? null,
         ev.location ?? '',
         ev.meetingUrl ?? null,
+        ev.htmlLink ?? null,
+        organizerJson,
         ev.startAt,
         ev.endAt,
         ev.allDay ? 1 : 0,
-        JSON.stringify(ev.attendees || []),
-        JSON.stringify(ev.attachments || []),
+        attendeesJson,
+        attachmentsJson,
         ev.status,
         ev.source,
         ev.readOnly ? 1 : 0
@@ -2274,27 +2346,91 @@ export class GlassmailDB {
       `)
       .all(...params) as Record<string, unknown>[]
 
-    return rows.map((r) => ({
-      id: String(r.id),
-      accountId: String(r.account_id),
-      accountColor: String(r.account_color),
-      accountEmail: String(r.account_email),
-      calendarId: String(r.calendar_id),
-      calendarName: String(r.calendar_name),
-      remoteId: String(r.remote_id),
-      title: String(r.title),
-      description: r.description ? String(r.description) : undefined,
-      location: r.location ? String(r.location) : undefined,
-      meetingUrl: r.meeting_url ? String(r.meeting_url) : undefined,
-      startAt: Number(r.start_at),
-      endAt: Number(r.end_at),
-      allDay: Boolean(r.all_day),
-      attendees: JSON.parse(String(r.attendees_json || '[]')),
-      attachments: JSON.parse(String(r.attachments_json || '[]')),
-      status: r.status as CalendarEvent['status'],
-      source: r.source as CalendarEvent['source'],
-      readOnly: Boolean(r.read_only)
-    }))
+    return rows.map((r) => this.mapCalendarEventRow(r))
+  }
+
+  findCalendarEventForInvite(
+    accountId: string,
+    uid?: string,
+    startAt?: number,
+    title?: string
+  ): CalendarEvent | null {
+    // 1. Match by UID / Google base event ID (e.g. "abc123@google.com" -> remote_id "abc123" or "abc123_2026...")
+    const cleanUid = (uid || '').trim()
+    if (cleanUid) {
+      const baseUid = cleanUid.replace(/@google\.com$/i, '')
+      const rows = this.db
+        .prepare(`
+          SELECT e.*, a.color AS account_color, a.icon AS account_icon, a.email AS account_email
+          FROM calendar_events e
+          JOIN accounts a ON a.id = e.account_id
+          WHERE e.remote_id = ? OR e.remote_id = ? OR e.remote_id LIKE ?
+          ORDER BY (e.account_id = ?) DESC, ABS(e.start_at - ?) ASC
+          LIMIT 1
+        `)
+        .all(cleanUid, baseUid, `${baseUid}_%`, accountId, startAt ?? 0) as Record<string, unknown>[]
+      if (rows.length > 0) return this.mapCalendarEventRow(rows[0])
+    }
+
+    // 2. Fallback: match by start time (±5 min) + normalized title
+    if (startAt && Number.isFinite(startAt) && title && title.trim()) {
+      const normTitle = title.trim().toLowerCase()
+      const windowMs = 5 * 60_000
+      const rows = this.db
+        .prepare(`
+          SELECT e.*, a.color AS account_color, a.icon AS account_icon, a.email AS account_email
+          FROM calendar_events e
+          JOIN accounts a ON a.id = e.account_id
+          WHERE e.start_at BETWEEN ? AND ? AND LOWER(TRIM(e.title)) = ?
+          ORDER BY (e.account_id = ?) DESC
+          LIMIT 1
+        `)
+        .all(startAt - windowMs, startAt + windowMs, normTitle, accountId) as Record<string, unknown>[]
+      if (rows.length > 0) return this.mapCalendarEventRow(rows[0])
+    }
+
+    return null
+  }
+
+  private enrichCalendarInvite(
+    accountId: string,
+    invite: import('../../shared/types').CalendarInvite
+  ): import('../../shared/types').CalendarInvite {
+    try {
+      const startMs = Date.parse(invite.startIso)
+      const matched = this.findCalendarEventForInvite(
+        accountId,
+        invite.uid,
+        Number.isFinite(startMs) ? startMs : undefined,
+        invite.summary
+      )
+      if (!matched) return invite
+      return {
+        ...invite,
+        summary: matched.title || invite.summary,
+        description:
+          matched.description && matched.description.length > (invite.description?.length || 0)
+            ? matched.description
+            : invite.description || matched.description,
+        descriptionHtml: invite.descriptionHtml || matched.descriptionHtml,
+        location: invite.location || matched.location,
+        meetingUrl: invite.meetingUrl || matched.meetingUrl,
+        allDay: invite.allDay ?? matched.allDay,
+        organizerEmail: invite.organizerEmail || matched.organizer?.email,
+        organizerName: invite.organizerName || matched.organizer?.name,
+        attendees:
+          matched.attendees && matched.attendees.length > (invite.attendees?.length || 0)
+            ? matched.attendees
+            : invite.attendees || matched.attendees,
+        attachments:
+          matched.attachments && matched.attachments.length > (invite.attachments?.length || 0)
+            ? matched.attachments
+            : invite.attachments || matched.attachments,
+        calendarEventId: matched.id
+      }
+    } catch {
+      return invite
+    }
   }
 
   deleteCalendarEvent(id: string): void {
