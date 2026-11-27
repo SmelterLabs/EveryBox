@@ -71,6 +71,7 @@ export const App: React.FC = () => {
     toggleCheckThread,
     clearCheckedThreads,
     clearToast,
+    performUndo,
     refreshHabits,
     acceptHabitSuggestion,
     dismissHabitSuggestion,
@@ -245,17 +246,17 @@ export const App: React.FC = () => {
         return
       }
 
-      if (inInput || activeView === 'triage') return
+      if (inInput) return
 
-      const actionTargets = checkedThreadIds.length > 0 ? checkedThreadIds : selectedThreadId ? [selectedThreadId] : []
-
-      if (match('undo') && toast?.undo) {
+      if (match('undo')) {
         e.preventDefault()
-        const fn = toast.undo
-        clearToast()
-        void fn()
+        void performUndo()
         return
       }
+
+      if (activeView === 'triage') return
+
+      const actionTargets = checkedThreadIds.length > 0 ? checkedThreadIds : selectedThreadId ? [selectedThreadId] : []
 
       if (match('delete') && actionTargets.length > 0) {
         e.preventDefault()
@@ -411,13 +412,12 @@ export const App: React.FC = () => {
           {toast.undo && (
             <button
               key={toast.id}
-              onClick={async () => {
-                const fn = toast.undo
-                clearToast()
-                if (fn) await fn()
+              onClick={() => {
+                void performUndo()
               }}
-              className="relative overflow-visible rounded-lg px-3.5 py-1 text-[13px] font-semibold transition hover:opacity-90"
+              className="relative inline-flex items-center gap-1.5 overflow-visible rounded-lg px-3.5 py-1 text-[13px] font-semibold transition hover:opacity-90"
               style={{ background: 'var(--accent-soft)', color: 'var(--accent-text)' }}
+              title={`Undo (${isMac ? '⌘Z' : 'Ctrl+Z'})`}
             >
               <svg
                 className="pointer-events-none absolute inset-0 h-full w-full"
@@ -453,6 +453,9 @@ export const App: React.FC = () => {
                 />
               </svg>
               <span className="relative z-10">Undo</span>
+              <span className="relative z-10 text-[10.5px] font-medium opacity-70">
+                {isMac ? '⌘Z' : 'Ctrl+Z'}
+              </span>
             </button>
           )}
         </div>

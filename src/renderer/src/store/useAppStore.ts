@@ -68,8 +68,11 @@ export interface ComposerState {
 }
 
 export interface UndoItem {
+  id: number
   label: string
   undo: () => Promise<void>
+  expiresAt?: number
+  selfToast?: boolean
 }
 
 interface AppState {
@@ -148,7 +151,8 @@ interface AppState {
   settingsOpen: boolean
   settingsInitialTab: 'accounts' | 'ai' | 'general' | 'themes' | 'shortcuts' | 'privacy' | 'snippets' | 'mcp'
   composer: ComposerState
-  toast: { id: number; message: string; undo?: () => Promise<void>; durationMs: number } | null
+  toast: { id: number; message: string; undo?: () => Promise<void>; undoId?: number; durationMs: number } | null
+  undoStack: UndoItem[]
   isSyncing: boolean
   appVersion: string
   updateStatus: AppUpdateStatus | null
@@ -267,8 +271,16 @@ interface AppState {
   closeSettings: () => void
   openComposer: (partial?: Partial<ComposerState>) => void
   closeComposer: () => void
-  showToast: (message: string, undo?: () => Promise<void>, durationMs?: number) => void
+  showToast: (
+    message: string,
+    undo?: () => Promise<void>,
+    durationMs?: number,
+    opts?: { expiresAt?: number; selfToast?: boolean }
+  ) => number
   clearToast: () => void
+  pushUndo: (item: Omit<UndoItem, 'id'>) => number
+  removeUndo: (id: number) => void
+  performUndo: () => Promise<boolean>
   queueSendWithUndo: (
     payload: SendEmailPayload,
     draftRestore: Partial<ComposerState>,
@@ -423,6 +435,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     body: ''
   },
   toast: null,
+  undoStack: [],
   isSyncing: false,
   appVersion: '',
   updateStatus: null,
@@ -872,11 +885,25 @@ export const useAppStore = create<AppState>((set, get) => ({
   toggleStarThread: async (threadId, current) => {
     await window.glassmail.setStarred([threadId], !current)
     await get().refreshAll()
+    get().pushUndo({
+      label: !current ? 'Starred conversation' : 'Removed star',
+      undo: async () => {
+        await window.glassmail.setStarred([threadId], current)
+        await get().refreshAll()
+      }
+    })
   },
 
   toggleReadThread: async (threadId, current) => {
     await window.glassmail.setRead([threadId], !current)
     await get().refreshAll()
+    get().pushUndo({
+      label: !current ? 'Marked as read' : 'Marked as unread',
+      undo: async () => {
+        await window.glassmail.setRead([threadId], current)
+        await get().refreshAll()
+      }
+    })
   },
 
   setStarredThreads: async (threadIds, isStarred) => {
@@ -892,7 +919,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         : n === 1
           ? 'Removed star'
           : `Removed star from ${n} conversations`,
-      undefined,
+      async () => {
+        await window.glassmail.setStarred(threadIds, !isStarred)
+        await get().refreshAll()
+      },
       3000
     )
   },
@@ -910,7 +940,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         : n === 1
           ? 'Marked as unread'
           : `Marked ${n} conversations as unread`,
-      undefined,
+      async () => {
+        await window.glassmail.setRead(threadIds, !isRead)
+        await get().refreshAll()
+      },
       3000
     )
   },
@@ -1400,19 +1433,82 @@ export const useAppStore = create<AppState>((set, get) => ({
       composer: { ...s.composer, open: false }
     })),
 
-  showToast: (message, undo, durationMs = 5000) => {
+  pushUndo: (item) => {
+    const id = Date.now() + Math.random()
+    const now = Date.now()
+    set((s) => ({
+      undoStack: [
+        ...s.undoStack.filter((u) => !u.expiresAt || u.expiresAt > now).slice(-14),
+        { ...item, id }
+      ]
+    }))
+    return id
+  },
+
+  removeUndo: (id) => {
+    set((s) => ({
+      undoStack: s.undoStack.filter((u) => u.id !== id)
+    }))
+  },
+
+  performUndo: async () => {
+    const { toast, undoStack } = get()
+    const now = Date.now()
+
+    // 1. Prioritize an active undoable toast (e.g. Undo Send countdown or just-deleted email)
+    if (toast?.undo) {
+      const fn = toast.undo
+      const label = toast.message
+      const undoId = toast.undoId
+      const matching = undoId !== undefined ? undoStack.find((u) => u.id === undoId) : undefined
+      if (undoId !== undefined) {
+        get().removeUndo(undoId)
+      }
+      get().clearToast()
+      await fn()
+      if (!matching?.selfToast) {
+        get().showToast(`Undone: ${label}`, undefined, 2500)
+      }
+      return true
+    }
+
+    // 2. Otherwise pop the most recent non-expired undoable action from the stack
+    const valid = undoStack.filter((u) => !u.expiresAt || u.expiresAt > now)
+    if (valid.length === 0) {
+      if (undoStack.length > 0) set({ undoStack: [] })
+      return false
+    }
+    const latest = valid[valid.length - 1]
+    set({ undoStack: valid.slice(0, -1) })
+    await latest.undo()
+    if (!latest.selfToast) {
+      get().showToast(`Undone: ${latest.label}`, undefined, 2500)
+    }
+    return true
+  },
+
+  showToast: (message, undo, durationMs = 5000, opts) => {
     if (toastTimer) {
       window.clearTimeout(toastTimer)
       toastTimer = null
     }
     const id = Date.now() + Math.random()
-    set({ toast: { id, message, undo, durationMs } })
+    const undoId = undo
+      ? get().pushUndo({
+          label: message,
+          undo,
+          expiresAt: opts?.expiresAt,
+          selfToast: opts?.selfToast
+        })
+      : undefined
+    set({ toast: { id, message, undo, undoId, durationMs } })
     toastTimer = window.setTimeout(() => {
       if (get().toast?.id === id) {
         set({ toast: null })
       }
       toastTimer = null
     }, durationMs)
+    return undoId ?? id
   },
 
   clearToast: () => {
@@ -1427,9 +1523,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     const ms = Math.max(0, delaySeconds) * 1000
     let timerId: number | null = null
     let cancelled = false
+    let sendUndoId: number | null = null
 
     const doSend = async () => {
       timerId = null
+      if (sendUndoId !== null) {
+        get().removeUndo(sendUndoId)
+        sendUndoId = null
+      }
       if (cancelled) return
       const res = await window.glassmail.sendEmail(payload)
       if (res.ok) {
@@ -1451,7 +1552,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       void doSend()
     }, ms)
 
-    get().showToast(
+    sendUndoId = get().showToast(
       `Sending message…`,
       async () => {
         cancelled = true
@@ -1459,10 +1560,12 @@ export const useAppStore = create<AppState>((set, get) => ({
           window.clearTimeout(timerId)
           timerId = null
         }
+        sendUndoId = null
         get().openComposer(draftRestore)
         get().showToast('Send cancelled — draft restored', undefined, 3000)
       },
-      ms
+      ms,
+      { expiresAt: Date.now() + ms, selfToast: true }
     )
   },
 

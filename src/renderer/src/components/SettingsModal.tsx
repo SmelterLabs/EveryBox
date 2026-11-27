@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertCircle, Check, ChevronDown, ChevronRight, Copy, Download, Key, Keyboard, Layout, Mail, Moon, Palette, Plus, RefreshCw, RotateCcw, Shield, Sparkles, Sun, Terminal, Trash2, X } from 'lucide-react'
+import { AlertCircle, Check, ChevronDown, ChevronRight, Copy, Download, Key, Keyboard, Layout, Mail, Moon, Palette, Plus, RefreshCw, RotateCcw, Shield, Sparkles, Sun, Terminal, Trash2, Upload, X } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
+import { AccountBadge, isCustomAccountIcon, resizeImageFileToIconDataUrl } from './AccountIcon'
 import { isMac } from '../utils/platform'
 import { detectPresetByEmail, MAIL_PROVIDER_PRESETS, type MailProviderPreset } from '../utils/mailPresets'
 import {
@@ -410,7 +411,7 @@ export const SettingsModal: React.FC = () => {
                         style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
                       >
                         <div className="flex items-center gap-2.5">
-                          <span className="h-3 w-3 rounded-full" style={{ background: a.color }} />
+                          <AccountBadge icon={a.icon} color={a.color} size="md" />
                           <div>
                             <div className="text-[13px] font-semibold">
                               {a.name}{' '}
@@ -424,18 +425,61 @@ export const SettingsModal: React.FC = () => {
                             </div>
                           </div>
                         </div>
-                        <button
-                          onClick={async () => {
-                            await window.glassmail.deleteAccount(a.id)
-                            await refreshAll()
-                            showToast(`Removed ${a.email}`)
-                          }}
-                          className="rounded p-1.5 hover:bg-[var(--bg-hover)]"
-                          style={{ color: 'var(--danger)' }}
-                          title="Remove account"
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                        <div className="flex items-center gap-1.5">
+                          <label
+                            className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11.5px] font-medium transition hover:bg-[var(--bg-hover)]"
+                            style={{ borderColor: 'var(--border-strong)', color: 'var(--text-secondary)' }}
+                            title="Upload a custom logo or icon for this account"
+                          >
+                            <Upload size={12} />
+                            <span>{isCustomAccountIcon(a.icon) ? 'Change Logo' : 'Upload Logo'}</span>
+                            <input
+                              type="file"
+                              accept="image/png,image/jpeg,image/webp,image/svg+xml,image/x-icon,image/gif"
+                              className="hidden"
+                              onChange={async (e) => {
+                                const file = e.target.files?.[0]
+                                e.target.value = ''
+                                if (!file) return
+                                try {
+                                  const dataUrl = await resizeImageFileToIconDataUrl(file, 96)
+                                  await window.glassmail.updateAccount({ ...a, icon: dataUrl })
+                                  await refreshAll()
+                                  showToast(`Updated logo for ${a.name}`, undefined, 2500)
+                                } catch (err) {
+                                  showToast(err instanceof Error ? err.message : 'Could not load image', undefined, 3500)
+                                }
+                              }}
+                            />
+                          </label>
+                          {isCustomAccountIcon(a.icon) && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await window.glassmail.updateAccount({ ...a, icon: 'none' })
+                                await refreshAll()
+                                showToast(`Removed custom logo for ${a.name}`, undefined, 2500)
+                              }}
+                              className="rounded p-1.5 transition hover:bg-[var(--bg-hover)]"
+                              style={{ color: 'var(--text-muted)' }}
+                              title="Reset to default dot"
+                            >
+                              <RotateCcw size={13} />
+                            </button>
+                          )}
+                          <button
+                            onClick={async () => {
+                              await window.glassmail.deleteAccount(a.id)
+                              await refreshAll()
+                              showToast(`Removed ${a.email}`)
+                            }}
+                            className="rounded p-1.5 hover:bg-[var(--bg-hover)]"
+                            style={{ color: 'var(--danger)' }}
+                            title="Remove account"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>

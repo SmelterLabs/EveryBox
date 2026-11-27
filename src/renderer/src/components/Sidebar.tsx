@@ -35,6 +35,7 @@ import {
   Sparkles,
   Star,
   Trash2,
+  Upload,
   X,
   Zap
 } from 'lucide-react'
@@ -51,7 +52,13 @@ import {
 } from '../utils/folderTree'
 import { ContextMenu, type ContextMenuItem, type ContextMenuState } from './ContextMenu'
 import { CreateFolderModal, DeleteFolderModal, RenameFolderModal } from './FolderModals'
-import { ACCOUNT_ICON_OPTIONS, AccountIcon } from './AccountIcon'
+import {
+  ACCOUNT_ICON_OPTIONS,
+  AccountBadge,
+  AccountIcon,
+  isCustomAccountIcon,
+  resizeImageFileToIconDataUrl
+} from './AccountIcon'
 import appIcon from '../assets/icon.png'
 import type { Account, AccountIconId, Folder, MailboxId, OutlookFocusedMode } from '../../../shared/types'
 
@@ -1650,20 +1657,33 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
                       >
                         {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                       </button>
-                      {/* Multi-select focus toggle checkbox (shows account symbol when set) */}
+                      {/* Multi-select focus toggle checkbox (shows account symbol or custom logo when set) */}
                       <button
                         onClick={(e) => {
                           e.stopPropagation()
                           void toggleAccountFilter(acc.id)
                         }}
-                        className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded border transition"
+                        className="flex h-[18px] w-[18px] shrink-0 items-center justify-center overflow-hidden rounded border transition"
                         style={{
                           borderColor: isChecked ? acc.color : 'var(--border-strong)',
-                          background: isChecked ? acc.color : 'transparent'
+                          background: isCustomAccountIcon(acc.icon)
+                            ? 'var(--bg-main)'
+                            : isChecked
+                              ? acc.color
+                              : 'transparent'
                         }}
                         title={isChecked ? `Hide ${acc.name} from mail & calendar` : `Include ${acc.name}`}
                       >
-                        {isChecked ? (
+                        {isCustomAccountIcon(acc.icon) ? (
+                          <img
+                            src={acc.icon}
+                            alt=""
+                            draggable={false}
+                            className={`h-full w-full object-contain p-[1px] transition-opacity ${
+                              isChecked ? 'opacity-100' : 'opacity-40 grayscale'
+                            }`}
+                          />
+                        ) : isChecked ? (
                           acc.icon && acc.icon !== 'none' ? (
                             <AccountIcon icon={acc.icon} size={11} color="#ffffff" />
                           ) : (
@@ -2170,7 +2190,7 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
 
             <div>
               <label className="mb-1.5 block text-[11.5px] font-medium" style={{ color: 'var(--text-muted)' }}>
-                Account Symbol
+                Account Symbol or Custom Logo
               </label>
               <div className="grid grid-cols-7 gap-1.5">
                 {ACCOUNT_ICON_OPTIONS.map((opt) => {
@@ -2199,6 +2219,57 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
                     </button>
                   )
                 })}
+              </div>
+
+              <div
+                className="mt-2.5 flex items-center justify-between gap-2 rounded-lg border px-2.5 py-2"
+                style={{
+                  background: 'var(--bg-main)',
+                  borderColor: isCustomAccountIcon(editIcon) ? editColor : 'var(--border-subtle)'
+                }}
+              >
+                <div className="flex min-w-0 items-center gap-2">
+                  <AccountBadge icon={editIcon} color={editColor} size="md" />
+                  <span className="truncate text-[11.5px]" style={{ color: 'var(--text-secondary)' }}>
+                    {isCustomAccountIcon(editIcon) ? 'Custom logo active' : 'Or upload your own logo / icon'}
+                  </span>
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <label
+                    className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11.5px] font-medium transition hover:bg-[var(--bg-hover)]"
+                    style={{ borderColor: 'var(--border-strong)', color: 'var(--text-primary)' }}
+                  >
+                    <Upload size={11} />
+                    <span>{isCustomAccountIcon(editIcon) ? 'Change' : 'Upload…'}</span>
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/svg+xml,image/x-icon,image/gif"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0]
+                        e.target.value = ''
+                        if (!file) return
+                        try {
+                          const dataUrl = await resizeImageFileToIconDataUrl(file, 96)
+                          setEditIcon(dataUrl)
+                        } catch (err) {
+                          showToast(err instanceof Error ? err.message : 'Could not load image', undefined, 3500)
+                        }
+                      }}
+                    />
+                  </label>
+                  {isCustomAccountIcon(editIcon) && (
+                    <button
+                      type="button"
+                      onClick={() => setEditIcon('none')}
+                      className="rounded-md px-2 py-1 text-[11.5px] font-medium transition hover:bg-[var(--bg-hover)]"
+                      style={{ color: 'var(--text-muted)' }}
+                      title="Remove custom logo"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
 
