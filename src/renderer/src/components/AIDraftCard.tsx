@@ -273,11 +273,12 @@ export const AIDraftCard: React.FC<AIDraftCardProps> = ({
             <button
               type="button"
               onClick={() => void onDismiss()}
-              className="rounded-lg p-1.5 text-[var(--text-secondary)] transition-colors duration-150 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11.5px] font-medium text-[var(--text-secondary)] transition-colors duration-150 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
               aria-label="Dismiss AI draft"
-              title="Dismiss draft"
+              title="Dismiss ghost draft (does not touch remote Drafts)"
             >
-              <X size={14} aria-hidden="true" />
+              <X size={13} aria-hidden="true" />
+              <span>Dismiss</span>
             </button>
           )}
         </div>

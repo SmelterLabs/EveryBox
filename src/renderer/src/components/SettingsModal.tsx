@@ -15,6 +15,9 @@ import type {
   AccountSwitchBehavior,
   AIProviderType,
   AppSettings,
+  DecisionAISettings,
+  DecisionProvider,
+  DecisionProviderTestResult,
   DiscoveredModel,
   ListDensity,
   LocalAIStatus,
@@ -82,6 +85,12 @@ export const SettingsModal: React.FC = () => {
   const [scanningAI, setScanningAI] = useState(false)
   const [showCustomUrls, setShowCustomUrls] = useState(false)
   const [apiKeyInput, setApiKeyInput] = useState('')
+
+  // Fast Sorter (Decision AI)
+  const [decisionApiKeyInput, setDecisionApiKeyInput] = useState('')
+  const [savingDecisionKey, setSavingDecisionKey] = useState(false)
+  const [testingDecision, setTestingDecision] = useState(false)
+  const [decisionTestResult, setDecisionTestResult] = useState<DecisionProviderTestResult | null>(null)
 
   // Snippets
   const [snipTitle, setSnipTitle] = useState('')
@@ -1493,6 +1502,317 @@ export const SettingsModal: React.FC = () => {
                                 </option>
                               ))}
                             </select>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })()}
+
+                  {/* Fast Sorter (Decision AI) Card */}
+                  {(() => {
+                    const decision: DecisionAISettings = draft.ai.decision || {
+                      enabled: false,
+                      provider: 'auto',
+                      autoDraftMinConfidence: 0.8
+                    }
+                    const updateDecision = (patch: Partial<DecisionAISettings>) => {
+                      setDecisionTestResult(null)
+                      void updateAndSave({
+                        ...draft,
+                        ai: {
+                          ...draft.ai,
+                          decision: {
+                            ...decision,
+                            ...patch
+                          }
+                        }
+                      })
+                    }
+
+                    const decisionKeyMeta: {
+                      keyProvider: 'jev' | 'openrouter' | 'gemini' | 'openai'
+                      label: string
+                      configured: boolean
+                    } | null =
+                      decision.provider === 'jev'
+                        ? {
+                            keyProvider: 'jev',
+                            label: 'Jev (TypeSafe AI) API Key',
+                            configured: Boolean(localAI?.apiKeysConfigured.jev)
+                          }
+                        : decision.provider === 'openrouter-jev'
+                          ? {
+                              keyProvider: 'openrouter',
+                              label: 'OpenRouter API Key',
+                              configured: Boolean(localAI?.apiKeysConfigured.openrouter)
+                            }
+                          : decision.provider === 'gemini-decisions'
+                            ? {
+                                keyProvider: 'gemini',
+                                label: 'Google Gemini API Key',
+                                configured: Boolean(localAI?.apiKeysConfigured.gemini)
+                              }
+                            : decision.provider === 'openai-decisions'
+                              ? {
+                                  keyProvider: 'openai',
+                                  label: 'OpenAI API Key',
+                                  configured: Boolean(localAI?.apiKeysConfigured.openai)
+                                }
+                              : null
+
+                    const confidencePct = Math.round((decision.autoDraftMinConfidence ?? 0.8) * 100)
+
+                    return (
+                      <div
+                        className="space-y-4 rounded-xl border p-4"
+                        style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <Sparkles size={14} style={{ color: 'var(--accent-text)' }} />
+                              <h4 className="text-[13.5px] font-semibold">Fast Sorter (Decision AI)</h4>
+                            </div>
+                            <p className="mt-0.5 text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                              Optional fast classifier that tags urgency, detects meeting invites, and gates auto-drafts as mail arrives.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={decision.enabled}
+                            aria-label="Enable Fast Sorter (Decision AI)"
+                            onClick={() => updateDecision({ enabled: !decision.enabled })}
+                            className="relative mt-0.5 inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors"
+                            style={{
+                              background: decision.enabled ? 'var(--accent)' : 'var(--border-strong)'
+                            }}
+                          >
+                            <span
+                              className="inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform"
+                              style={{
+                                transform: decision.enabled ? 'translateX(18px)' : 'translateX(3px)'
+                              }}
+                            />
+                          </button>
+                        </div>
+
+                        {decision.enabled && (
+                          <div className="space-y-3.5 border-t pt-3.5" style={{ borderColor: 'var(--border-subtle)' }}>
+                            {/* Provider Selector */}
+                            <div className="space-y-1.5">
+                              <label
+                                htmlFor="decision-provider-select"
+                                className="block text-[12px] font-medium"
+                                style={{ color: 'var(--text-secondary)' }}
+                              >
+                                Decision Provider
+                              </label>
+                              <select
+                                id="decision-provider-select"
+                                value={decision.provider || 'auto'}
+                                onChange={(e) => {
+                                  setDecisionApiKeyInput('')
+                                  updateDecision({ provider: e.target.value as DecisionProvider })
+                                }}
+                                className="w-full rounded-lg border px-3 py-2 text-[12.5px] outline-none"
+                                style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
+                              >
+                                <option value="auto">Auto (best available)</option>
+                                <option value="jev">Jev (TypeSafe AI)</option>
+                                <option value="gemini-decisions">Gemini Decisions</option>
+                                <option value="openai-decisions">OpenAI Decisions</option>
+                                <option value="openrouter-jev">OpenRouter (Jev)</option>
+                                <option value="local-fast">Local Fast Model</option>
+                                <option value="off">Off</option>
+                              </select>
+                            </div>
+
+                            {/* Privacy note for Gemini Decisions */}
+                            {decision.provider === 'gemini-decisions' && (
+                              <div
+                                className="flex items-start gap-2 rounded-lg border px-3 py-2 text-[11.5px]"
+                                style={{
+                                  background: 'var(--bg-main)',
+                                  borderColor: 'rgba(245, 184, 65, 0.4)',
+                                  color: 'var(--text-secondary)'
+                                }}
+                              >
+                                <AlertCircle size={14} className="mt-0.5 shrink-0" style={{ color: '#e5a424' }} />
+                                <span>
+                                  Google AI Studio&apos;s free tier may log inputs to improve Google products. Use a paid Gemini API billing tier to disable training on your email content.
+                                </span>
+                              </div>
+                            )}
+
+                            {/* Contextual API Key Input */}
+                            {decisionKeyMeta && (
+                              <div className="space-y-1.5">
+                                <div className="flex items-center justify-between gap-2">
+                                  <label className="text-[12px] font-medium" style={{ color: 'var(--text-secondary)' }}>
+                                    {decisionKeyMeta.label}
+                                  </label>
+                                  {decisionKeyMeta.configured && (
+                                    <span
+                                      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium"
+                                      style={{ background: 'rgba(45, 212, 191, 0.14)', color: 'var(--success)' }}
+                                    >
+                                      <Check size={11} /> Configured
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex gap-2">
+                                  <input
+                                    type="password"
+                                    placeholder={
+                                      decisionKeyMeta.configured
+                                        ? 'Key saved — paste to replace…'
+                                        : `Paste ${decisionKeyMeta.label}…`
+                                    }
+                                    value={decisionApiKeyInput}
+                                    onChange={(e) => setDecisionApiKeyInput(e.target.value)}
+                                    className="flex-1 rounded-lg border px-3 py-1.5 text-[12.5px] outline-none"
+                                    style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
+                                  />
+                                  <button
+                                    type="button"
+                                    disabled={savingDecisionKey || !decisionApiKeyInput.trim()}
+                                    onClick={async () => {
+                                      const trimmed = decisionApiKeyInput.trim()
+                                      if (!trimmed) return
+                                      setSavingDecisionKey(true)
+                                      try {
+                                        await window.glassmail.saveDecisionApiKey(decisionKeyMeta.keyProvider, trimmed)
+                                        setDecisionApiKeyInput('')
+                                        setDecisionTestResult(null)
+                                        showToast(`Saved ${decisionKeyMeta.label} securely`)
+                                        await runLocalAIDetection({
+                                          localOpenAiUrl: draft.ai.localOpenAiUrl,
+                                          ollamaUrl: draft.ai.ollamaUrl,
+                                          lmStudioUrl: draft.ai.lmStudioUrl
+                                        })
+                                      } finally {
+                                        setSavingDecisionKey(false)
+                                      }
+                                    }}
+                                    className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+                                    style={{ background: 'var(--accent)' }}
+                                  >
+                                    <Key size={12.5} /> {savingDecisionKey ? 'Saving…' : 'Save Key'}
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Optional Model Override & Auto-Draft Confidence */}
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <label
+                                  htmlFor="decision-model-override"
+                                  className="block text-[11.5px] font-medium"
+                                  style={{ color: 'var(--text-secondary)' }}
+                                >
+                                  Model override (optional)
+                                </label>
+                                <input
+                                  id="decision-model-override"
+                                  value={decision.model || ''}
+                                  onChange={(e) =>
+                                    setDraft({
+                                      ...draft,
+                                      ai: {
+                                        ...draft.ai,
+                                        decision: { ...decision, model: e.target.value }
+                                      }
+                                    })
+                                  }
+                                  onBlur={() =>
+                                    updateDecision({ model: (decision.model || '').trim() || undefined })
+                                  }
+                                  placeholder="Default for provider"
+                                  className="w-full rounded-lg border px-2.5 py-1.5 text-[12px] outline-none"
+                                  style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
+                                />
+                              </div>
+
+                              <div className="space-y-1">
+                                <div className="flex items-center justify-between text-[11.5px]">
+                                  <label
+                                    htmlFor="decision-confidence-range"
+                                    className="font-medium"
+                                    style={{ color: 'var(--text-secondary)' }}
+                                  >
+                                    Auto-draft confidence
+                                  </label>
+                                  <span className="font-semibold tabular-nums" style={{ color: 'var(--accent-text)' }}>
+                                    {confidencePct}%
+                                  </span>
+                                </div>
+                                <input
+                                  id="decision-confidence-range"
+                                  type="range"
+                                  min={50}
+                                  max={95}
+                                  step={5}
+                                  value={confidencePct}
+                                  onChange={(e) =>
+                                    updateDecision({ autoDraftMinConfidence: Number(e.target.value) / 100 })
+                                  }
+                                  className="mt-1.5 w-full accent-[var(--accent)]"
+                                />
+                              </div>
+                            </div>
+
+                            {/* Test Fast Sorter */}
+                            <div className="flex flex-wrap items-center gap-3 pt-0.5">
+                              <button
+                                type="button"
+                                disabled={testingDecision || decision.provider === 'off'}
+                                onClick={async () => {
+                                  setTestingDecision(true)
+                                  setDecisionTestResult(null)
+                                  try {
+                                    const res = await window.glassmail.testDecisionProvider(decision)
+                                    setDecisionTestResult(res)
+                                  } catch (err) {
+                                    setDecisionTestResult({
+                                      ok: false,
+                                      latencyMs: 0,
+                                      detail: err instanceof Error ? err.message : 'Connection test failed',
+                                      modelLabel: decision.provider
+                                    })
+                                  } finally {
+                                    setTestingDecision(false)
+                                  }
+                                }}
+                                className="inline-flex items-center gap-1.5 rounded-lg border px-3.5 py-1.5 text-[12px] font-semibold transition hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                                style={{ background: 'var(--bg-main)', borderColor: 'var(--border-strong)' }}
+                              >
+                                <RefreshCw size={12.5} className={testingDecision ? 'animate-spin' : ''} />
+                                {testingDecision ? 'Testing Fast Sorter…' : 'Test Fast Sorter'}
+                              </button>
+
+                              {decisionTestResult && (
+                                <span
+                                  className="inline-flex min-w-0 items-center gap-1.5 text-[12px] font-medium"
+                                  style={{ color: decisionTestResult.ok ? 'var(--success)' : 'var(--danger)' }}
+                                >
+                                  {decisionTestResult.ok ? (
+                                    <>
+                                      <Check size={13} className="shrink-0" />
+                                      <span className="truncate">
+                                        {decisionTestResult.latencyMs}ms — {decisionTestResult.detail}
+                                      </span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <AlertCircle size={13} className="shrink-0" />
+                                      <span className="truncate">{decisionTestResult.detail}</span>
+                                    </>
+                                  )}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         )}
                       </div>
