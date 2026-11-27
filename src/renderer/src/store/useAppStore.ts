@@ -11,6 +11,12 @@ import type {
   ComposerAttachment,
   CreateReminderPayload,
   Folder,
+  FolderCreateInput,
+  FolderDeleteInput,
+  FolderDeletePreview,
+  FolderMutationResult,
+  FolderPrefsInput,
+  FolderRenameInput,
   HabitSuggestion,
   ImplicitCalendarEvent,
   InboxCategory,
@@ -82,6 +88,13 @@ interface AppState {
   activeMailbox: MailboxId
   activeCategory: InboxCategory
   activeFolderName: string | null
+
+  // Persisted sidebar tree & folder UI state
+  expandedAccountIds: Record<string, boolean>
+  expandedFolderIds: Record<string, boolean>
+  showHiddenFoldersByAccount: Record<string, boolean>
+  moveToPopover: { open: boolean; threadIds: string[]; accountId?: string } | null
+  recentMovedFolderIds: string[]
 
   // Mail state
   threads: ThreadSummary[]
@@ -172,8 +185,30 @@ interface AppState {
   // Mutations with Undo
   archiveThreads: (threadIds: string[]) => Promise<void>
   trashThreads: (threadIds: string[]) => Promise<void>
-  moveThreadsToFolder: (threadIds: string[], role: Folder['role'], folderName?: string) => Promise<void>
+  moveThreadsToFolder: (
+    threadIds: string[],
+    role: Folder['role'],
+    folderName?: string,
+    targetFolderId?: string
+  ) => Promise<void>
   snoozeThreads: (threadIds: string[], untilMs: number, label: string) => Promise<void>
+
+  // Sidebar tree expand state & Move-To popover
+  toggleAccountExpanded: (accountId: string) => void
+  setAccountExpanded: (accountId: string, expanded: boolean) => void
+  toggleFolderExpanded: (folderId: string) => void
+  setFolderExpanded: (folderId: string, expanded: boolean) => void
+  toggleShowHiddenFolders: (accountId: string) => void
+  openMoveToPopover: (threadIds: string[], accountId?: string) => void
+  closeMoveToPopover: () => void
+
+  // Folder CRUD & Preferences
+  createFolder: (input: FolderCreateInput) => Promise<FolderMutationResult>
+  renameFolder: (input: FolderRenameInput) => Promise<FolderMutationResult>
+  deleteFolder: (input: FolderDeleteInput) => Promise<FolderMutationResult>
+  getFolderDeletePreview: (folderId: string) => Promise<FolderDeletePreview | null>
+  updateFolderPrefs: (input: FolderPrefsInput) => Promise<FolderMutationResult>
+  syncSingleFolder: (accountId: string, folderPath: string) => Promise<{ ok: boolean; synced: number }>
   toggleStarThread: (threadId: string, current: boolean) => Promise<void>
   toggleReadThread: (threadId: string, current: boolean) => Promise<void>
   setStarredThreads: (threadIds: string[], isStarred: boolean) => Promise<void>
@@ -240,6 +275,76 @@ interface AppState {
 
 let toastTimer: number | null = null
 
+const SIDEBAR_TREE_STORAGE_KEY = 'everybox_sidebar_tree_v1'
+const RECENT_MOVED_FOLDERS_STORAGE_KEY = 'everybox_recent_moved_folders_v1'
+const MAX_RECENT_MOVED_FOLDERS = 6
+
+interface PersistedSidebarTreeState {
+  expandedAccountIds: Record<string, boolean>
+  expandedFolderIds: Record<string, boolean>
+  showHiddenFoldersByAccount: Record<string, boolean>
+}
+
+function toBoolRecord(val: unknown): Record<string, boolean> {
+  if (!val || typeof val !== 'object' || Array.isArray(val)) return {}
+  const out: Record<string, boolean> = {}
+  for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
+    if (typeof v === 'boolean') out[k] = v
+  }
+  return out
+}
+
+function loadSidebarTreeState(): PersistedSidebarTreeState {
+  try {
+    const raw = window.localStorage.getItem(SIDEBAR_TREE_STORAGE_KEY)
+    if (!raw) {
+      return { expandedAccountIds: {}, expandedFolderIds: {}, showHiddenFoldersByAccount: {} }
+    }
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    return {
+      expandedAccountIds: toBoolRecord(parsed.expandedAccountIds),
+      expandedFolderIds: toBoolRecord(parsed.expandedFolderIds),
+      showHiddenFoldersByAccount: toBoolRecord(parsed.showHiddenFoldersByAccount)
+    }
+  } catch {
+    return { expandedAccountIds: {}, expandedFolderIds: {}, showHiddenFoldersByAccount: {} }
+  }
+}
+
+function saveSidebarTreeState(state: PersistedSidebarTreeState): void {
+  try {
+    window.localStorage.setItem(SIDEBAR_TREE_STORAGE_KEY, JSON.stringify(state))
+  } catch {
+    // Ignore storage quota / privacy mode errors
+  }
+}
+
+function loadRecentMovedFolderIds(): string[] {
+  try {
+    const raw = window.localStorage.getItem(RECENT_MOVED_FOLDERS_STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((id): id is string => typeof id === 'string' && id.length > 0).slice(0, MAX_RECENT_MOVED_FOLDERS)
+  } catch {
+    return []
+  }
+}
+
+function saveRecentMovedFolderIds(ids: string[]): void {
+  try {
+    window.localStorage.setItem(
+      RECENT_MOVED_FOLDERS_STORAGE_KEY,
+      JSON.stringify(ids.slice(0, MAX_RECENT_MOVED_FOLDERS))
+    )
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+const initialSidebarTree = loadSidebarTreeState()
+const initialRecentMovedFolderIds = loadRecentMovedFolderIds()
+
 export const useAppStore = create<AppState>((set, get) => ({
   settings: null,
   accounts: [],
@@ -254,6 +359,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   activeMailbox: 'inbox',
   activeCategory: 'all',
   activeFolderName: null,
+
+  expandedAccountIds: initialSidebarTree.expandedAccountIds,
+  expandedFolderIds: initialSidebarTree.expandedFolderIds,
+  showHiddenFoldersByAccount: initialSidebarTree.showHiddenFoldersByAccount,
+  moveToPopover: null,
+  recentMovedFolderIds: initialRecentMovedFolderIds,
 
   threads: [],
   selectedThreadId: null,
@@ -779,10 +890,39 @@ export const useAppStore = create<AppState>((set, get) => ({
     )
   },
 
-  moveThreadsToFolder: async (threadIds, role, folderName) => {
+  moveThreadsToFolder: async (threadIds, role, folderName, targetFolderId) => {
     if (!threadIds.length) return
-    const { threads, selectedThreadId } = get()
+    const { threads, selectedThreadId, selectedThread, folders, activeAccountIds, recentMovedFolderIds } = get()
     const currentIdx = threads.findIndex((t) => t.id === selectedThreadId)
+
+    // Resolve target folder ID for fast Move-To recency ranking
+    let resolvedFolderId = targetFolderId
+    if (!resolvedFolderId) {
+      const sampleThread =
+        threads.find((t) => threadIds.includes(t.id)) ||
+        (selectedThread && threadIds.includes(selectedThread.id) ? selectedThread : null)
+      const preferredAccountId = sampleThread?.accountId || (activeAccountIds.length === 1 ? activeAccountIds[0] : undefined)
+      const lowerName = (folderName || '').toLowerCase()
+      const findMatch = (list: Folder[]): Folder | undefined => {
+        if (role === 'custom' && lowerName) {
+          return list.find((f) => f.name.toLowerCase() === lowerName || f.path.toLowerCase() === lowerName)
+        }
+        return list.find((f) => f.role === role)
+      }
+      const accountScoped = preferredAccountId ? folders.filter((f) => f.accountId === preferredAccountId) : folders
+      const match = findMatch(accountScoped) || findMatch(folders)
+      if (match) resolvedFolderId = match.id
+    }
+
+    if (resolvedFolderId) {
+      const nextRecent = [
+        resolvedFolderId,
+        ...recentMovedFolderIds.filter((id) => id !== resolvedFolderId)
+      ].slice(0, MAX_RECENT_MOVED_FOLDERS)
+      saveRecentMovedFolderIds(nextRecent)
+      set({ recentMovedFolderIds: nextRecent })
+    }
+
     await window.glassmail.moveThreads(threadIds, role, folderName)
     set({ checkedThreadIds: [], lastCheckedThreadId: null })
     await get().refreshAll()
@@ -800,6 +940,228 @@ export const useAppStore = create<AppState>((set, get) => ({
         await get().refreshAll()
       }
     )
+  },
+
+  // ---- Sidebar tree expand state & Move-To popover ----
+  toggleAccountExpanded: (accountId) => {
+    set((s) => {
+      const expandedAccountIds = { ...s.expandedAccountIds, [accountId]: !s.expandedAccountIds[accountId] }
+      saveSidebarTreeState({
+        expandedAccountIds,
+        expandedFolderIds: s.expandedFolderIds,
+        showHiddenFoldersByAccount: s.showHiddenFoldersByAccount
+      })
+      return { expandedAccountIds }
+    })
+  },
+
+  setAccountExpanded: (accountId, expanded) => {
+    set((s) => {
+      if (s.expandedAccountIds[accountId] === expanded) return s
+      const expandedAccountIds = { ...s.expandedAccountIds, [accountId]: expanded }
+      saveSidebarTreeState({
+        expandedAccountIds,
+        expandedFolderIds: s.expandedFolderIds,
+        showHiddenFoldersByAccount: s.showHiddenFoldersByAccount
+      })
+      return { expandedAccountIds }
+    })
+  },
+
+  toggleFolderExpanded: (folderId) => {
+    set((s) => {
+      const expandedFolderIds = { ...s.expandedFolderIds, [folderId]: !s.expandedFolderIds[folderId] }
+      saveSidebarTreeState({
+        expandedAccountIds: s.expandedAccountIds,
+        expandedFolderIds,
+        showHiddenFoldersByAccount: s.showHiddenFoldersByAccount
+      })
+      return { expandedFolderIds }
+    })
+  },
+
+  setFolderExpanded: (folderId, expanded) => {
+    set((s) => {
+      if (s.expandedFolderIds[folderId] === expanded) return s
+      const expandedFolderIds = { ...s.expandedFolderIds, [folderId]: expanded }
+      saveSidebarTreeState({
+        expandedAccountIds: s.expandedAccountIds,
+        expandedFolderIds,
+        showHiddenFoldersByAccount: s.showHiddenFoldersByAccount
+      })
+      return { expandedFolderIds }
+    })
+  },
+
+  toggleShowHiddenFolders: (accountId) => {
+    set((s) => {
+      const showHiddenFoldersByAccount = {
+        ...s.showHiddenFoldersByAccount,
+        [accountId]: !s.showHiddenFoldersByAccount[accountId]
+      }
+      saveSidebarTreeState({
+        expandedAccountIds: s.expandedAccountIds,
+        expandedFolderIds: s.expandedFolderIds,
+        showHiddenFoldersByAccount
+      })
+      return { showHiddenFoldersByAccount }
+    })
+  },
+
+  openMoveToPopover: (threadIds, accountId) => {
+    if (!threadIds.length) return
+    set({ moveToPopover: { open: true, threadIds, accountId } })
+  },
+
+  closeMoveToPopover: () => set({ moveToPopover: null }),
+
+  // ---- Folder CRUD & Preferences ----
+  createFolder: async (input) => {
+    const res = await window.glassmail.createFolder(input)
+    if (res.ok) {
+      await get().refreshAll()
+      const label = res.folder?.name || input.name.trim()
+      get().showToast(`Created folder "${label}"`, undefined, 3000)
+    } else {
+      get().showToast(res.error || 'Could not create folder', undefined, 4000)
+    }
+    return res
+  },
+
+  renameFolder: async (input) => {
+    const prevFolder = get().folders.find((f) => f.id === input.folderId)
+    const res = await window.glassmail.renameFolder(input)
+    if (res.ok) {
+      const { activeFolderName } = get()
+      if (activeFolderName && prevFolder && res.folder) {
+        const lowerActive = activeFolderName.toLowerCase()
+        const lowerPrevName = prevFolder.name.toLowerCase()
+        const lowerPrevPath = prevFolder.path.toLowerCase()
+        const delim = prevFolder.delimiter || '/'
+        if (lowerActive === lowerPrevName || lowerActive === lowerPrevPath) {
+          set({ activeFolderName: res.folder.name })
+        } else if (lowerActive.startsWith(`${lowerPrevName}/`)) {
+          set({ activeFolderName: `${res.folder.name}${activeFolderName.slice(prevFolder.name.length)}` })
+        } else if (lowerActive.startsWith(`${lowerPrevPath}${delim.toLowerCase()}`)) {
+          set({ activeFolderName: `${res.folder.path}${activeFolderName.slice(prevFolder.path.length)}` })
+        }
+      }
+      await get().refreshAll()
+      get().showToast(`Renamed folder to "${input.newName.trim()}"`, undefined, 3000)
+    } else {
+      get().showToast(res.error || 'Could not rename folder', undefined, 4000)
+    }
+    return res
+  },
+
+  deleteFolder: async (input) => {
+    const prevFolder = get().folders.find((f) => f.id === input.folderId)
+    const res = await window.glassmail.deleteFolder(input)
+    if (res.ok) {
+      // Remove deleted folder from recents
+      const nextRecent = get().recentMovedFolderIds.filter((id) => id !== input.folderId)
+      if (nextRecent.length !== get().recentMovedFolderIds.length) {
+        saveRecentMovedFolderIds(nextRecent)
+        set({ recentMovedFolderIds: nextRecent })
+      }
+
+      // If currently viewing the deleted folder (or a deleted descendant), navigate back to Inbox
+      const { activeFolderName } = get()
+      if (activeFolderName && prevFolder) {
+        const lowerActive = activeFolderName.toLowerCase()
+        const lowerPrevName = prevFolder.name.toLowerCase()
+        const lowerPrevPath = prevFolder.path.toLowerCase()
+        const delim = (prevFolder.delimiter || '/').toLowerCase()
+        const matchesDeleted =
+          lowerActive === lowerPrevName ||
+          lowerActive === lowerPrevPath ||
+          (input.deleteChildren !== false &&
+            (lowerActive.startsWith(`${lowerPrevName}/`) || lowerActive.startsWith(`${lowerPrevPath}${delim}`)))
+        if (matchesDeleted) {
+          set({
+            activeView: 'mail',
+            activeMailbox: 'inbox',
+            activeFolderName: null,
+            selectedThreadId: null,
+            selectedThread: null,
+            checkedThreadIds: [],
+            lastCheckedThreadId: null
+          })
+        }
+      }
+
+      await get().refreshAll()
+      const folderLabel = prevFolder?.name || 'folder'
+      const pausedRules = res.disabledRuleNames || []
+      const pausedSuffix =
+        pausedRules.length > 0
+          ? ` — paused Autopilot rule${pausedRules.length === 1 ? '' : 's'}: ${pausedRules.join(', ')}`
+          : ''
+      get().showToast(`Deleted "${folderLabel}"${pausedSuffix}`, undefined, pausedRules.length > 0 ? 6000 : 3500)
+    } else {
+      get().showToast(res.error || 'Could not delete folder', undefined, 4000)
+    }
+    return res
+  },
+
+  getFolderDeletePreview: async (folderId) => {
+    return window.glassmail.getFolderDeletePreview(folderId)
+  },
+
+  updateFolderPrefs: async (input) => {
+    const prevFolders = get().folders
+    const { folderId, ...prefs } = input
+    // Optimistically update the folder in store
+    set({
+      folders: prevFolders.map((f) => {
+        if (f.id !== folderId) return f
+        const next: Folder = { ...f }
+        if (prefs.color !== undefined) next.color = prefs.color
+        if (prefs.icon !== undefined) next.icon = prefs.icon
+        if (prefs.isPinned !== undefined) next.isPinned = prefs.isPinned
+        if (prefs.isHidden !== undefined) next.isHidden = prefs.isHidden
+        if (prefs.muteBadge !== undefined) next.muteBadge = prefs.muteBadge
+        if (prefs.sortOrder !== undefined) next.sortOrder = prefs.sortOrder
+        if (prefs.syncEnabled !== undefined) next.syncEnabled = prefs.syncEnabled
+        return next
+      })
+    })
+    const res = await window.glassmail.updateFolderPrefs(input)
+    if (res.ok) {
+      if (res.folder) {
+        set((s) => ({
+          folders: s.folders.map((f) => (f.id === folderId ? res.folder! : f))
+        }))
+      }
+      await get().refreshAll()
+    } else {
+      set({ folders: prevFolders })
+      get().showToast(res.error || 'Could not update folder preferences', undefined, 4000)
+    }
+    return res
+  },
+
+  syncSingleFolder: async (accountId, folderPath) => {
+    set({ isSyncing: true })
+    try {
+      const res = await window.glassmail.syncSingleFolder(accountId, folderPath)
+      await get().refreshAll()
+      const folder = get().folders.find(
+        (f) =>
+          f.accountId === accountId &&
+          (f.path.toLowerCase() === folderPath.toLowerCase() || f.name.toLowerCase() === folderPath.toLowerCase())
+      )
+      const label = folder?.name || folderPath
+      if (res.ok) {
+        const suffix = res.synced > 0 ? ` (${res.synced} updated)` : ''
+        get().showToast(`Synced "${label}"${suffix}`, undefined, 3000)
+      } else {
+        get().showToast(`Could not sync "${label}"`, undefined, 4000)
+      }
+      return res
+    } finally {
+      set({ isSyncing: false })
+    }
   },
 
   markFolderRead: async ({ mailbox, accountIds, folderName, label }) => {
