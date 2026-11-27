@@ -408,7 +408,7 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
             <img
               src={appIcon}
               alt="EveryBox"
-              className="h-6 w-6 shrink-0 rounded-[5px] object-contain"
+              className="h-7 w-7 shrink-0 object-contain"
             />
             {activeWs && activeWs.id !== 'ws-all' && (
               <span

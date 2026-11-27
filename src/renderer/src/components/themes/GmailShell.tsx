@@ -751,7 +751,7 @@ export const GmailShell: React.FC<{
             <img
               src={appIcon}
               alt="EveryBox"
-              className="h-7 w-7 shrink-0 rounded-[6px] object-contain"
+              className="h-8 w-8 shrink-0 object-contain"
             />
             <span className="text-[19px] font-medium tracking-tight" style={{ color: g.textSec }}>
               EveryBox

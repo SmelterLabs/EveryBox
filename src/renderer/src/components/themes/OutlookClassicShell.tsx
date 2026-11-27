@@ -428,7 +428,7 @@ export const OutlookClassicShell: React.FC<{
           <img
             src={appIcon}
             alt="EveryBox"
-            className="ml-1 h-4 w-4 shrink-0 rounded-[3px] object-contain"
+            className="ml-1 h-5 w-5 shrink-0 object-contain"
           />
           <span className="ml-1 text-[12px] font-semibold tracking-tight opacity-95">
             EveryBox — Mail
