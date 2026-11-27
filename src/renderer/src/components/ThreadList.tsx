@@ -74,6 +74,7 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
     counts,
     threads,
     preDrafts,
+    threadAiMeta,
     selectedThreadId,
     checkedThreadIds,
     parsedSearch,
@@ -241,7 +242,10 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
 
   const isSelecting = checkedThreadIds.length > 0
   const checkedSet = useMemo(() => new Set(checkedThreadIds), [checkedThreadIds])
-  const preDraftThreadIds = useMemo(() => new Set(preDrafts.map((p) => p.threadId)), [preDrafts])
+  const preDraftThreadIds = useMemo(
+    () => new Set(preDrafts.filter((p) => p.status !== 'dismissed').map((p) => p.threadId)),
+    [preDrafts]
+  )
   const allVisibleSelected =
     visibleThreadIds.length > 0 && visibleThreadIds.every((id) => checkedSet.has(id))
   const selectedThreadObjs = useMemo(
@@ -1218,6 +1222,10 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
                   {items.map((t) => {
                     const isSelected = selectedThreadId === t.id
                     const isChecked = checkedThreadIds.includes(t.id)
+                    const aiMeta = threadAiMeta[t.id]
+                    const hasPreDraft = preDraftThreadIds.has(t.id)
+                    const showUrgency = Boolean(aiMeta && aiMeta.urgency >= 2)
+                    const showNeedsReply = Boolean(aiMeta && aiMeta.needsReply && aiMeta.urgency >= 1)
                     const selfEmail = (t.accountEmail || '').toLowerCase()
                     const sentOrDraftRecipient =
                       activeMailbox === 'sent' || activeMailbox === 'drafts'
@@ -1443,7 +1451,16 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
                               )}
                             </span>
                             <div className="flex shrink-0 items-center gap-1">
-                              {preDraftThreadIds.has(t.id) && (
+                              {listDensity === 'compact' && showUrgency && (
+                                <span
+                                  className="h-2 w-2 rounded-full"
+                                  style={{
+                                    background: aiMeta!.urgency >= 3 ? 'var(--danger)' : '#e5a424'
+                                  }}
+                                  title={aiMeta!.aiReason || (aiMeta!.urgency >= 3 ? 'Urgent' : 'High priority')}
+                                />
+                              )}
+                              {listDensity === 'compact' && hasPreDraft && (
                                 <span
                                   className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium"
                                   style={{ background: 'rgba(245, 184, 65, 0.18)', color: '#d99a1e' }}
@@ -1548,6 +1565,63 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
                               )}
                             </div>
                           )}
+
+                          {/* Subtle AI Signals (max 2 tiny pills per row) */}
+                          {listDensity !== 'compact' && (showUrgency || hasPreDraft || showNeedsReply) && (() => {
+                            const pills: React.ReactNode[] = []
+                            if (showUrgency && aiMeta) {
+                              const isCritical = aiMeta.urgency >= 3
+                              pills.push(
+                                <span
+                                  key="urgency"
+                                  className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+                                  style={{
+                                    background: isCritical
+                                      ? 'rgba(240, 96, 96, 0.14)'
+                                      : 'rgba(245, 184, 65, 0.16)',
+                                    color: isCritical ? 'var(--danger)' : '#d99a1e'
+                                  }}
+                                  title={aiMeta.aiReason || (isCritical ? 'Urgent' : 'Priority')}
+                                >
+                                  <span
+                                    className="h-1.5 w-1.5 rounded-full"
+                                    style={{ background: isCritical ? 'var(--danger)' : '#e5a424' }}
+                                  />
+                                  {isCritical ? 'Urgent' : 'Priority'}
+                                </span>
+                              )
+                            }
+                            if (hasPreDraft && pills.length < 2) {
+                              pills.push(
+                                <span
+                                  key="draft-ready"
+                                  className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+                                  style={{ background: 'rgba(245, 184, 65, 0.16)', color: '#d99a1e' }}
+                                  title="AI reply draft ready"
+                                >
+                                  <Sparkles size={9.5} fill="#f5b841" style={{ color: '#e5a424' }} />
+                                  Draft ready
+                                </span>
+                              )
+                            }
+                            if (showNeedsReply && pills.length < 2) {
+                              pills.push(
+                                <span
+                                  key="needs-reply"
+                                  className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+                                  style={{ background: 'var(--accent-soft)', color: 'var(--accent-text)' }}
+                                  title={aiMeta?.aiReason || 'Reply expected'}
+                                >
+                                  Needs reply
+                                </span>
+                              )
+                            }
+                            return (
+                              <div className="mt-1 flex flex-wrap items-center gap-1">
+                                {pills}
+                              </div>
+                            )
+                          })()}
 
                           {/* Inline 2FA Sign-In Code Copy Pill */}
                           {listDensity !== 'compact' && t.signInCode && (
