@@ -208,6 +208,9 @@ export async function syncImapAccount(
       }
     }
 
+    // Cache existing local message IDs so polling only fetches raw MIME for new messages
+    const cachedMessageIds = db.getCachedMessageIds(account.id)
+
     // Sync each standard folder sequentially over the single IMAP connection
     for (const target of foldersToSync) {
       try {
@@ -235,16 +238,44 @@ export async function syncImapAccount(
 
           if (total > 0) {
             const startSeq = Math.max(1, total - target.limit + 1)
-            for await (const msg of client.fetch(`${startSeq}:${total}`, {
+            const missingUids: number[] = []
+
+            // Fast pass: fetch only UID + flags so already-cached messages never re-download MIME bodies or rebuild FTS5
+            for await (const meta of client.fetch(`${startSeq}:${total}`, {
               uid: true,
-              flags: true,
-              envelope: true,
-              internalDate: true,
-              source: true
+              flags: true
             })) {
-              try {
-                if (!msg.source) continue
-                const parsed = await simpleParser(msg.source)
+              const msgId =
+                target.role === 'inbox'
+                  ? `${account.id}|imap-${meta.uid}`
+                  : `${account.id}|imap-${target.role}-${meta.uid}`
+              if (cachedMessageIds.has(msgId)) {
+                const f = meta.flags || new Set<string>()
+                db.updateLocalMessageFlagsById(
+                  msgId,
+                  target.role === 'sent' ? true : f.has('\\Seen'),
+                  f.has('\\Flagged')
+                )
+              } else {
+                missingUids.push(meta.uid)
+              }
+            }
+
+            if (missingUids.length > 0) {
+              for await (const msg of client.fetch(
+                missingUids.join(','),
+                {
+                  uid: true,
+                  flags: true,
+                  envelope: true,
+                  internalDate: true,
+                  source: true
+                },
+                { uid: true }
+              )) {
+                try {
+                  if (!msg.source) continue
+                  const parsed = await simpleParser(msg.source)
                 const fromObj = parsed.from?.value?.[0]
                 const from: EmailAddress = {
                   name: fromObj?.name || fromObj?.address?.split('@')[0] || 'Unknown',
@@ -361,10 +392,12 @@ export async function syncImapAccount(
                 }
 
                 db.upsertMessageAndThread(message, remoteThreadId)
+                cachedMessageIds.add(msgId)
                 synced += 1
               } catch {
                 // Skip malformed single email so rest of folder still loads
               }
+            }
             }
           }
 

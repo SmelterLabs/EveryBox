@@ -277,6 +277,8 @@ interface AppState {
 }
 
 let toastTimer: number | null = null
+let refreshAllInFlight: Promise<void> | null = null
+let refreshAllPending = false
 
 const SIDEBAR_TREE_STORAGE_KEY = 'everybox_sidebar_tree_v1'
 const RECENT_MOVED_FOLDERS_STORAGE_KEY = 'everybox_recent_moved_folders_v1'
@@ -438,50 +440,66 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   refreshAll: async () => {
-    const { activeAccountIds } = get()
-    const filterIds = activeAccountIds.length > 0 ? activeAccountIds : undefined
-    const [
-      accounts,
-      workspaces,
-      folders,
-      counts,
-      snippets,
-      reminders,
-      preDrafts,
-      autopilotRules,
-      autopilotLogs,
-      habitSuggestions,
-      senderProfiles,
-      voiceProfiles
-    ] = await Promise.all([
-      window.glassmail.listAccounts(),
-      window.glassmail.listWorkspaces(),
-      window.glassmail.listFolders(),
-      window.glassmail.getMailboxCounts(filterIds),
-      window.glassmail.listSnippets(),
-      window.glassmail.listReminders(filterIds),
-      window.glassmail.listPreDrafts(),
-      window.glassmail.listAutopilotRules(),
-      window.glassmail.listAutopilotLogs(50),
-      window.glassmail.listHabitSuggestions('pending'),
-      window.glassmail.listSenderProfiles(40),
-      window.glassmail.listVoiceProfiles()
-    ])
-    set({
-      accounts,
-      workspaces,
-      folders,
-      counts,
-      snippets,
-      reminders,
-      preDrafts,
-      autopilotRules,
-      autopilotLogs,
-      habitSuggestions,
-      senderProfiles,
-      voiceProfiles
+    if (refreshAllInFlight) {
+      refreshAllPending = true
+      await refreshAllInFlight
+      return
+    }
+
+    const run = async () => {
+      do {
+        refreshAllPending = false
+        const { activeAccountIds } = get()
+        const filterIds = activeAccountIds.length > 0 ? activeAccountIds : undefined
+        const [
+          accounts,
+          workspaces,
+          folders,
+          counts,
+          snippets,
+          reminders,
+          preDrafts,
+          autopilotRules,
+          autopilotLogs,
+          habitSuggestions,
+          senderProfiles,
+          voiceProfiles
+        ] = await Promise.all([
+          window.glassmail.listAccounts(),
+          window.glassmail.listWorkspaces(),
+          window.glassmail.listFolders(),
+          window.glassmail.getMailboxCounts(filterIds),
+          window.glassmail.listSnippets(),
+          window.glassmail.listReminders(filterIds),
+          window.glassmail.listPreDrafts(),
+          window.glassmail.listAutopilotRules(),
+          window.glassmail.listAutopilotLogs(50),
+          window.glassmail.listHabitSuggestions('pending'),
+          window.glassmail.listSenderProfiles(40),
+          window.glassmail.listVoiceProfiles()
+        ])
+        set({
+          accounts,
+          workspaces,
+          folders,
+          counts,
+          snippets,
+          reminders,
+          preDrafts,
+          autopilotRules,
+          autopilotLogs,
+          habitSuggestions,
+          senderProfiles,
+          voiceProfiles
+        })
+        await Promise.all([get().refreshThreads(), get().refreshTodayEvents()])
+      } while (refreshAllPending)
+    }
+
+    refreshAllInFlight = run().finally(() => {
+      refreshAllInFlight = null
     })
-    await Promise.all([get().refreshThreads(), get().refreshTodayEvents()])
+    await refreshAllInFlight
   },
 
   refreshThreads: async () => {

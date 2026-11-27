@@ -633,6 +633,14 @@ export class GlassmailDB {
     } catch {
       // Index already exists
     }
+    try {
+      this.db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_messages_thread_draft_sent_date ON messages(thread_id, is_draft, is_sent, date DESC)`
+      )
+      this.db.exec(`CREATE INDEX IF NOT EXISTS idx_messages_account_remote ON messages(account_id, remote_id)`)
+    } catch {
+      // Indexes already exist
+    }
 
     // Decode any HTML-entity-encoded snippets (e.g. Gmail's `&#39;`, `&amp;`) already cached in SQLite
     this.cleanupEncodedSnippets()
@@ -2599,6 +2607,41 @@ export class GlassmailDB {
       `)
       .all(accountId) as { remote_id: string }[]
     return new Set(rows.map((r) => r.remote_id))
+  }
+
+  getCachedMessageIds(accountId: string): Set<string> {
+    const rows = this.db
+      .prepare('SELECT id FROM messages WHERE account_id = ?')
+      .all(accountId) as { id: string }[]
+    return new Set(rows.map((r) => r.id))
+  }
+
+  updateLocalMessageFlagsById(messageId: string, isRead: boolean, isStarred: boolean): void {
+    const row = this.db
+      .prepare('SELECT id, thread_id, is_read, is_starred, date FROM messages WHERE id = ?')
+      .get(messageId) as
+      | { id: string; thread_id: string; is_read: number; is_starred: number; date: number }
+      | undefined
+    if (!row) return
+
+    const guard = this.getActiveMutation(row.thread_id)
+    const nextRead = guard && row.date <= guard.recordedAt && guard.isRead !== undefined ? guard.isRead : isRead
+    const nextStarred =
+      guard && row.date <= guard.recordedAt && guard.isStarred !== undefined ? guard.isStarred : isStarred
+    const rVal = nextRead ? 1 : 0
+    const sVal = nextStarred ? 1 : 0
+
+    if (row.is_read === rVal && row.is_starred === sVal) return
+
+    this.db.prepare('UPDATE messages SET is_read = ?, is_starred = ? WHERE id = ?').run(rVal, sVal, row.id)
+    const agg = this.db
+      .prepare('SELECT MIN(is_read) AS all_read, MAX(is_starred) AS any_starred FROM messages WHERE thread_id = ?')
+      .get(row.thread_id) as { all_read: number | null; any_starred: number | null } | undefined
+    if (agg) {
+      this.db
+        .prepare('UPDATE threads SET is_read = ?, is_starred = ? WHERE id = ?')
+        .run(agg.all_read ?? rVal, agg.any_starred ?? sVal, row.thread_id)
+    }
   }
 
   updateLocalMessageFlagsByRemoteId(
