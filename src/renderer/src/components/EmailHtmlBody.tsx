@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react'
+import { linkifyElement } from '../utils/linkify'
 
 export interface EmailBodyContextMenuInfo {
   x: number
@@ -45,6 +46,7 @@ export const EmailHtmlBody: React.FC<{
         a {
           color: var(--accent-text);
           text-decoration: underline;
+          cursor: pointer;
         }
         p {
           margin: 0 0 0.75em;
@@ -58,12 +60,22 @@ export const EmailHtmlBody: React.FC<{
       <div class="email-root">${html}</div>
     `
 
+    const emailRoot = shadow.querySelector('.email-root') as HTMLElement | null
+    if (emailRoot) {
+      linkifyElement(emailRoot)
+    }
+
     const onClick = (e: Event) => {
       const target = e.target as HTMLElement | null
       const link = target?.closest?.('a[href]') as HTMLAnchorElement | null
-      if (link && /^https?:\/\//i.test(link.href)) {
+      if (!link) return
+      const rawHref = (link.getAttribute('href') || '').trim()
+      if (/^https?:\/\//i.test(link.href)) {
         e.preventDefault()
         void window.glassmail.openExternal(link.href)
+      } else if (/^www\./i.test(rawHref)) {
+        e.preventDefault()
+        void window.glassmail.openExternal(`https://${rawHref}`)
       }
     }
     const onContextMenu = (e: Event) => {
