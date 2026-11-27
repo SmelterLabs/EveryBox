@@ -14,6 +14,8 @@ import type {
   DecisionAISettings,
   DecisionProviderTestResult,
   Folder,
+  HabitLearningIpcAPI,
+  HabitSuggestion,
   ImplicitCalendarEvent,
   LocalAIStatus,
   MailboxId,
@@ -23,6 +25,8 @@ import type {
   Reminder,
   ScheduledEmail,
   SendEmailPayload,
+  SenderPreference,
+  SenderProfile,
   Snippet,
   SubscriptionGroup,
   ThreadAIMeta,
@@ -57,6 +61,13 @@ const api = {
     ipcRenderer.on('glassmail:reminder-due', handler)
     return () => {
       ipcRenderer.removeListener('glassmail:reminder-due', handler)
+    }
+  },
+  onHabitSuggestion: (cb: (suggestion: HabitSuggestion) => void): (() => void) => {
+    const handler = (_: Electron.IpcRendererEvent, suggestion: HabitSuggestion) => cb(suggestion)
+    ipcRenderer.on('habits:new-suggestion', handler)
+    return () => {
+      ipcRenderer.removeListener('habits:new-suggestion', handler)
     }
   },
 
@@ -282,8 +293,34 @@ const api = {
   getWaitingOnYou: (accountIds?: string[], useAI?: boolean): Promise<WaitingOnYouItem[]> =>
     ipcRenderer.invoke('mail:waiting-on-you', accountIds, useAI),
   listAutopilotLogs: (limit?: number): Promise<AutopilotLogEntry[]> => ipcRenderer.invoke('autopilot:list-logs', limit),
-  undoAutopilotLog: (logId: string, threadId: string, undoAction: string): Promise<{ ok: boolean }> =>
-    ipcRenderer.invoke('autopilot:undo-log', logId, threadId, undoAction),
+  undoAutopilotLog: (
+    logId: string,
+    pauseRuleOrThreadId?: boolean | string,
+    legacyUndoAction?: string
+  ): Promise<{ ok: boolean; error?: string }> => {
+    if (typeof pauseRuleOrThreadId === 'boolean' || pauseRuleOrThreadId === undefined) {
+      return ipcRenderer.invoke('autopilot:undoLog', logId, pauseRuleOrThreadId)
+    }
+    return ipcRenderer.invoke('autopilot:undo-log', logId, pauseRuleOrThreadId, legacyUndoAction)
+  },
+
+  // Habit Learning & Rule Suggestions
+  listHabitSuggestions: (status?: 'pending' | 'accepted' | 'dismissed' | 'all'): Promise<HabitSuggestion[]> =>
+    ipcRenderer.invoke('habits:listSuggestions', status),
+  acceptHabitSuggestion: (
+    suggestionId: string
+  ): Promise<{ ok: boolean; rule?: AutopilotRule; error?: string }> =>
+    ipcRenderer.invoke('habits:acceptSuggestion', suggestionId),
+  dismissHabitSuggestion: (suggestionId: string): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke('habits:dismissSuggestion', suggestionId),
+  listSenderProfiles: (limit?: number): Promise<SenderProfile[]> =>
+    ipcRenderer.invoke('habits:listSenderProfiles', limit),
+  setSenderPreference: (
+    senderEmail: string,
+    preference: SenderPreference,
+    locked?: boolean
+  ): Promise<{ ok: boolean; profile?: SenderProfile }> =>
+    ipcRenderer.invoke('habits:setSenderPreference', senderEmail, preference, locked),
 
   // Voice Profiles
   listVoiceProfiles: (): Promise<VoiceProfile[]> => ipcRenderer.invoke('voices:list'),
@@ -314,7 +351,9 @@ const api = {
 }
 
 export type GlassmailAPI = typeof api
-// Compile-time check that GlassmailAPI satisfies DecisionAIIpcAPI
+// Compile-time checks that GlassmailAPI satisfies DecisionAIIpcAPI and HabitLearningIpcAPI
 const _decisionApiCheck: DecisionAIIpcAPI = api
 void _decisionApiCheck
+const _habitApiCheck: HabitLearningIpcAPI = api
+void _habitApiCheck
 contextBridge.exposeInMainWorld('glassmail', api)
