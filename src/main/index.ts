@@ -42,6 +42,7 @@ import type {
   Folder,
   FolderCreateInput,
   FolderDeleteInput,
+  FolderMoveInput,
   FolderPrefsInput,
   FolderRenameInput,
   HabitActionType,
@@ -555,6 +556,16 @@ function registerIpc(): void {
   })
   ipcMain.handle('folders:rename', async (_, input: FolderRenameInput) => {
     const res = await syncManager.renameFolder(input)
+    if (res.ok) broadcastDataUpdated()
+    return res
+  })
+  ipcMain.handle('folders:move', async (_, input: FolderMoveInput) => {
+    const res = await syncManager.moveFolder(input)
+    if (res.ok) broadcastDataUpdated()
+    return res
+  })
+  ipcMain.handle('folders:reorder', (_, accountId: string, orderedFolderIds: string[]) => {
+    const res = syncManager.reorderFolders(accountId, orderedFolderIds)
     if (res.ok) broadcastDataUpdated()
     return res
   })

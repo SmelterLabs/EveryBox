@@ -7,6 +7,7 @@ import type {
   FolderCreateInput,
   FolderDeleteInput,
   FolderDeletePreview,
+  FolderMoveInput,
   FolderMutationResult,
   FolderPrefsInput,
   FolderRenameInput,
@@ -37,6 +38,7 @@ import {
 import {
   createOutlookFolder,
   deleteOutlookFolder,
+  moveOutlookFolder,
   mutateOutlookComMessages,
   renameOutlookFolder,
   sendOrSaveOutlookComMessage,
@@ -939,6 +941,171 @@ export class SyncManager {
           .filter((x): x is NonNullable<typeof x> => Boolean(x))
 
         const updated = this.db.renameFolderCascade(folder.id, cleanLeaf, res.newPath, res.newPath, childRenames)
+        this.onSyncUpdate()
+        return { ok: true, folder: updated || undefined }
+      }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    } finally {
+      const nextCount = (this.pendingRemoteMutations.get(account.id) || 1) - 1
+      if (nextCount <= 0) this.pendingRemoteMutations.delete(account.id)
+      else this.pendingRemoteMutations.set(account.id, nextCount)
+    }
+  }
+
+  reorderFolders(accountId: string, orderedFolderIds: string[]): { ok: boolean } {
+    if (!accountId || !Array.isArray(orderedFolderIds) || orderedFolderIds.length === 0) {
+      return { ok: false }
+    }
+    this.db.reorderFolders(accountId, orderedFolderIds)
+    this.onSyncUpdate()
+    return { ok: true }
+  }
+
+  async moveFolder(input: FolderMoveInput): Promise<FolderMutationResult> {
+    const folder = this.db.getFolderById(input.folderId)
+    if (!folder) return { ok: false, error: 'Folder not found.' }
+    if (folder.role !== 'custom') return { ok: false, error: 'Cannot move a system folder.' }
+    const account = this.db.getAccount(folder.accountId)
+    if (!account) return { ok: false, error: 'Account not found.' }
+
+    const targetParent = input.targetParentFolderId
+      ? this.db.getFolderById(input.targetParentFolderId)
+      : null
+    if (input.targetParentFolderId && !targetParent) {
+      return { ok: false, error: 'Destination folder not found.' }
+    }
+    if (targetParent) {
+      if (targetParent.accountId !== folder.accountId) {
+        return { ok: false, error: 'Folders can only be moved within the same account.' }
+      }
+      if (targetParent.id === folder.id) {
+        return { ok: false, error: 'Cannot move a folder into itself.' }
+      }
+    }
+
+    const descendants = this.db.findDescendantFolders(folder)
+    if (targetParent && descendants.some((d) => d.id === targetParent.id)) {
+      return { ok: false, error: 'Cannot move a folder into one of its own subfolders.' }
+    }
+
+    const delim = folder.delimiter || '/'
+    const leafParts = (folder.name || folder.path).split(delim).filter(Boolean)
+    const leaf = leafParts[leafParts.length - 1] || folder.name
+
+    // No-op if already under this exact parent
+    const currentParentLower = (folder.parentPath || '').toLowerCase()
+    const targetParentPathLower = (targetParent?.path || '').toLowerCase()
+    if (targetParent && currentParentLower === targetParentPathLower) {
+      return { ok: true, folder }
+    }
+    if (!targetParent && (!folder.parentPath || currentParentLower === 'inbox')) {
+      return { ok: true, folder }
+    }
+
+    if (account.isDemo) {
+      const nextPath = targetParent ? `${targetParent.path}${delim}${leaf}` : leaf
+      const updated = this.db.renameFolderCascade(folder.id, nextPath, nextPath, nextPath)
+      this.onSyncUpdate()
+      return { ok: true, folder: updated || undefined }
+    }
+
+    this.pendingRemoteMutations.set(account.id, (this.pendingRemoteMutations.get(account.id) || 0) + 1)
+    try {
+      if (account.provider === 'gmail') {
+        const settings = this.db.getSettings()
+        const auth = getAuthorizedGoogleClient(
+          account.id,
+          settings.googleOAuthClientId || '',
+          settings.googleOAuthClientSecret || '',
+          this.secrets
+        )
+        if (!auth) return { ok: false, error: 'Gmail authorization expired. Please reconnect account.' }
+        const nextFullName = targetParent ? `${targetParent.path}/${leaf}` : leaf
+        const res = await renameGmailLabel(auth, folder.remoteId, folder.path, nextFullName)
+        const childRenames = res.childRenames.map((cr) => {
+          const match = descendants.find((d) => d.remoteId === cr.remoteId)
+          return {
+            folderId: match ? match.id : `${account.id}|${cr.remoteId}`,
+            newName: cr.newPath,
+            newPath: cr.newPath,
+            newRemoteId: cr.remoteId
+          }
+        })
+        this.recordFolderMutation(account.id, folder.remoteId, 'create')
+        const updated = this.db.renameFolderCascade(folder.id, res.name, res.name, folder.remoteId, childRenames)
+        this.onSyncUpdate()
+        return { ok: true, folder: updated || undefined }
+      } else if (account.provider === 'outlook-local') {
+        const res = await moveOutlookFolder(account, folder.path, targetParent ? targetParent.path : null)
+        if (!res.ok || !res.path) {
+          return { ok: false, error: res.error || 'Could not move Outlook folder.' }
+        }
+        const nextDisplayName = targetParent
+          ? `${targetParent.name}/${res.name || leaf}`
+          : res.name || leaf
+
+        this.recordFolderMutation(account.id, folder.remoteId, 'rename-old')
+        this.recordFolderMutation(account.id, res.path, 'create')
+        for (const d of descendants) {
+          this.recordFolderMutation(account.id, d.remoteId, 'rename-old')
+        }
+
+        const childRenames = (res.childRenames || [])
+          .map((cr) => {
+            const match = descendants.find((d) => d.path.toLowerCase() === cr.oldPath.toLowerCase())
+            if (!match) return null
+            this.recordFolderMutation(account.id, cr.newPath, 'create')
+            const cNewName = match.name.toLowerCase().startsWith(`${folder.name.toLowerCase()}/`)
+              ? `${nextDisplayName}${match.name.slice(folder.name.length)}`
+              : match.name
+            return {
+              folderId: match.id,
+              newName: cNewName,
+              newPath: cr.newPath,
+              newRemoteId: cr.newPath
+            }
+          })
+          .filter((x): x is NonNullable<typeof x> => Boolean(x))
+
+        const updated = this.db.renameFolderCascade(folder.id, nextDisplayName, res.path, res.path, childRenames)
+        this.onSyncUpdate()
+        return { ok: true, folder: updated || undefined }
+      } else {
+        // IMAP: preserve INBOX.<prefix> namespace if the server stores top-level folders under INBOX
+        const usesInboxPrefix = folder.path.toLowerCase().startsWith(`inbox${delim.toLowerCase()}`)
+        const nextPath = targetParent
+          ? `${targetParent.path}${delim}${leaf}`
+          : usesInboxPrefix
+            ? `INBOX${delim}${leaf}`
+            : leaf
+        if (nextPath.toLowerCase() === folder.path.toLowerCase()) {
+          return { ok: true, folder }
+        }
+        const res = await renameImapFolder(account, this.secrets, folder.path, nextPath)
+
+        this.recordFolderMutation(account.id, folder.remoteId, 'rename-old')
+        this.recordFolderMutation(account.id, res.newPath, 'create')
+        for (const d of descendants) {
+          this.recordFolderMutation(account.id, d.remoteId, 'rename-old')
+        }
+
+        const childRenames = res.childRenames
+          .map((cr) => {
+            const match = descendants.find((d) => d.path.toLowerCase() === cr.oldPath.toLowerCase())
+            if (!match) return null
+            this.recordFolderMutation(account.id, cr.newPath, 'create')
+            const parts = cr.newPath.split(res.delimiter)
+            return {
+              folderId: match.id,
+              newName: parts[parts.length - 1] || match.name,
+              newPath: cr.newPath,
+              newRemoteId: cr.newPath
+            }
+          })
+          .filter((x): x is NonNullable<typeof x> => Boolean(x))
+
+        const updated = this.db.renameFolderCascade(folder.id, leaf, res.newPath, res.newPath, childRenames)
         this.onSyncUpdate()
         return { ok: true, folder: updated || undefined }
       }

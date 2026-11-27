@@ -14,6 +14,7 @@ import type {
   FolderCreateInput,
   FolderDeleteInput,
   FolderDeletePreview,
+  FolderMoveInput,
   FolderMutationResult,
   FolderPrefsInput,
   FolderRenameInput,
@@ -206,6 +207,8 @@ interface AppState {
   // Folder CRUD & Preferences
   createFolder: (input: FolderCreateInput) => Promise<FolderMutationResult>
   renameFolder: (input: FolderRenameInput) => Promise<FolderMutationResult>
+  moveFolder: (input: FolderMoveInput) => Promise<FolderMutationResult>
+  reorderFolders: (accountId: string, orderedFolderIds: string[]) => Promise<{ ok: boolean }>
   deleteFolder: (input: FolderDeleteInput) => Promise<FolderMutationResult>
   getFolderDeletePreview: (folderId: string) => Promise<FolderDeletePreview | null>
   updateFolderPrefs: (input: FolderPrefsInput) => Promise<FolderMutationResult>
@@ -1122,6 +1125,35 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().showToast(`Deleted "${folderLabel}"${pausedSuffix}`, undefined, pausedRules.length > 0 ? 6000 : 3500)
     } else {
       get().showToast(res.error || 'Could not delete folder', undefined, 4000)
+    }
+    return res
+  },
+
+  moveFolder: async (input) => {
+    const res = await window.glassmail.moveFolder(input)
+    if (res.ok) {
+      await get().refreshAll()
+      const movedName = res.folder?.name || 'folder'
+      get().showToast(`Moved "${movedName}"`)
+    } else {
+      get().showToast(res.error || 'Could not move folder', undefined, 4500)
+    }
+    return res
+  },
+
+  reorderFolders: async (accountId, orderedFolderIds) => {
+    const orderMap = new Map<string, number>()
+    orderedFolderIds.forEach((id, idx) => orderMap.set(id, idx + 1))
+    set((s) => ({
+      folders: s.folders.map((f) =>
+        f.accountId === accountId && orderMap.has(f.id)
+          ? { ...f, sortOrder: orderMap.get(f.id)! }
+          : f
+      )
+    }))
+    const res = await window.glassmail.reorderFolders(accountId, orderedFolderIds)
+    if (!res.ok) {
+      await get().refreshAll()
     }
     return res
   },
