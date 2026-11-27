@@ -4,6 +4,7 @@ import type {
   Account,
   ActiveView,
   AppSettings,
+  AppUpdateStatus,
   AutopilotLogEntry,
   AutopilotRule,
   CalendarEvent,
@@ -128,6 +129,9 @@ interface AppState {
   composer: ComposerState
   toast: { id: number; message: string; undo?: () => Promise<void>; durationMs: number } | null
   isSyncing: boolean
+  appVersion: string
+  updateStatus: AppUpdateStatus | null
+  checkingForUpdates: boolean
 
   // Actions
   bootstrap: () => Promise<void>
@@ -217,6 +221,7 @@ interface AppState {
   ) => void
   triggerSync: () => Promise<void>
   saveSettings: (s: AppSettings) => Promise<void>
+  checkForUpdates: (opts?: { silent?: boolean }) => Promise<AppUpdateStatus | null>
 }
 
 let toastTimer: number | null = null
@@ -282,17 +287,21 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   toast: null,
   isSyncing: false,
+  appVersion: '',
+  updateStatus: null,
+  checkingForUpdates: false,
 
   bootstrap: async () => {
-    const [settings, accounts, workspaces, snippets] = await Promise.all([
+    const [settings, accounts, workspaces, snippets, appVersion] = await Promise.all([
       window.glassmail.getSettings(),
       window.glassmail.listAccounts(),
       window.glassmail.listWorkspaces(),
-      window.glassmail.listSnippets()
+      window.glassmail.listSnippets(),
+      window.glassmail.getAppVersion().catch(() => '')
     ])
     document.documentElement.setAttribute('data-theme', settings.theme)
     document.documentElement.setAttribute('data-ui-theme', settings.uiTheme || 'everybox')
-    set({ settings, accounts, workspaces, snippets })
+    set({ settings, accounts, workspaces, snippets, appVersion })
     await get().refreshAll()
   },
 
@@ -988,5 +997,34 @@ export const useAppStore = create<AppState>((set, get) => ({
     document.documentElement.setAttribute('data-theme', s.theme)
     document.documentElement.setAttribute('data-ui-theme', s.uiTheme || 'everybox')
     set({ settings: s })
+  },
+
+  checkForUpdates: async (opts) => {
+    if (get().checkingForUpdates) return get().updateStatus
+    set({ checkingForUpdates: true })
+    try {
+      const status = await window.glassmail.checkForUpdates()
+      set({
+        updateStatus: status,
+        appVersion: status.currentVersion || get().appVersion
+      })
+      if (!opts?.silent) {
+        if (status.error) {
+          get().showToast(status.error, undefined, 4000)
+        } else if (status.updateAvailable && status.latestVersion) {
+          get().showToast(`Update available: v${status.latestVersion}`, undefined, 4500)
+        } else {
+          get().showToast(`EveryBox v${status.currentVersion} is up to date`, undefined, 3000)
+        }
+      }
+      return status
+    } catch {
+      if (!opts?.silent) {
+        get().showToast('Could not check for updates', undefined, 4000)
+      }
+      return null
+    } finally {
+      set({ checkingForUpdates: false })
+    }
   }
 }))
