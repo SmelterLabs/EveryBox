@@ -13,6 +13,7 @@ import {
   ExternalLink,
   Folder as FolderIcon,
   FolderInput,
+  FolderPlus,
   Forward,
   Home,
   Inbox,
@@ -81,6 +82,7 @@ export const ThreadReader: React.FC<{ isPopout?: boolean }> = ({ isPopout = fals
     archiveThreads,
     trashThreads,
     moveThreadsToFolder,
+    openMoveToPopover,
     snoozeThreads,
     toggleStarThread,
     openComposer,
@@ -477,7 +479,7 @@ export const ThreadReader: React.FC<{ isPopout?: boolean }> = ({ isPopout = fals
                 background: showMoveMenu ? 'var(--bg-hover)' : undefined,
                 color: 'var(--text-primary)'
               }}
-              title="Move to folder"
+              title="Move to folder (V)"
               aria-label="Move to folder"
               aria-expanded={showMoveMenu}
             >
@@ -600,6 +602,28 @@ export const ThreadReader: React.FC<{ isPopout?: boolean }> = ({ isPopout = fals
                         No matching folders
                       </div>
                     )}
+                  </div>
+                  <div className="shrink-0 border-t p-1" style={{ borderColor: 'var(--border-subtle)' }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowMoveMenu(false)
+                        openMoveToPopover([selectedThread.id], selectedThread.accountId)
+                      }}
+                      className="flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12px] font-medium transition hover:bg-[var(--bg-hover)]"
+                      style={{ color: 'var(--accent-text)' }}
+                    >
+                      <span className="flex items-center gap-2">
+                        <FolderPlus size={13} />
+                        <span>Move to… / New folder</span>
+                      </span>
+                      <kbd
+                        className="rounded border px-1 py-0.5 font-mono text-[10px]"
+                        style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }}
+                      >
+                        V
+                      </kbd>
+                    </button>
                   </div>
                 </div>
               )

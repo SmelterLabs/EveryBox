@@ -97,6 +97,7 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
     archiveThreads,
     trashThreads,
     moveThreadsToFolder,
+    openMoveToPopover,
     snoozeThreads,
     toggleStarThread,
     setStarredThreads,
@@ -326,6 +327,13 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
     ).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
 
     const moveChildren: ContextMenuItem[] = [
+      {
+        label: 'Move to…',
+        icon: <FolderInput size={13} />,
+        shortcut: 'V',
+        onClick: () => openMoveToPopover(targetIds, t.accountId)
+      },
+      { type: 'separator' },
       {
         label: 'Inbox',
         icon: <Inbox size={13} />,
@@ -1117,6 +1125,15 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
               </button>
               <button
                 type="button"
+                onClick={() => openMoveToPopover(checkedThreadIds, selectedThreadObjs[0]?.accountId)}
+                className="rounded p-1 transition hover:bg-[var(--bg-hover)]"
+                title="Move selected to folder (V)"
+                aria-label="Move selected to folder"
+              >
+                <FolderInput size={14} />
+              </button>
+              <button
+                type="button"
                 onClick={() => void archiveThreads(checkedThreadIds)}
                 className="rounded p-1 transition hover:bg-[var(--bg-hover)]"
                 title="Archive selected (E)"
@@ -1277,6 +1294,17 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
                         key={t.id}
                         role="option"
                         aria-selected={isSelected}
+                        draggable
+                        onDragStart={(e) => {
+                          const dragIds =
+                            checkedSet.has(t.id) && checkedThreadIds.length > 0 ? checkedThreadIds : [t.id]
+                          e.dataTransfer.setData(
+                            'application/x-everybox-threads',
+                            JSON.stringify({ threadIds: dragIds, accountId: t.accountId })
+                          )
+                          e.dataTransfer.setData('text/plain', t.subject || 'Conversation')
+                          e.dataTransfer.effectAllowed = 'move'
+                        }}
                         onClick={async () => {
                           if (activeMailbox === 'drafts') {
                             const detail = await window.glassmail.getThread(t.id)

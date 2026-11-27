@@ -15,6 +15,7 @@ import { SubscriptionsView } from './components/SubscriptionsView'
 import { AutopilotView } from './components/AutopilotView'
 import { Composer } from './components/Composer'
 import { CommandPalette } from './components/CommandPalette'
+import { MoveToFolderModal } from './components/MoveToFolderModal'
 import { SettingsModal } from './components/SettingsModal'
 import { ConfirmModal } from './components/ConfirmModal'
 import { ShortcutHelpModal } from './components/ShortcutHelpModal'
@@ -41,6 +42,7 @@ export const App: React.FC = () => {
     searchQuery,
     searchScopeAccountId,
     shortcutHelpOpen,
+    moveToPopover,
     confirmDialog,
     toast,
     activeHabitToast,
@@ -49,6 +51,7 @@ export const App: React.FC = () => {
     setActiveView,
     setCommandPaletteOpen,
     setShortcutHelpOpen,
+    openMoveToPopover,
     closeConfirm,
     openSettings,
     openComposer,
@@ -190,13 +193,16 @@ export const App: React.FC = () => {
   // Global OS-aware & customizable keyboard shortcuts
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      // Do not intercept keys while Settings modal is open (especially when recording shortcuts)
-      if (settingsOpen) return
+      // Do not intercept keys while Settings or Move-To modal is open
+      if (settingsOpen || moveToPopover?.open) return
 
       const target = e.target as HTMLElement | null
       const inInput =
         Boolean(target) &&
-        (target!.tagName === 'INPUT' || target!.tagName === 'TEXTAREA' || target!.isContentEditable)
+        (target!.tagName === 'INPUT' ||
+          target!.tagName === 'TEXTAREA' ||
+          target!.tagName === 'SELECT' ||
+          target!.isContentEditable)
 
       const overrides = settings?.shortcuts
       const match = (id: Parameters<typeof getEffectiveShortcut>[0]) =>
@@ -333,6 +339,13 @@ export const App: React.FC = () => {
       } else if (!e.ctrlKey && !e.metaKey && !e.altKey && k === 'c') {
         e.preventDefault()
         openComposer({ mode: 'new' })
+      } else if (!e.ctrlKey && !e.metaKey && !e.altKey && k === 'v' && activeView === 'mail' && actionTargets.length > 0) {
+        e.preventDefault()
+        const targetAccId =
+          checkedThreadIds.length > 0
+            ? threads.find((t) => t.id === checkedThreadIds[0])?.accountId
+            : selectedThread?.accountId
+        openMoveToPopover(actionTargets, targetAccId)
       } else if (!e.ctrlKey && !e.metaKey && !e.altKey && k === 'x' && selectedThreadId) {
         toggleCheckThread(selectedThreadId)
       } else if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key === '?') {
@@ -351,6 +364,7 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [
     settingsOpen,
+    moveToPopover?.open,
     settings?.shortcuts,
     activeView,
     selectedThreadId,
@@ -360,7 +374,8 @@ export const App: React.FC = () => {
     workspaces,
     toast,
     shortcutHelpOpen,
-    showSearchScopeMenu
+    showSearchScopeMenu,
+    openMoveToPopover
   ])
 
   const uiTheme = settings?.uiTheme || 'everybox'
@@ -373,6 +388,7 @@ export const App: React.FC = () => {
       {/* Overlays */}
       <Composer />
       <CommandPalette />
+      <MoveToFolderModal />
       <SettingsModal />
       <ConfirmModal dialog={confirmDialog} onClose={closeConfirm} />
       <ShortcutHelpModal open={shortcutHelpOpen} onClose={() => setShortcutHelpOpen(false)} />
