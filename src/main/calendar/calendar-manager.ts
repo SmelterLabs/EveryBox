@@ -4,6 +4,7 @@ import type { CalendarEvent, CreateCalendarEventPayload, OutlookCalendarInfo } f
 import { getAuthorizedGoogleClient } from '../mail/gmail-oauth'
 import { createGoogleCalendarEvent, deleteGoogleCalendarEvent, syncGoogleCalendar } from './google-calendar'
 import { createCalDavEvent, exportEventsToIcs, ingestIcsText, syncImapAccountCalendars } from './caldav-sync'
+import { extractMeetingUrl, normalizeEventDescription } from './calendar-utils'
 import { importOutlookCalendar, listOutlookCalendars } from './outlook-import'
 
 export class CalendarManager {
@@ -60,12 +61,23 @@ export class CalendarManager {
     return this.db.listCalendarEvents(startAt, endAt, accountIds)
   }
 
+  findEventForInvite(
+    accountId: string,
+    uid?: string,
+    startAt?: number,
+    title?: string
+  ): CalendarEvent | null {
+    return this.db.findCalendarEventForInvite(accountId, uid, startAt, title)
+  }
+
   async createEvent(payload: CreateCalendarEventPayload): Promise<{ ok: boolean; id?: string; error?: string }> {
     const account = this.db.getAccount(payload.accountId)
     if (!account) return { ok: false, error: 'Account not found.' }
 
     if (account.isDemo || account.provider === 'outlook-local' || (account.provider === 'imap' && !account.caldavUrl)) {
       const id = `${account.id}|local|primary|${Date.now()}`
+      const { description, descriptionHtml } = normalizeEventDescription(payload.description || '')
+      const meetingUrl = extractMeetingUrl(`${payload.location || ''}\n${description}`, descriptionHtml)
       this.db.upsertCalendarEvent({
         id,
         accountId: account.id,
@@ -73,8 +85,11 @@ export class CalendarManager {
         calendarName: account.name,
         remoteId: id,
         title: payload.title,
-        description: payload.description || '',
+        description,
+        descriptionHtml,
         location: payload.location || '',
+        meetingUrl,
+        organizer: { name: account.name || undefined, email: account.email },
         startAt: payload.startAt,
         endAt: payload.endAt,
         allDay: payload.allDay,

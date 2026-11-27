@@ -146,12 +146,19 @@ export interface CalendarInvite {
   uid: string
   summary: string
   description?: string
+  descriptionHtml?: string
   location?: string
+  meetingUrl?: string
   startIso: string
   endIso: string
+  allDay?: boolean
   organizerEmail?: string
   organizerName?: string
-  status?: 'NEEDS-ACTION' | 'ACCEPTED' | 'TENTATIVE' | 'DECLINED'
+  attendees?: { name?: string; email: string; status?: string; organizer?: boolean; optional?: boolean }[]
+  attachments?: { title: string; fileUrl: string; mimeType?: string }[]
+  method?: string
+  status?: 'NEEDS-ACTION' | 'ACCEPTED' | 'TENTATIVE' | 'DECLINED' | 'CANCELLED'
+  calendarEventId?: string
   rawIcs: string
 }
 
@@ -237,12 +244,15 @@ export interface CalendarEvent {
   remoteId: string
   title: string
   description?: string
+  descriptionHtml?: string
   location?: string
   meetingUrl?: string
+  htmlLink?: string
+  organizer?: { name?: string; email: string }
   startAt: number // unix ms
   endAt: number // unix ms
   allDay: boolean
-  attendees: { name?: string; email: string; status?: string }[]
+  attendees: { name?: string; email: string; status?: string; organizer?: boolean; optional?: boolean }[]
   attachments?: { title: string; fileUrl: string; mimeType?: string }[]
   status: 'confirmed' | 'tentative' | 'cancelled'
   source: 'google' | 'microsoft' | 'caldav' | 'ics' | 'local'

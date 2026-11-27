@@ -998,6 +998,11 @@ function registerIpc(): void {
   ipcMain.handle('calendar:list', (_, startAt: number, endAt: number, accountIds?: string[]) =>
     calendarManager.listEvents(startAt, endAt, accountIds)
   )
+  ipcMain.handle(
+    'calendar:find-for-invite',
+    (_, input: { accountId: string; uid?: string; startAt?: number; title?: string }) =>
+      calendarManager.findEventForInvite(input.accountId, input.uid, input.startAt, input.title)
+  )
   ipcMain.handle('calendar:sync', async () => {
     const res = await calendarManager.syncAllCalendars()
     broadcastDataUpdated()

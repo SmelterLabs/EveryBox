@@ -195,6 +195,12 @@ const api = {
   // Combined Calendar
   listCalendarEvents: (startAt: number, endAt: number, accountIds?: string[]): Promise<CalendarEvent[]> =>
     ipcRenderer.invoke('calendar:list', startAt, endAt, accountIds),
+  findCalendarEventForInvite: (input: {
+    accountId: string
+    uid?: string
+    startAt?: number
+    title?: string
+  }): Promise<CalendarEvent | null> => ipcRenderer.invoke('calendar:find-for-invite', input),
   syncCalendars: (): Promise<{ synced: number }> => ipcRenderer.invoke('calendar:sync'),
   createCalendarEvent: (payload: CreateCalendarEventPayload): Promise<{ ok: boolean; id?: string; error?: string }> =>
     ipcRenderer.invoke('calendar:create', payload),

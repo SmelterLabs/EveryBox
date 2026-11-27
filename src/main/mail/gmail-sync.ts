@@ -85,14 +85,17 @@ function extractBodyParts(
         isInline: Boolean(contentIdHeader),
         remoteAttachmentId: part.body?.attachmentId || undefined
       })
-      if ((mime === 'text/calendar' || part.filename.toLowerCase().endsWith('.ics')) && part.body?.data) {
+      if (
+        (mime === 'text/calendar' || mime === 'application/ics' || part.filename.toLowerCase().endsWith('.ics')) &&
+        part.body?.data
+      ) {
         icsRaw = decodeBase64Url(part.body.data)
       }
     } else if (mime === 'text/plain' && part.body?.data) {
       text += decodeBase64Url(part.body.data)
     } else if (mime === 'text/html' && part.body?.data) {
       html += decodeBase64Url(part.body.data)
-    } else if (mime === 'text/calendar' && part.body?.data) {
+    } else if ((mime === 'text/calendar' || mime === 'application/ics') && part.body?.data) {
       icsRaw = decodeBase64Url(part.body.data)
     }
     if (part.parts) {
@@ -569,7 +572,7 @@ async function fetchAndUpsertGmailMessages(
         })
         const signInCode = extractSignInCode(subject, text)
         const scamWarning = detectScamWarning(from, subject)
-        const calendarInvite = icsRaw ? parseIcsInvite(icsRaw) : undefined
+        const calendarInvite = icsRaw ? parseIcsInvite(icsRaw, account.email) : undefined
 
         const msg: Message = {
           id: msgId,

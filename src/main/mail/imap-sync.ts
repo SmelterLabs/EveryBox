@@ -290,7 +290,8 @@ export async function syncImapAccount(
 
                 let icsRaw: string | undefined
                 const attachments: Attachment[] = (parsed.attachments || []).map((a, idx) => {
-                  if (a.contentType === 'text/calendar' || (a.filename || '').toLowerCase().endsWith('.ics')) {
+                  const ct = (a.contentType || '').toLowerCase()
+                  if (ct === 'text/calendar' || ct === 'application/ics' || (a.filename || '').toLowerCase().endsWith('.ics')) {
                     icsRaw = a.content.toString('utf8')
                   }
                   return {
@@ -344,7 +345,7 @@ export async function syncImapAccount(
                   scamWarning: detectScamWarning(from, subject),
                   unsubscribeUrl: unsub.url,
                   unsubscribeMailto: unsub.mailto,
-                  calendarInvite: icsRaw ? parseIcsInvite(icsRaw) : undefined
+                  calendarInvite: icsRaw ? parseIcsInvite(icsRaw, account.email) : undefined
                 }
 
                 db.upsertMessageAndThread(message, remoteThreadId)
