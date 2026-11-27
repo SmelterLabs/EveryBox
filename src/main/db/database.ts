@@ -3154,6 +3154,10 @@ export class GlassmailDB {
     this.db.prepare('DELETE FROM calendar_events WHERE account_id = ? AND source = ?').run(accountId, source)
   }
 
+  deleteCalendarEventsByCalendarId(accountId: string, calendarId: string): void {
+    this.db.prepare('DELETE FROM calendar_events WHERE account_id = ? AND calendar_id = ?').run(accountId, calendarId)
+  }
+
   // ---- Scheduled Emails ----
   listScheduledEmails(accountIds?: string[]): ScheduledEmail[] {
     let sql = "SELECT * FROM scheduled_emails WHERE status = 'pending'"

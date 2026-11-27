@@ -229,9 +229,9 @@ try {
   $items.IncludeRecurrences = $true
 
   $inv = [System.Globalization.CultureInfo]::InvariantCulture
-  $winStart = (Get-Date).AddYears(-1).ToString('MM/dd/yyyy hh:mm tt', $inv)
-  $winEnd = (Get-Date).AddYears(2).ToString('MM/dd/yyyy hh:mm tt', $inv)
-  $filter = "[Start] >= '$winStart' AND [Start] <= '$winEnd'"
+  $winStart = (Get-Date).AddDays(-30).ToString('MM/dd/yyyy hh:mm tt', $inv)
+  $winEnd = (Get-Date).AddDays(120).ToString('MM/dd/yyyy hh:mm tt', $inv)
+  $filter = "[Start] <= '$winEnd' AND [End] >= '$winStart'"
   $restricted = $items.Restrict($filter)
 
   $events = New-Object System.Collections.ArrayList
@@ -386,6 +386,8 @@ try {
     }
 
     const calName = raw.calendarName || 'Outlook Calendar'
+    const calendarId = `outlook:${folderPath}`
+    db.deleteCalendarEventsByCalendarId(account.id, calendarId)
     let imported = 0
     for (const ev of raw.events || []) {
       const startAt = Date.parse(ev.startIso)
