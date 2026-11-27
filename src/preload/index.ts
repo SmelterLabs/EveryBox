@@ -18,6 +18,7 @@ import type {
   FolderCrudIpcAPI,
   FolderDeleteInput,
   FolderDeletePreview,
+  FolderMoveInput,
   FolderMutationResult,
   FolderPrefsInput,
   FolderRenameInput,
@@ -115,6 +116,10 @@ const api = {
     ipcRenderer.invoke('folders:create', input),
   renameFolder: (input: FolderRenameInput): Promise<FolderMutationResult> =>
     ipcRenderer.invoke('folders:rename', input),
+  moveFolder: (input: FolderMoveInput): Promise<FolderMutationResult> =>
+    ipcRenderer.invoke('folders:move', input),
+  reorderFolders: (accountId: string, orderedFolderIds: string[]): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke('folders:reorder', accountId, orderedFolderIds),
   deleteFolder: (input: FolderDeleteInput): Promise<FolderMutationResult> =>
     ipcRenderer.invoke('folders:delete', input),
   getFolderDeletePreview: (folderId: string): Promise<FolderDeletePreview | null> =>

@@ -1189,6 +1189,13 @@ export class GlassmailDB {
     return this.getFolderById(folderId)
   }
 
+  reorderFolders(accountId: string, orderedFolderIds: string[]): void {
+    const stmt = this.db.prepare('UPDATE folders SET sort_order = ? WHERE id = ? AND account_id = ?')
+    for (let i = 0; i < orderedFolderIds.length; i++) {
+      stmt.run(i + 1, orderedFolderIds[i], accountId)
+    }
+  }
+
   pruneMissingFolders(
     accountId: string,
     liveRemoteIds: string[],

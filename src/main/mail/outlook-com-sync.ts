@@ -1353,6 +1353,92 @@ try {
   }>(script, 30_000)
 }
 
+export async function moveOutlookFolder(
+  account: Account,
+  folderPath: string,
+  targetParentPath: string | null
+): Promise<{
+  ok: boolean
+  name?: string
+  path?: string
+  childRenames?: { oldPath: string; newPath: string }[]
+  error?: string
+}> {
+  if (process.platform !== 'win32') {
+    return { ok: false, error: 'Classic Outlook Desktop is only available on Windows.' }
+  }
+
+  const emailB64 = toB64(account.email)
+  const storeB64 = toB64(account.imapHost || account.email)
+  const pathB64 = toB64(folderPath)
+  const parentB64 = toB64(targetParentPath || '')
+
+  const script = `
+${PS_COMMON_HELPERS}
+${PS_OUTLOOK_FOLDER_HELPERS}
+try {
+  $outlook = Get-OutlookApp
+  $ns = $outlook.GetNamespace('MAPI')
+  $store = Find-TargetStore $ns (From-B64 '${emailB64}') (From-B64 '${storeB64}')
+  if ($null -eq $store) { throw 'Outlook store not found for this account.' }
+
+  $root = $store.GetRootFolder()
+  $targetSpec = From-B64 '${pathB64}'
+  $target = Find-FolderByPathOrName $root '' $targetSpec 0
+  if ($null -eq $target) { throw "Folder not found in Outlook: $targetSpec" }
+
+  $defaultIds = Get-DefaultFolderEntryIds $store
+  if ($defaultIds.ContainsKey([string]$target.EntryID)) {
+    throw 'Cannot move a default Outlook system folder.'
+  }
+
+  $parentSpec = From-B64 '${parentB64}'
+  $destParent = $root
+  if ($parentSpec) {
+    $destParent = Find-FolderByPathOrName $root '' $parentSpec 0
+    if ($null -eq $destParent) { throw "Destination folder not found in Outlook: $parentSpec" }
+  }
+
+  if ([string]$target.EntryID -eq [string]$destParent.EntryID) {
+    throw 'Cannot move a folder into itself.'
+  }
+
+  $oldPath = [string]$target.FolderPath
+  $desc = New-Object System.Collections.ArrayList
+  Collect-DescendantFolders $target $desc 0
+
+  $moved = $target.MoveTo($destParent)
+  $newPath = [string]$moved.FolderPath
+
+  $childRenames = New-Object System.Collections.ArrayList
+  foreach ($d in $desc) {
+    $op = [string]$d.path
+    if ($op.ToLower().StartsWith(($oldPath + '\\').ToLower())) {
+      $np = $newPath + $op.Substring($oldPath.Length)
+      $null = $childRenames.Add([PSCustomObject]@{ oldPath = $op; newPath = $np })
+    }
+  }
+
+  ConvertTo-Json -InputObject @{
+    ok           = $true
+    name         = [string]$moved.Name
+    path         = $newPath
+    childRenames = @($childRenames)
+  } -Depth 4 -Compress
+} catch {
+  ConvertTo-Json -InputObject @{ ok = $false; error = $_.Exception.Message } -Compress
+}
+`
+
+  return runPowerShellEncodedJson<{
+    ok: boolean
+    name?: string
+    path?: string
+    childRenames?: { oldPath: string; newPath: string }[]
+    error?: string
+  }>(script, 30_000)
+}
+
 export async function deleteOutlookFolder(
   account: Account,
   folderPath: string,

@@ -155,6 +155,11 @@ export interface FolderRenameInput {
   newName: string
 }
 
+export interface FolderMoveInput {
+  folderId: string
+  targetParentFolderId: string | null
+}
+
 export interface FolderDeleteInput {
   folderId: string
   strategy?: FolderDeleteStrategy
@@ -193,6 +198,8 @@ export interface FolderMutationResult {
 export interface FolderCrudIpcAPI {
   createFolder: (input: FolderCreateInput) => Promise<FolderMutationResult>
   renameFolder: (input: FolderRenameInput) => Promise<FolderMutationResult>
+  moveFolder: (input: FolderMoveInput) => Promise<FolderMutationResult>
+  reorderFolders: (accountId: string, orderedFolderIds: string[]) => Promise<{ ok: boolean }>
   deleteFolder: (input: FolderDeleteInput) => Promise<FolderMutationResult>
   getFolderDeletePreview: (folderId: string) => Promise<FolderDeletePreview | null>
   updateFolderPrefs: (input: FolderPrefsInput) => Promise<FolderMutationResult>

@@ -106,6 +106,8 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
     setFolderExpanded,
     toggleShowHiddenFolders,
     moveThreadsToFolder,
+    moveFolder,
+    reorderFolders,
     updateFolderPrefs,
     syncSingleFolder,
     openAutopilotWithPrompt,
@@ -170,10 +172,18 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
   const [savingAccount, setSavingAccount] = useState(false)
   const [draggedAccountId, setDraggedAccountId] = useState<string | null>(null)
   const [dragOverAccountId, setDragOverAccountId] = useState<string | null>(null)
+  const [draggedFolder, setDraggedFolder] = useState<Folder | null>(null)
+  const [folderDropTarget, setFolderDropTarget] = useState<{
+    key: string
+    zone: 'before' | 'inside' | 'after'
+  } | null>(null)
+  const [folderRootDropAccountId, setFolderRootDropAccountId] = useState<string | null>(null)
   const [threadDropTargetKey, setThreadDropTargetKey] = useState<string | null>(null)
   const springLoadTimerRef = useRef<number | null>(null)
   const springLoadTargetRef = useRef<string | null>(null)
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+
+  const FOLDER_DND_MIME = 'application/x-everybox-folder'
 
   const clearSpringLoad = () => {
     if (springLoadTimerRef.current !== null) {
@@ -187,6 +197,62 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
 
   const isThreadDragEvent = (e: React.DragEvent): boolean =>
     Array.from(e.dataTransfer.types || []).includes(THREAD_DND_MIME)
+
+  const isFolderDragEvent = (e: React.DragEvent): boolean =>
+    Boolean(draggedFolder) || Array.from(e.dataTransfer.types || []).includes(FOLDER_DND_MIME)
+
+  const isFolderDescendant = (ancestor: Folder, candidate: Folder): boolean => {
+    const delim = (ancestor.delimiter || '/').toLowerCase()
+    const ancPath = (ancestor.path || '').toLowerCase()
+    const candPath = (candidate.path || '').toLowerCase()
+    const candParent = (candidate.parentPath || '').toLowerCase()
+    if (!ancPath) return false
+    return candPath.startsWith(`${ancPath}${delim}`) || candParent === ancPath || candParent.startsWith(`${ancPath}${delim}`)
+  }
+
+  const handleFolderDropOnNode = async (
+    source: Folder,
+    targetNode: FolderTreeNode,
+    siblings: FolderTreeNode[],
+    parentFolderId: string | null,
+    zone: 'before' | 'inside' | 'after'
+  ) => {
+    const targetFolder = targetNode.folder
+    if (!targetFolder || source.accountId !== targetFolder.accountId || source.id === targetFolder.id) return
+    if (isFolderDescendant(source, targetFolder)) return
+
+    if (zone === 'inside') {
+      const res = await moveFolder({ folderId: source.id, targetParentFolderId: targetFolder.id })
+      if (res.ok) {
+        setFolderExpanded(targetNode.key, true)
+      }
+      return
+    }
+
+    const siblingIds = siblings.map((n) => n.folder?.id).filter((id): id is string => Boolean(id))
+    const isSameParent = siblingIds.includes(source.id)
+
+    if (isSameParent) {
+      const withoutSource = siblingIds.filter((id) => id !== source.id)
+      const targetIdx = withoutSource.indexOf(targetFolder.id)
+      if (targetIdx === -1) return
+      const insertAt = zone === 'before' ? targetIdx : targetIdx + 1
+      withoutSource.splice(insertAt, 0, source.id)
+      await reorderFolders(source.accountId, withoutSource)
+      return
+    }
+
+    // Dragged from a different parent level onto a before/after slot: move to this parent, then sort
+    const res = await moveFolder({ folderId: source.id, targetParentFolderId: parentFolderId })
+    if (res.ok && res.folder) {
+      const nextIds = siblingIds.filter((id) => id !== res.folder!.id && id !== source.id)
+      const targetIdx = nextIds.indexOf(targetFolder.id)
+      if (targetIdx !== -1) {
+        nextIds.splice(zone === 'before' ? targetIdx : targetIdx + 1, 0, res.folder.id)
+        await reorderFolders(source.accountId, nextIds)
+      }
+    }
+  }
 
   const scheduleSpringLoad = (targetKey: string, action: () => void) => {
     if (springLoadTargetRef.current === targetKey) return
@@ -673,7 +739,9 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
     node: FolderTreeNode,
     acc: Account,
     isSoloed: boolean,
-    mutedOpacity = false
+    mutedOpacity = false,
+    siblings: FolderTreeNode[] = [],
+    parentFolderId: string | null = null
   ): React.ReactNode => {
     const isGmail = acc.provider === 'gmail'
     const folder = node.folder
@@ -690,52 +758,126 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
     const showDirectUnread = (!node.hasChildren || isExpanded) && node.unreadCount > 0
     const dropKey = `folder:${node.key}`
     const isThreadDropOver = threadDropTargetKey === dropKey
+    const isBeingDragged = Boolean(folder && draggedFolder?.id === folder.id)
+    const activeFolderDropZone = folderDropTarget?.key === node.key ? folderDropTarget.zone : null
+
+    const rowBoxShadow =
+      isThreadDropOver || activeFolderDropZone === 'inside'
+        ? 'inset 0 0 0 1px var(--accent)'
+        : activeFolderDropZone === 'before'
+          ? 'inset 0 2px 0 0 var(--accent)'
+          : activeFolderDropZone === 'after'
+            ? 'inset 0 -2px 0 0 var(--accent)'
+            : undefined
 
     return (
       <div key={node.key}>
         <div
+          draggable={Boolean(folder)}
+          onDragStart={(e) => {
+            if (!folder) return
+            e.stopPropagation()
+            e.dataTransfer.setData(
+              FOLDER_DND_MIME,
+              JSON.stringify({ folderId: folder.id, accountId: acc.id })
+            )
+            e.dataTransfer.effectAllowed = 'move'
+            setDraggedFolder(folder)
+          }}
+          onDragEnd={() => {
+            clearSpringLoad()
+            setDraggedFolder(null)
+            setFolderDropTarget(null)
+            setFolderRootDropAccountId(null)
+          }}
           className="group flex items-center rounded-md pl-0.5 pr-1.5 transition hover:bg-[var(--bg-hover)]"
           style={{
-            background: isThreadDropOver
-              ? 'var(--accent-soft)'
-              : isItemActive
-                ? 'var(--bg-selected)'
-                : undefined,
-            boxShadow: isThreadDropOver ? 'inset 0 0 0 1px var(--accent)' : undefined,
-            opacity: mutedOpacity ? 0.65 : 1
+            background:
+              isThreadDropOver || activeFolderDropZone === 'inside'
+                ? 'var(--accent-soft)'
+                : isItemActive
+                  ? 'var(--bg-selected)'
+                  : undefined,
+            boxShadow: rowBoxShadow,
+            opacity: isBeingDragged ? 0.45 : mutedOpacity ? 0.65 : 1
           }}
-          title={node.fullPath}
+          title={
+            folder
+              ? `${node.fullPath} · Drag to reorder or drop onto another folder to nest`
+              : node.fullPath
+          }
           onDragOver={(e) => {
-            if (!isThreadDragEvent(e)) return
-            e.preventDefault()
-            e.stopPropagation()
-            e.dataTransfer.dropEffect = 'move'
-            if (node.hasChildren && !isExpanded) {
-              scheduleSpringLoad(dropKey, () => setFolderExpanded(node.key, true))
+            if (isThreadDragEvent(e)) {
+              e.preventDefault()
+              e.stopPropagation()
+              e.dataTransfer.dropEffect = 'move'
+              if (node.hasChildren && !isExpanded) {
+                scheduleSpringLoad(dropKey, () => setFolderExpanded(node.key, true))
+              }
+              if (folder && threadDropTargetKey !== dropKey) {
+                setThreadDropTargetKey(dropKey)
+              }
+              return
             }
-            if (folder && threadDropTargetKey !== dropKey) {
-              setThreadDropTargetKey(dropKey)
+            if (
+              isFolderDragEvent(e) &&
+              draggedFolder &&
+              folder &&
+              draggedFolder.accountId === acc.id &&
+              draggedFolder.id !== folder.id &&
+              !isFolderDescendant(draggedFolder, folder)
+            ) {
+              e.preventDefault()
+              e.stopPropagation()
+              e.dataTransfer.dropEffect = 'move'
+              const rect = e.currentTarget.getBoundingClientRect()
+              const ratio = rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0.5
+              const zone: 'before' | 'inside' | 'after' =
+                ratio < 0.28 ? 'before' : ratio > 0.72 ? 'after' : 'inside'
+              if (zone === 'inside' && node.hasChildren && !isExpanded) {
+                scheduleSpringLoad(dropKey, () => setFolderExpanded(node.key, true))
+              } else if (springLoadTargetRef.current === dropKey) {
+                clearSpringLoad()
+              }
+              if (folderDropTarget?.key !== node.key || folderDropTarget?.zone !== zone) {
+                setFolderDropTarget({ key: node.key, zone })
+              }
             }
           }}
           onDragLeave={(e) => {
             if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
             if (springLoadTargetRef.current === dropKey) clearSpringLoad()
             if (threadDropTargetKey === dropKey) setThreadDropTargetKey(null)
+            if (folderDropTarget?.key === node.key) setFolderDropTarget(null)
           }}
           onDrop={(e) => {
-            if (!isThreadDragEvent(e)) return
-            if (folder) {
-              handleThreadDropOnFolder(e, {
-                accountId: acc.id,
-                role: 'custom',
-                folderName: folder.path || folder.name,
-                folderId: folder.id
-              })
-            } else {
+            if (isThreadDragEvent(e)) {
+              if (folder) {
+                handleThreadDropOnFolder(e, {
+                  accountId: acc.id,
+                  role: 'custom',
+                  folderName: folder.path || folder.name,
+                  folderId: folder.id
+                })
+              } else {
+                e.preventDefault()
+                e.stopPropagation()
+                clearSpringLoad()
+                setThreadDropTargetKey(null)
+              }
+              return
+            }
+            if (isFolderDragEvent(e) && draggedFolder && folder) {
               e.preventDefault()
               e.stopPropagation()
+              const zone =
+                folderDropTarget?.key === node.key ? folderDropTarget.zone : 'inside'
+              const source = draggedFolder
               clearSpringLoad()
-              setThreadDropTargetKey(null)
+              setDraggedFolder(null)
+              setFolderDropTarget(null)
+              setFolderRootDropAccountId(null)
+              void handleFolderDropOnNode(source, node, siblings, parentFolderId, zone)
             }
           }}
           onContextMenu={(e) => {
@@ -833,7 +975,9 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
                 : undefined
             }
           >
-            {node.children.map((child) => renderCustomFolderNode(child, acc, isSoloed, mutedOpacity))}
+            {node.children.map((child) =>
+              renderCustomFolderNode(child, acc, isSoloed, mutedOpacity, node.children, folder?.id ?? null)
+            )}
           </div>
         )}
       </div>
@@ -1663,10 +1807,53 @@ export const Sidebar: React.FC<{ width?: number }> = ({ width = 244 }) => {
                       })}
 
                       {hasAnyCustom && (
-                        <div className="my-1.5 h-px" style={{ background: 'var(--border-subtle)' }} />
+                        draggedFolder &&
+                        draggedFolder.accountId === acc.id &&
+                        Boolean(draggedFolder.parentPath) &&
+                        draggedFolder.parentPath?.toLowerCase() !== 'inbox' ? (
+                          <div
+                            onDragOver={(e) => {
+                              if (!isFolderDragEvent(e) || !draggedFolder || draggedFolder.accountId !== acc.id) return
+                              e.preventDefault()
+                              e.stopPropagation()
+                              e.dataTransfer.dropEffect = 'move'
+                              if (folderRootDropAccountId !== acc.id) setFolderRootDropAccountId(acc.id)
+                            }}
+                            onDragLeave={(e) => {
+                              if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
+                              if (folderRootDropAccountId === acc.id) setFolderRootDropAccountId(null)
+                            }}
+                            onDrop={(e) => {
+                              if (!isFolderDragEvent(e) || !draggedFolder || draggedFolder.accountId !== acc.id) return
+                              e.preventDefault()
+                              e.stopPropagation()
+                              const source = draggedFolder
+                              clearSpringLoad()
+                              setDraggedFolder(null)
+                              setFolderDropTarget(null)
+                              setFolderRootDropAccountId(null)
+                              void moveFolder({ folderId: source.id, targetParentFolderId: null })
+                            }}
+                            className="my-1 rounded-md border border-dashed px-2 py-1 text-center text-[10.5px] font-medium transition"
+                            style={{
+                              borderColor:
+                                folderRootDropAccountId === acc.id ? 'var(--accent)' : 'var(--border-strong)',
+                              background:
+                                folderRootDropAccountId === acc.id ? 'var(--accent-soft)' : 'transparent',
+                              color:
+                                folderRootDropAccountId === acc.id ? 'var(--accent-text)' : 'var(--text-muted)'
+                            }}
+                          >
+                            Drop here to move to top level
+                          </div>
+                        ) : (
+                          <div className="my-1.5 h-px" style={{ background: 'var(--border-subtle)' }} />
+                        )
                       )}
 
-                      {visibleCustomTree.map((node) => renderCustomFolderNode(node, acc, isSoloed, false))}
+                      {visibleCustomTree.map((node) =>
+                        renderCustomFolderNode(node, acc, isSoloed, false, visibleCustomTree, null)
+                      )}
 
                       {hiddenCustomFolders.length > 0 && (
                         <div className="pt-1">
