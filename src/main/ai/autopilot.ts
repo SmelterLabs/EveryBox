@@ -203,11 +203,24 @@ async function threadMatchesRule(
     if (ageHours < c.olderThanHours) return false
   }
   if (c.aiPrompt) {
+    // Reuse single-pass Decision AI rule evaluation when already persisted for this message timestamp
+    const meta = db.getThreadAiMeta(t.id)
+    if (
+      meta &&
+      meta.classifiedMsgAt === t.lastMessageAt &&
+      meta.modelLabel &&
+      meta.modelLabel !== 'tier0-rules' &&
+      Array.isArray(meta.matchedRuleIds)
+    ) {
+      return meta.matchedRuleIds.includes(rule.id)
+    }
+
     try {
       const settings = db.getSettings()
       const res = await completeAI(
         {
           maxTokens: 20,
+          priority: 'background',
           system: 'Answer ONLY "YES" or "NO".',
           prompt: `Rule question: ${c.aiPrompt}\n\nEmail:\nFrom: ${t.latestFrom.name} <${t.latestFrom.email}>\nSubject: ${t.subject}\nSnippet: ${t.snippet}`
         },
@@ -306,8 +319,10 @@ export async function runAutopilotPass(
               summaries.push('Notified')
             }
           } else if (act.type === 'preDraft') {
-            if (!db.getPreDraft(t.id) && !attemptedPreDraftThreads.has(t.id)) {
+            if (!db.getPreDraft(t.id, { includeDismissed: true }) && !attemptedPreDraftThreads.has(t.id)) {
               attemptedPreDraftThreads.add(t.id)
+              const detail = db.getThreadDetail(t.id)
+              const latestMsg = detail?.messages[detail.messages.length - 1]
               const res = await draftVoiceMatchedReply({
                 accountId: t.accountId,
                 threadId: t.id,
@@ -322,7 +337,10 @@ export async function runAutopilotPass(
                   subject: t.subject.startsWith('Re:') ? t.subject : `Re: ${t.subject}`,
                   body: res.draft,
                   providerLabel: res.providerLabel,
-                  createdAt: Date.now()
+                  createdAt: Date.now(),
+                  messageId: latestMsg?.id,
+                  status: 'ready',
+                  source: 'auto'
                 })
                 summaries.push('Pre-drafted reply')
               }
@@ -350,13 +368,18 @@ export async function runAutopilotPass(
       }
     }
 
-    // 3. Built-in Background Pre-Drafts:
-    //    (a) Always-auto-draft VIP senders run first (even if blanket autoPreDraftPeople is off) and bypass automated heuristics
-    //    (b) General unread human emails run when autoPreDraftPeople is on (with strict automated/newsletter filters)
+    // 3. Built-in Background Pre-Drafts (6-Point Auto-Draft Gate):
+    //    (a) Always-auto-draft VIP senders run first (even if blanket autoPreDraftPeople is off) and bypass Gate 4
+    //    (b) General unread human emails run when autoPreDraftPeople is on and must pass all 6 gates
     const alwaysSenders = (settings.autopilot?.preDraftAlwaysSenders || []).map((s) => s.toLowerCase())
     if (settings.autopilot?.autoPreDraftPeople || alwaysSenders.length > 0) {
       const disabledAccs = new Set(settings.autopilot?.preDraftDisabledAccountIds || [])
       const excludedSenders = (settings.autopilot?.preDraftExcludedSenders || []).map((s) => s.toLowerCase())
+      const minConfidence = settings.ai.decision?.autoDraftMinConfidence ?? 0.8
+      const maxAgeMs = 48 * 3600_000
+      const now = Date.now()
+      const metaByThread = db.getThreadAiMetaBatch(inboxThreads.map((t) => t.id))
+
       const matchesList = (email: string, list: string[]) =>
         list.some((entry) => (entry.startsWith('@') ? email.endsWith(entry) : email === entry))
       const automatedSenderRe =
@@ -364,7 +387,11 @@ export async function runAutopilotPass(
       const automatedSubjectRe =
         /\b(ordered\s+\d|order\s*#|your\s+order|has\s+shipped|out\s+for\s+delivery|delivered:|receipt\s+for|invoice\s*#|payment\s+received|black\s+friday|%\s*off|sale\s+ends|weekly\s+digest|daily\s+digest|price\s+change|security\s+alert|unrecognized\s+device|sign-?in\s+code|verification\s+code|newsletter|unsubscribe)\b/i
 
-      const runDraftForThread = async (t: ThreadSummary, label: string): Promise<boolean> => {
+      const runDraftForThread = async (
+        t: ThreadSummary,
+        latestMsgId: string | undefined,
+        label: string
+      ): Promise<boolean> => {
         attemptedPreDraftThreads.add(t.id)
         const res = await draftVoiceMatchedReply({
           accountId: t.accountId,
@@ -374,13 +401,17 @@ export async function runAutopilotPass(
           secrets
         })
         if (res.draft && !res.error) {
+          // Gate 6: persist with messageId, status: 'ready', source: 'auto'
           db.upsertPreDraft({
             threadId: t.id,
             accountId: t.accountId,
             subject: t.subject.startsWith('Re:') ? t.subject : `Re: ${t.subject}`,
             body: res.draft,
             providerLabel: res.providerLabel,
-            createdAt: Date.now()
+            createdAt: Date.now(),
+            messageId: latestMsgId,
+            status: 'ready',
+            source: 'auto'
           })
           db.addAutopilotLog({
             id: randomUUID(),
@@ -397,20 +428,97 @@ export async function runAutopilotPass(
         return false
       }
 
-      // (a) Priority pass for "Always auto-draft" senders
+      const evaluateSixPointGate = (
+        t: ThreadSummary,
+        isVip: boolean
+      ): { pass: boolean; latestMsgId?: string } => {
+        if (t.isRead || disabledAccs.has(t.accountId)) return { pass: false }
+        const fromEmail = (t.latestFrom.email || '').toLowerCase()
+        const accEmail = (t.accountEmail || '').toLowerCase()
+        if (!fromEmail || fromEmail === accEmail) return { pass: false }
+        if (matchesList(fromEmail, excludedSenders)) return { pass: false }
+        if (attemptedPreDraftThreads.has(t.id)) return { pass: false }
+
+        // Gate 1: Tier 0 pass (not automated / unsubscribe / security)
+        if (!isVip) {
+          if (t.category !== 'people') return { pass: false }
+          if (t.unsubscribeUrl || t.signInCode) return { pass: false }
+          if (automatedSenderRe.test(fromEmail)) return { pass: false }
+          if (automatedSubjectRe.test(`${t.subject} ${t.snippet}`)) return { pass: false }
+        }
+
+        // Gate 3 (early check): not already replied to, not already drafted or dismissed in thread_predrafts
+        if (t.waitingSince) return { pass: false }
+        const existingPreDraft = db.getPreDraft(t.id, { includeDismissed: true })
+        if (existingPreDraft) return { pass: false }
+
+        const detail = db.getThreadDetail(t.id)
+        const nonDrafts = detail?.messages.filter((m) => !m.isDraft) || []
+        const latestMsg = nonDrafts[nonDrafts.length - 1]
+        if (!latestMsg) return { pass: false }
+
+        // Gate 3 (continued): latest message is inbound and < 48h old
+        if (latestMsg.isSent) return { pass: false }
+        if (now - latestMsg.date > maxAgeMs) return { pass: false }
+
+        // Gate 1 (body check for disguised newsletters on non-VIP)
+        if (!isVip) {
+          const fullBodyCheck = `${latestMsg.bodyText || ''} ${latestMsg.bodyHtml || ''}`
+          if (
+            /unsubscribe|manage\s+(?:your\s+)?(?:email\s+)?preferences|email\s+preferences|view\s+(?:this\s+email\s+)?in\s+(?:your\s+)?browser|opt[\s-]out/i.test(
+              fullBodyCheck
+            )
+          ) {
+            attemptedPreDraftThreads.add(t.id)
+            return { pass: false }
+          }
+
+          // Gate 2: User's account email is in To: (not CC-only) and total recipients <= 4
+          const toList = (latestMsg.to || []).map((a) => (a.email || '').toLowerCase().trim()).filter(Boolean)
+          const ccList = (latestMsg.cc || []).map((a) => (a.email || '').toLowerCase().trim()).filter(Boolean)
+          const totalRecipients = toList.length + ccList.length
+          if (toList.length > 0 && accEmail && !toList.includes(accEmail)) {
+            return { pass: false }
+          }
+          if (totalRecipients > 4) {
+            return { pass: false }
+          }
+        }
+
+        const meta = metaByThread[t.id]
+
+        // Gate 5: Safety gate — never auto-draft on suspicious/phishing mail
+        if (t.scamWarning || (meta && meta.phishingRisk > 0)) {
+          return { pass: false }
+        }
+
+        // Gate 4: Persisted thread_ai_meta confidence check (VIP alwaysSenders bypasses Gate 4)
+        if (!isVip) {
+          if (
+            !meta ||
+            !meta.modelLabel ||
+            meta.modelLabel === 'tier0-rules' ||
+            !meta.needsReply ||
+            !meta.autoDraftWorthy ||
+            meta.replyConfidence < minConfidence
+          ) {
+            return { pass: false }
+          }
+        }
+
+        return { pass: true, latestMsgId: latestMsg.id }
+      }
+
+      // (a) Priority pass for "Always auto-draft" VIP senders
       if (alwaysSenders.length > 0) {
         let vipDrafted = 0
         for (const t of inboxThreads) {
           if (vipDrafted >= 4) break
-          if (t.isRead || t.waitingSince) continue
-          if (disabledAccs.has(t.accountId)) continue
           const fromEmail = (t.latestFrom.email || '').toLowerCase()
-          const accEmail = (t.accountEmail || '').toLowerCase()
-          if (!fromEmail || fromEmail === accEmail) continue
           if (!matchesList(fromEmail, alwaysSenders)) continue
-          if (matchesList(fromEmail, excludedSenders)) continue
-          if (db.getPreDraft(t.id) || attemptedPreDraftThreads.has(t.id)) continue
-          if (await runDraftForThread(t, 'Always Auto-Draft')) {
+          const gate = evaluateSixPointGate(t, true)
+          if (!gate.pass) continue
+          if (await runDraftForThread(t, gate.latestMsgId, 'Always Auto-Draft')) {
             vipDrafted++
           }
         }
@@ -421,31 +529,9 @@ export async function runAutopilotPass(
         let drafted = 0
         for (const t of inboxThreads) {
           if (drafted >= 2) break
-          if (t.isRead || t.waitingSince || t.category !== 'people') continue
-          if (disabledAccs.has(t.accountId)) continue
-          if (t.unsubscribeUrl || t.signInCode) continue
-          const fromEmail = (t.latestFrom.email || '').toLowerCase()
-          const accEmail = (t.accountEmail || '').toLowerCase()
-          if (!fromEmail || fromEmail === accEmail) continue
-          if (automatedSenderRe.test(fromEmail)) continue
-          if (automatedSubjectRe.test(`${t.subject} ${t.snippet}`)) continue
-          if (matchesList(fromEmail, excludedSenders)) continue
-          if (db.getPreDraft(t.id) || attemptedPreDraftThreads.has(t.id)) continue
-
-          // Inspect full latest message body to reject disguised newsletters (unsubscribe / preferences footers)
-          const detail = db.getThreadDetail(t.id)
-          const latestMsg = detail?.messages[detail.messages.length - 1]
-          const fullBodyCheck = `${latestMsg?.bodyText || ''} ${latestMsg?.bodyHtml || ''}`
-          if (
-            /unsubscribe|manage\s+(?:your\s+)?(?:email\s+)?preferences|email\s+preferences|view\s+(?:this\s+email\s+)?in\s+(?:your\s+)?browser|opt[\s-]out/i.test(
-              fullBodyCheck
-            )
-          ) {
-            attemptedPreDraftThreads.add(t.id)
-            continue
-          }
-
-          if (await runDraftForThread(t, 'Background Pre-Drafts')) {
+          const gate = evaluateSixPointGate(t, false)
+          if (!gate.pass) continue
+          if (await runDraftForThread(t, gate.latestMsgId, 'Background Pre-Drafts')) {
             drafted++
           }
         }
@@ -528,26 +614,61 @@ export async function getWaitingOnYouItems(
     limit: 80
   })
 
-  const unreadCandidates = inbox.filter((t) => {
-    if (t.isRead) return false
-    if (dismissedIds.has(t.id)) return false
-    if (t.unsubscribeUrl || t.signInCode) return false
-    if (t.category === 'updates') return false
+  // First read persisted thread_ai_meta directly from SQLite — instant across restarts
+  const metaMap = db.getThreadAiMetaBatch(inbox.map((t) => t.id))
+  const persistedItems: { item: WaitingOnYouItem; urgency: number; confidence: number }[] = []
+  const unclassifiedCandidates: ThreadSummary[] = []
+
+  for (const t of inbox) {
+    if (t.isRead) continue
+    if (dismissedIds.has(t.id)) continue
     const fromEmail = (t.latestFrom.email || '').toLowerCase()
-    if (!fromEmail || fromEmail === (t.accountEmail || '').toLowerCase()) return false
-    if (WAITING_AUTOMATED_RE.test(fromEmail)) return false
+    if (!fromEmail || fromEmail === (t.accountEmail || '').toLowerCase()) continue
     if (excludedSenders.some((ex) => (ex.startsWith('@') ? fromEmail.endsWith(ex) : fromEmail === ex))) {
-      return false
+      continue
     }
-    return true
-  })
 
-  if (unreadCandidates.length === 0) return []
+    const meta = metaMap[t.id]
+    if (meta && meta.classifiedMsgAt === t.lastMessageAt && meta.modelLabel) {
+      if (meta.needsReply && (meta.phishingRisk ?? 0) < 2) {
+        persistedItems.push({
+          item: {
+            thread: t,
+            reason: meta.aiReason || 'Needs your reply',
+            aiVerified: true
+          },
+          urgency: meta.urgency,
+          confidence: meta.replyConfidence
+        })
+      }
+      // Already classified in SQLite (needsReply === false) — skip redundant LLM calls
+      continue
+    }
 
+    // Fallback candidate for threads not yet triaged by TriageWorker
+    if (t.unsubscribeUrl || t.signInCode) continue
+    if (t.category === 'updates') continue
+    if (WAITING_AUTOMATED_RE.test(fromEmail)) continue
+    unclassifiedCandidates.push(t)
+  }
+
+  persistedItems.sort(
+    (a, b) =>
+      b.urgency - a.urgency ||
+      b.confidence - a.confidence ||
+      b.item.thread.lastMessageAt - a.item.thread.lastMessageAt
+  )
+
+  const verifiedResults: WaitingOnYouItem[] = persistedItems.slice(0, 5).map((p) => p.item)
+  if (verifiedResults.length >= 5 || unclassifiedCandidates.length === 0) {
+    return verifiedResults
+  }
+
+  const remainingSlots = 5 - verifiedResults.length
   const knownContacts = db.getKnownCorrespondentEmails()
-  const repliedThreadIds = db.getThreadIdsWithUserSent(unreadCandidates.map((t) => t.id))
+  const repliedThreadIds = db.getThreadIdsWithUserSent(unclassifiedCandidates.map((t) => t.id))
 
-  const scored = unreadCandidates
+  const scored = unclassifiedCandidates
     .map((t) => {
       const fromEmail = (t.latestFrom.email || '').toLowerCase()
       let score = 0
@@ -575,16 +696,17 @@ export async function getWaitingOnYouItems(
     .slice(0, 8)
 
   if (!useAI || scored.length === 0) {
-    return scored.slice(0, 5).map((s) => {
+    const fallback = scored.slice(0, remainingSlots).map((s) => {
       const cached = waitingAICache.get(s.thread.id)
       if (cached && cached.lastMessageAt === s.thread.lastMessageAt) {
         return { thread: s.thread, reason: cached.reason || s.reason, aiVerified: true }
       }
       return { thread: s.thread, reason: s.reason, aiVerified: false }
     })
+    return [...verifiedResults, ...fallback]
   }
 
-  // Tier 2: Enrich any uncached candidates in one fast batch AI call
+  // Tier 2: Enrich any uncached unclassified candidates in one fast batch AI call
   const uncached = scored.filter((s) => {
     const c = waitingAICache.get(s.thread.id)
     return !c || c.lastMessageAt !== s.thread.lastMessageAt
@@ -602,6 +724,7 @@ export async function getWaitingOnYouItems(
         {
           maxTokens: 600,
           jsonMode: true,
+          priority: 'background',
           system: `You filter an email inbox for "Waiting on you" — ONLY emails from real humans or important senders that genuinely require a reply, decision, or action from the user. Reject newsletters, digests, marketing, cold pitches, and FYI notifications.
 Return ONLY a JSON array:
 [{"id":"...","needsYou":true,"reason":"3-5 word reason like 'Needs final SOW' or 'Asking for meeting time'"}]`,
@@ -629,8 +752,9 @@ Return ONLY a JSON array:
     }
   }
 
-  const finalItems: WaitingOnYouItem[] = []
+  const finalItems: WaitingOnYouItem[] = [...verifiedResults]
   for (const s of scored) {
+    if (finalItems.length >= 5) break
     const c = waitingAICache.get(s.thread.id)
     if (c && c.lastMessageAt === s.thread.lastMessageAt) {
       if (!c.needsYou) continue
@@ -638,7 +762,6 @@ Return ONLY a JSON array:
     } else {
       finalItems.push({ thread: s.thread, reason: s.reason, aiVerified: false })
     }
-    if (finalItems.length >= 5) break
   }
 
   return finalItems

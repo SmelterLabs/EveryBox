@@ -11,6 +11,7 @@ import type {
   CreateReminderPayload,
   EmailAddress,
   Folder,
+  ImplicitCalendarEvent,
   MailboxId,
   Message,
   ParsedSearchQuery,
@@ -18,6 +19,9 @@ import type {
   ScheduledEmail,
   Snippet,
   SubscriptionGroup,
+  ThreadAIBundle,
+  ThreadAIMeta,
+  ThreadAISummary,
   ThreadDetail,
   ThreadPreDraft,
   ThreadSummary,
@@ -55,7 +59,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
     geminiModel: 'gemini-2.5-flash',
     openaiModel: 'gpt-4.1-mini',
     grokModel: 'grok-3-mini',
-    responseLanguage: 'auto'
+    responseLanguage: 'auto',
+    decision: {
+      enabled: true,
+      provider: 'auto',
+      autoDraftMinConfidence: 0.8
+    }
   },
   privacy: {
     blockRemoteImages: false,
@@ -87,6 +96,17 @@ export class GlassmailDB {
   // Guards against in-flight background syncs resurrecting freshly deleted/moved/read emails from stale snapshots
   private recentMutations = new Map<string, RecentThreadMutation>()
   private recentDeletedRemoteIds = new Map<string, number>()
+  private syncThreadCaptures = new Map<string, Set<string>>()
+
+  beginSyncThreadCapture(accountId: string): void {
+    this.syncThreadCaptures.set(accountId, new Set())
+  }
+
+  endSyncThreadCapture(accountId: string): string[] {
+    const set = this.syncThreadCaptures.get(accountId)
+    this.syncThreadCaptures.delete(accountId)
+    return set ? Array.from(set) : []
+  }
 
   constructor(userDataDir: string) {
     this.dbPath = join(userDataDir, 'glassmail.sqlite')
@@ -350,8 +370,33 @@ export class GlassmailDB {
         subject TEXT NOT NULL,
         body TEXT NOT NULL,
         provider_label TEXT NOT NULL,
-        created_at INTEGER NOT NULL
+        created_at INTEGER NOT NULL,
+        message_id TEXT,
+        status TEXT NOT NULL DEFAULT 'ready',
+        source TEXT NOT NULL DEFAULT 'auto'
       );
+
+      CREATE TABLE IF NOT EXISTS thread_ai_meta (
+        thread_id TEXT PRIMARY KEY,
+        classified_msg_at INTEGER NOT NULL,
+        bundle TEXT NOT NULL,
+        urgency INTEGER NOT NULL DEFAULT 0,
+        needs_reply INTEGER NOT NULL DEFAULT 0,
+        reply_confidence REAL NOT NULL DEFAULT 0,
+        auto_draft_worthy INTEGER NOT NULL DEFAULT 0,
+        ai_reason TEXT NOT NULL DEFAULT '',
+        has_implicit_event INTEGER NOT NULL DEFAULT 0,
+        implicit_event_json TEXT,
+        phishing_risk INTEGER NOT NULL DEFAULT 0,
+        expects_reply INTEGER,
+        matched_rule_ids_json TEXT,
+        summary_json TEXT,
+        model_label TEXT NOT NULL DEFAULT '',
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_thread_ai_meta_needs_reply
+        ON thread_ai_meta(needs_reply, updated_at DESC);
 
       CREATE TABLE IF NOT EXISTS autopilot_rules (
         id TEXT PRIMARY KEY,
@@ -418,6 +463,21 @@ export class GlassmailDB {
     }
     try {
       this.db.exec(`ALTER TABLE accounts ADD COLUMN gmail_history_id TEXT`)
+    } catch {
+      // Column already exists
+    }
+    try {
+      this.db.exec(`ALTER TABLE thread_predrafts ADD COLUMN message_id TEXT`)
+    } catch {
+      // Column already exists
+    }
+    try {
+      this.db.exec(`ALTER TABLE thread_predrafts ADD COLUMN status TEXT NOT NULL DEFAULT 'ready'`)
+    } catch {
+      // Column already exists
+    }
+    try {
+      this.db.exec(`ALTER TABLE thread_predrafts ADD COLUMN source TEXT NOT NULL DEFAULT 'auto'`)
     } catch {
       // Column already exists
     }
@@ -529,7 +589,14 @@ export class GlassmailDB {
       return {
         ...DEFAULT_SETTINGS,
         ...parsed,
-        ai: { ...DEFAULT_SETTINGS.ai, ...(parsed.ai || {}) },
+        ai: {
+          ...DEFAULT_SETTINGS.ai,
+          ...(parsed.ai || {}),
+          decision: {
+            ...DEFAULT_SETTINGS.ai.decision!,
+            ...(parsed.ai?.decision || {})
+          }
+        },
         privacy: { ...DEFAULT_SETTINGS.privacy, ...(parsed.privacy || {}) },
         mcp: { ...DEFAULT_SETTINGS.mcp, ...(parsed.mcp || {}) }
       }
@@ -1055,6 +1122,11 @@ export class GlassmailDB {
         JSON.stringify(mergedLabels),
         msg.threadId
       )
+
+    const capture = this.syncThreadCaptures.get(msg.accountId)
+    if (capture) {
+      capture.add(msg.threadId)
+    }
   }
 
   /**
@@ -1958,6 +2030,10 @@ export class GlassmailDB {
     this.db.prepare(`UPDATE threads SET snoozed_until = ? WHERE id IN (${ph})`).run(untilMs, ...threadIds)
   }
 
+  setThreadWaitingSince(threadId: string, waitingSince: number | null): void {
+    this.db.prepare('UPDATE threads SET waiting_since = ? WHERE id = ?').run(waitingSince, threadId)
+  }
+
   deleteThreadsPermanently(threadIds: string[]): void {
     if (threadIds.length === 0) return
     const ph = threadIds.map(() => '?').join(',')
@@ -2383,47 +2459,220 @@ export class GlassmailDB {
   }
 
   // ---- AI Thread Pre-Drafts ----
-  listPreDrafts(): ThreadPreDraft[] {
-    const rows = this.db
-      .prepare('SELECT * FROM thread_predrafts ORDER BY created_at DESC LIMIT 100')
-      .all() as Record<string, unknown>[]
-    return rows.map((r) => ({
-      threadId: String(r.thread_id),
-      accountId: String(r.account_id),
-      subject: String(r.subject),
-      body: String(r.body),
-      providerLabel: String(r.provider_label),
-      createdAt: Number(r.created_at)
-    }))
-  }
-
-  getPreDraft(threadId: string): ThreadPreDraft | null {
-    const r = this.db
-      .prepare('SELECT * FROM thread_predrafts WHERE thread_id = ?')
-      .get(threadId) as Record<string, unknown> | undefined
-    if (!r) return null
+  private mapPreDraft(r: Record<string, unknown>): ThreadPreDraft {
+    const rawStatus = r.status ? String(r.status) : 'ready'
+    const status: ThreadPreDraft['status'] =
+      rawStatus === 'dismissed' || rawStatus === 'promoted' ? rawStatus : 'ready'
+    const rawSource = r.source ? String(r.source) : 'auto'
+    const source: ThreadPreDraft['source'] = rawSource === 'manual' ? 'manual' : 'auto'
     return {
       threadId: String(r.thread_id),
       accountId: String(r.account_id),
       subject: String(r.subject),
       body: String(r.body),
       providerLabel: String(r.provider_label),
-      createdAt: Number(r.created_at)
+      createdAt: Number(r.created_at),
+      messageId: r.message_id ? String(r.message_id) : undefined,
+      status,
+      source
     }
+  }
+
+  listPreDrafts(): ThreadPreDraft[] {
+    const rows = this.db
+      .prepare("SELECT * FROM thread_predrafts WHERE COALESCE(status, 'ready') != 'dismissed' ORDER BY created_at DESC LIMIT 100")
+      .all() as Record<string, unknown>[]
+    return rows.map((r) => this.mapPreDraft(r))
+  }
+
+  getPreDraft(threadId: string, opts?: { includeDismissed?: boolean }): ThreadPreDraft | null {
+    const r = this.db
+      .prepare('SELECT * FROM thread_predrafts WHERE thread_id = ?')
+      .get(threadId) as Record<string, unknown> | undefined
+    if (!r) return null
+    const mapped = this.mapPreDraft(r)
+    if (!opts?.includeDismissed && mapped.status === 'dismissed') return null
+    return mapped
   }
 
   upsertPreDraft(pd: ThreadPreDraft): void {
     this.db
       .prepare(`
-        INSERT INTO thread_predrafts (thread_id, account_id, subject, body, provider_label, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO thread_predrafts (thread_id, account_id, subject, body, provider_label, created_at, message_id, status, source)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(thread_id) DO UPDATE SET
           subject = excluded.subject,
           body = excluded.body,
           provider_label = excluded.provider_label,
-          created_at = excluded.created_at
+          created_at = excluded.created_at,
+          message_id = excluded.message_id,
+          status = excluded.status,
+          source = excluded.source
       `)
-      .run(pd.threadId, pd.accountId, pd.subject, pd.body, pd.providerLabel, pd.createdAt)
+      .run(
+        pd.threadId,
+        pd.accountId,
+        pd.subject,
+        pd.body,
+        pd.providerLabel,
+        pd.createdAt,
+        pd.messageId ?? null,
+        pd.status ?? 'ready',
+        pd.source ?? 'auto'
+      )
+  }
+
+  updatePreDraftStatus(threadId: string, status: 'ready' | 'dismissed' | 'promoted'): void {
+    this.db.prepare('UPDATE thread_predrafts SET status = ? WHERE thread_id = ?').run(status, threadId)
+  }
+
+  // ---- AI Thread Triage Metadata ----
+  private mapThreadAiMeta(r: Record<string, unknown>): ThreadAIMeta {
+    let implicitEvent: ImplicitCalendarEvent | null = null
+    if (r.implicit_event_json) {
+      try {
+        implicitEvent = JSON.parse(String(r.implicit_event_json)) as ImplicitCalendarEvent
+      } catch {
+        implicitEvent = null
+      }
+    }
+    let matchedRuleIds: string[] | undefined
+    if (r.matched_rule_ids_json) {
+      try {
+        const parsed = JSON.parse(String(r.matched_rule_ids_json))
+        if (Array.isArray(parsed)) matchedRuleIds = parsed.map(String)
+      } catch {
+        matchedRuleIds = undefined
+      }
+    }
+    let summary: ThreadAISummary | null = null
+    if (r.summary_json) {
+      try {
+        summary = JSON.parse(String(r.summary_json)) as ThreadAISummary
+      } catch {
+        summary = null
+      }
+    }
+    return {
+      threadId: String(r.thread_id),
+      classifiedMsgAt: Number(r.classified_msg_at || 0),
+      bundle: (String(r.bundle || 'fyi') as ThreadAIBundle),
+      urgency: Math.max(0, Math.min(3, Number(r.urgency || 0))) as 0 | 1 | 2 | 3,
+      needsReply: Boolean(r.needs_reply),
+      replyConfidence: Number(r.reply_confidence || 0),
+      autoDraftWorthy: Boolean(r.auto_draft_worthy),
+      aiReason: String(r.ai_reason || ''),
+      hasImplicitEvent: Boolean(r.has_implicit_event),
+      implicitEvent,
+      phishingRisk: Math.max(0, Math.min(2, Number(r.phishing_risk || 0))) as 0 | 1 | 2,
+      expectsReply: r.expects_reply === null || r.expects_reply === undefined ? undefined : Boolean(r.expects_reply),
+      matchedRuleIds,
+      summary,
+      modelLabel: String(r.model_label || ''),
+      updatedAt: Number(r.updated_at || 0)
+    }
+  }
+
+  getThreadAiMeta(threadId: string): ThreadAIMeta | null {
+    const row = this.db
+      .prepare('SELECT * FROM thread_ai_meta WHERE thread_id = ?')
+      .get(threadId) as Record<string, unknown> | undefined
+    return row ? this.mapThreadAiMeta(row) : null
+  }
+
+  getThreadAiMetaBatch(threadIds: string[]): Record<string, ThreadAIMeta> {
+    const result: Record<string, ThreadAIMeta> = {}
+    if (!threadIds || threadIds.length === 0) return result
+    const unique = Array.from(new Set(threadIds.filter(Boolean)))
+    const chunkSize = 400
+    for (let i = 0; i < unique.length; i += chunkSize) {
+      const chunk = unique.slice(i, i + chunkSize)
+      const ph = chunk.map(() => '?').join(',')
+      const rows = this.db
+        .prepare(`SELECT * FROM thread_ai_meta WHERE thread_id IN (${ph})`)
+        .all(...chunk) as Record<string, unknown>[]
+      for (const r of rows) {
+        const meta = this.mapThreadAiMeta(r)
+        result[meta.threadId] = meta
+      }
+    }
+    return result
+  }
+
+  upsertThreadAiMeta(meta: ThreadAIMeta): void {
+    const implicitEventJson = meta.implicitEvent ? JSON.stringify(meta.implicitEvent) : null
+    const matchedRuleIdsJson = meta.matchedRuleIds ? JSON.stringify(meta.matchedRuleIds) : null
+    const summaryJson = meta.summary ? JSON.stringify(meta.summary) : null
+    this.db
+      .prepare(`
+        INSERT INTO thread_ai_meta (
+          thread_id, classified_msg_at, bundle, urgency, needs_reply, reply_confidence,
+          auto_draft_worthy, ai_reason, has_implicit_event, implicit_event_json,
+          phishing_risk, expects_reply, matched_rule_ids_json, summary_json,
+          model_label, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(thread_id) DO UPDATE SET
+          classified_msg_at = excluded.classified_msg_at,
+          bundle = excluded.bundle,
+          urgency = excluded.urgency,
+          needs_reply = excluded.needs_reply,
+          reply_confidence = excluded.reply_confidence,
+          auto_draft_worthy = excluded.auto_draft_worthy,
+          ai_reason = excluded.ai_reason,
+          has_implicit_event = excluded.has_implicit_event,
+          implicit_event_json = excluded.implicit_event_json,
+          phishing_risk = excluded.phishing_risk,
+          expects_reply = excluded.expects_reply,
+          matched_rule_ids_json = excluded.matched_rule_ids_json,
+          summary_json = CASE
+            WHEN excluded.summary_json IS NOT NULL THEN excluded.summary_json
+            WHEN excluded.classified_msg_at = thread_ai_meta.classified_msg_at OR thread_ai_meta.classified_msg_at = 0 THEN thread_ai_meta.summary_json
+            ELSE NULL
+          END,
+          model_label = excluded.model_label,
+          updated_at = excluded.updated_at
+      `)
+      .run(
+        meta.threadId,
+        meta.classifiedMsgAt,
+        meta.bundle,
+        meta.urgency,
+        meta.needsReply ? 1 : 0,
+        meta.replyConfidence,
+        meta.autoDraftWorthy ? 1 : 0,
+        meta.aiReason || '',
+        meta.hasImplicitEvent ? 1 : 0,
+        implicitEventJson,
+        meta.phishingRisk,
+        meta.expectsReply === undefined ? null : meta.expectsReply ? 1 : 0,
+        matchedRuleIdsJson,
+        summaryJson,
+        meta.modelLabel || '',
+        meta.updatedAt || Date.now()
+      )
+  }
+
+  updateThreadAiSummary(threadId: string, summary: ThreadAISummary): void {
+    const now = Date.now()
+    const summaryJson = JSON.stringify(summary)
+    const existing = this.db
+      .prepare('SELECT thread_id FROM thread_ai_meta WHERE thread_id = ?')
+      .get(threadId) as { thread_id: string } | undefined
+    if (existing) {
+      this.db
+        .prepare('UPDATE thread_ai_meta SET summary_json = ?, updated_at = ? WHERE thread_id = ?')
+        .run(summaryJson, now, threadId)
+    } else {
+      this.db
+        .prepare(`
+          INSERT INTO thread_ai_meta (
+            thread_id, classified_msg_at, bundle, urgency, needs_reply, reply_confidence,
+            auto_draft_worthy, ai_reason, has_implicit_event, phishing_risk,
+            summary_json, model_label, updated_at
+          ) VALUES (?, 0, 'fyi', 0, 0, 0, 0, '', 0, 0, ?, '', ?)
+        `)
+        .run(threadId, summaryJson, now)
+    }
   }
 
   deletePreDraft(threadId: string): void {

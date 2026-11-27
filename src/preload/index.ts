@@ -9,7 +9,11 @@ import type {
   ComposerAttachment,
   CreateCalendarEventPayload,
   CreateReminderPayload,
+  DecisionAIIpcAPI,
+  DecisionAISettings,
+  DecisionProviderTestResult,
   Folder,
+  ImplicitCalendarEvent,
   LocalAIStatus,
   MailboxId,
   OutlookCalendarInfo,
@@ -20,6 +24,7 @@ import type {
   SendEmailPayload,
   Snippet,
   SubscriptionGroup,
+  ThreadAIMeta,
   ThreadAISummary,
   ThreadDetail,
   ThreadPreDraft,
@@ -207,13 +212,36 @@ const api = {
   }): Promise<LocalAIStatus> => ipcRenderer.invoke('ai:detect-local', overrides),
   askAssistant: (question: string, accountIds?: string[]): Promise<AssistantResponse> =>
     ipcRenderer.invoke('ai:ask', question, accountIds),
-  summarizeThread: (threadId: string): Promise<ThreadAISummary> => ipcRenderer.invoke('ai:summarize', threadId),
+  summarizeThread: (threadId: string, forceRefresh?: boolean): Promise<ThreadAISummary> =>
+    ipcRenderer.invoke('ai:summarize', threadId, forceRefresh),
   draftReply: (opts: {
     accountId: string
     threadId?: string
     instruction: string
     voiceProfileId?: string
   }): Promise<{ draft: string; providerLabel: string; error?: string }> => ipcRenderer.invoke('ai:draft', opts),
+
+  // Decision AI & Thread Triage
+  saveDecisionApiKey: (
+    provider: 'jev' | 'openrouter' | 'gemini' | 'openai',
+    apiKey: string
+  ): Promise<{ ok: boolean }> => ipcRenderer.invoke('ai:saveDecisionApiKey', provider, apiKey),
+  testDecisionProvider: (override?: Partial<DecisionAISettings>): Promise<DecisionProviderTestResult> =>
+    ipcRenderer.invoke('ai:testDecisionProvider', override),
+  getThreadAiMeta: (threadId: string): Promise<ThreadAIMeta | null> =>
+    ipcRenderer.invoke('ai:getThreadMeta', threadId),
+  getThreadAiMetaBatch: (threadIds: string[]): Promise<Record<string, ThreadAIMeta>> =>
+    ipcRenderer.invoke('ai:getThreadMetaBatch', threadIds),
+  reclassifyThread: (threadId: string): Promise<ThreadAIMeta | null> =>
+    ipcRenderer.invoke('ai:reclassifyThread', threadId),
+  dismissPreDraft: (threadId: string): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke('ai:dismissPreDraft', threadId),
+  createCalendarEventFromImplicit: (input: {
+    accountId: string
+    threadId: string
+    event: ImplicitCalendarEvent
+  }): Promise<{ ok: boolean; id?: string; error?: string }> =>
+    ipcRenderer.invoke('calendar:createFromImplicitEvent', input),
 
   // Reminders
   listReminders: (accountIds?: string[]): Promise<Reminder[]> => ipcRenderer.invoke('reminders:list', accountIds),
@@ -281,4 +309,7 @@ const api = {
 }
 
 export type GlassmailAPI = typeof api
+// Compile-time check that GlassmailAPI satisfies DecisionAIIpcAPI
+const _decisionApiCheck: DecisionAIIpcAPI = api
+void _decisionApiCheck
 contextBridge.exposeInMainWorld('glassmail', api)
