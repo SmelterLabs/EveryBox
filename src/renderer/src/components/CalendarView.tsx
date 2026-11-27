@@ -110,6 +110,15 @@ export const CalendarView: React.FC = () => {
   const splitContainerRef = useRef<HTMLDivElement | null>(null)
   const timeGridScrollRef = useRef<HTMLDivElement | null>(null)
   const hasAutoScrolledRef = useRef(false)
+  const pendingSelectTimerRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (pendingSelectTimerRef.current !== null) {
+        window.clearTimeout(pendingSelectTimerRef.current)
+      }
+    }
+  }, [])
 
   const imapAccounts = useMemo(() => accounts.filter((a) => a.provider === 'imap' && !a.isDemo), [accounts])
   const importTargetAccounts = imapAccounts.length > 0 ? imapAccounts : accounts
@@ -227,22 +236,6 @@ export const CalendarView: React.FC = () => {
     return unsub
   }, [loadEvents])
 
-  // Keep selectedEvent fresh if events refresh in background
-  useEffect(() => {
-    if (!selectedEvent) return
-    const refreshed = events.find((e) => e.id === selectedEvent.primary.id)
-    if (refreshed) {
-      setSelectedEvent((prev) =>
-        prev
-          ? {
-              ...prev,
-              primary: refreshed as RichCalendarEvent
-            }
-          : null
-      )
-    }
-  }, [events])
-
   const handleCopy = useCallback(
     async (text: string, message: string) => {
       await window.glassmail.copyText(text, message)
@@ -310,12 +303,32 @@ export const CalendarView: React.FC = () => {
     []
   )
 
-  // Single-click selects & opens bottom details pane immediately; double-click promotes to full modal
-  const handleSelectEvent = useCallback((item: MergedCalendarEvent) => {
-    setSelectedEvent(item)
-  }, [])
+  // Single-click selects & opens bottom details pane (brief delay only when pane is closed
+  // so a double-click on a lower-viewport event isn't occluded before click 2 lands);
+  // double-click immediately promotes to the full detail modal.
+  const handleSelectEvent = useCallback(
+    (item: MergedCalendarEvent) => {
+      if (pendingSelectTimerRef.current !== null) {
+        window.clearTimeout(pendingSelectTimerRef.current)
+        pendingSelectTimerRef.current = null
+      }
+      if (selectedEvent !== null) {
+        setSelectedEvent(item)
+        return
+      }
+      pendingSelectTimerRef.current = window.setTimeout(() => {
+        pendingSelectTimerRef.current = null
+        setSelectedEvent(item)
+      }, 190)
+    },
+    [selectedEvent]
+  )
 
   const handleOpenEventModal = useCallback((item: MergedCalendarEvent) => {
+    if (pendingSelectTimerRef.current !== null) {
+      window.clearTimeout(pendingSelectTimerRef.current)
+      pendingSelectTimerRef.current = null
+    }
     setSelectedEvent(item)
     setDetailModalOpen(true)
   }, [])
@@ -642,6 +655,22 @@ export const CalendarView: React.FC = () => {
       }
     })
   }, [days, events, mergeDuplicates, accountPriority, rankOf, now, anchor])
+
+  // Keep selectedEvent fresh from post-merge dayBuckets on background sync so merged
+  // fields (meetingUrl, descriptionHtml, organizer, htmlLink, attendees, attachments, occurrences) are preserved.
+  useEffect(() => {
+    if (!selectedEvent) return
+    const targetId = selectedEvent.primary.id
+    for (const bucket of dayBuckets) {
+      const match =
+        bucket.allDayEvents.find((m) => m.primary.id === targetId) ||
+        bucket.timedEvents.find((m) => m.primary.id === targetId)
+      if (match) {
+        setSelectedEvent(match)
+        return
+      }
+    }
+  }, [dayBuckets])
 
   const anyAllDay = useMemo(() => dayBuckets.some((b) => b.allDayEvents.length > 0), [dayBuckets])
   const todayVisible = useMemo(() => dayBuckets.some((b) => b.isToday), [dayBuckets])
