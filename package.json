@@ -1,6 +1,6 @@
 {
   "name": "everybox",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "description": "EveryBox for Windows — every inbox and calendar in one calm place, with private local AI",
   "main": "./out/main/index.js",
   "workspaces": [

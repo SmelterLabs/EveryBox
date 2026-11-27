@@ -673,3 +673,14 @@ export interface OutlookStoreInfo {
   unreadCount: number
   calendarPath?: string
 }
+
+export interface AppUpdateStatus {
+  currentVersion: string
+  latestVersion?: string
+  updateAvailable: boolean
+  releaseUrl?: string
+  releaseName?: string
+  publishedAt?: string
+  checkedAt: number
+  error?: string
+}

@@ -1,0 +1,45 @@
+name: release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: build & release (windows)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run package -- --publish never
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          $assets = @(Get-ChildItem -Path "dist\*.exe" | Select-Object -ExpandProperty FullName)
+          if ($assets.Count -eq 0) {
+            Write-Error "No .exe release artifacts found in dist/"
+            exit 1
+          }
+          gh release view $env:TAG_NAME 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:TAG_NAME @assets --clobber
+          } else {
+            gh release create $env:TAG_NAME @assets --title "EveryBox $env:TAG_NAME" --generate-notes
+          }

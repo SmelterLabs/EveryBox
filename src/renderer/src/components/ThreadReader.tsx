@@ -5,6 +5,7 @@ import {
   Bell,
   Calendar,
   CalendarPlus,
+  Check,
   ChevronDown,
   ChevronRight,
   Clock,
@@ -39,12 +40,36 @@ import { AttachmentBar } from './AttachmentBar'
 import { buildReplyComposerState } from '../utils/replyHelper'
 import type { EmailAddress, Message, ThreadAISummary, ThreadPreDraft } from '../../../shared/types'
 
+function formatImplicitEventTime(startIso: string, endIso?: string): string {
+  const start = new Date(startIso)
+  if (Number.isNaN(start.getTime())) return startIso
+  const datePart = start.toLocaleString([], {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  })
+  if (endIso) {
+    const end = new Date(endIso)
+    if (!Number.isNaN(end.getTime())) {
+      const sameDay = start.toDateString() === end.toDateString()
+      const endPart = sameDay
+        ? end.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+        : end.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+      return `${datePart} – ${endPart}`
+    }
+  }
+  return datePart
+}
+
 export const ThreadReader: React.FC<{ isPopout?: boolean }> = ({ isPopout = false }) => {
   const {
     settings,
     folders,
     selectedThread,
     preDrafts,
+    threadAiMeta,
     voiceProfiles,
     pendingSummarizeThreadId,
     pendingDraftThreadId,
@@ -62,6 +87,9 @@ export const ThreadReader: React.FC<{ isPopout?: boolean }> = ({ isPopout = fals
     clearPendingDraft,
     createReminder,
     openCalendarCreate,
+    reclassifyThread,
+    dismissPreDraft,
+    createCalendarEventFromImplicit,
     saveSettings,
     showToast,
     refreshAll,
@@ -77,6 +105,9 @@ export const ThreadReader: React.FC<{ isPopout?: boolean }> = ({ isPopout = fals
 
   const [summary, setSummary] = useState<ThreadAISummary | null>(null)
   const [loadingSummary, setLoadingSummary] = useState(false)
+  const [reclassifying, setReclassifying] = useState(false)
+  const [addingImplicitEvent, setAddingImplicitEvent] = useState(false)
+  const [addedImplicitThreadIds, setAddedImplicitThreadIds] = useState<Record<string, boolean>>({})
   const [loadingDraft, setLoadingDraft] = useState(false)
   const [localPreDraft, setLocalPreDraft] = useState<ThreadPreDraft | null>(null)
   const [editablePreDraftBody, setEditablePreDraftBody] = useState('')
@@ -92,10 +123,13 @@ export const ThreadReader: React.FC<{ isPopout?: boolean }> = ({ isPopout = fals
   const latestMsgRef = useRef<HTMLElement | null>(null)
   const initializedThreadIdRef = useRef<string | null>(null)
 
+  const aiMeta = selectedThread ? threadAiMeta[selectedThread.id] : undefined
+  const effectiveSummary = summary || aiMeta?.summary || null
+
   const activePreDraft =
-    localPreDraft && localPreDraft.threadId === selectedThread?.id
+    localPreDraft && localPreDraft.threadId === selectedThread?.id && localPreDraft.status !== 'dismissed'
       ? localPreDraft
-      : preDrafts.find((p) => p.threadId === selectedThread?.id) || null
+      : preDrafts.find((p) => p.threadId === selectedThread?.id && p.status !== 'dismissed') || null
 
   useEffect(() => {
     setEditablePreDraftBody(activePreDraft?.body || '')
@@ -104,6 +138,8 @@ export const ThreadReader: React.FC<{ isPopout?: boolean }> = ({ isPopout = fals
   useEffect(() => {
     setSummary(null)
     setLoadingSummary(false)
+    setReclassifying(false)
+    setAddingImplicitEvent(false)
     setLoadingDraft(false)
     setLocalPreDraft(null)
     setShowSnoozeMenu(false)
@@ -171,10 +207,15 @@ export const ThreadReader: React.FC<{ isPopout?: boolean }> = ({ isPopout = fals
   useEffect(() => {
     if (!selectedThread || pendingSummarizeThreadId !== selectedThread.id) return
     clearPendingSummarize()
+    const cached = threadAiMeta[selectedThread.id]?.summary
+    if (cached) {
+      setSummary(cached)
+      return
+    }
     void (async () => {
       setLoadingSummary(true)
       try {
-        const res = await window.glassmail.summarizeThread(selectedThread.id)
+        const res = await window.glassmail.summarizeThread(selectedThread.id, false)
         setSummary(res)
       } finally {
         setLoadingSummary(false)
@@ -186,13 +227,32 @@ export const ThreadReader: React.FC<{ isPopout?: boolean }> = ({ isPopout = fals
 
   const latestMsg = selectedThread.messages[selectedThread.messages.length - 1]
 
-  const handleSummarize = async () => {
+  const handleSummarize = async (forceRefresh = false) => {
+    if (!forceRefresh && aiMeta?.summary && !summary) {
+      setSummary(aiMeta.summary)
+      return
+    }
     setLoadingSummary(true)
     try {
-      const res = await window.glassmail.summarizeThread(selectedThread.id)
+      const res = await window.glassmail.summarizeThread(selectedThread.id, forceRefresh)
       setSummary(res)
     } finally {
       setLoadingSummary(false)
+    }
+  }
+
+  const handleReclassify = async () => {
+    if (reclassifying) return
+    setReclassifying(true)
+    try {
+      const updated = await reclassifyThread(selectedThread.id)
+      if (updated) {
+        showToast(`Re-classified as "${updated.bundle}"`, undefined, 2500)
+      } else {
+        showToast('Fast Sorter is unavailable or disabled', undefined, 3000)
+      }
+    } finally {
+      setReclassifying(false)
     }
   }
 
@@ -758,13 +818,26 @@ export const ThreadReader: React.FC<{ isPopout?: boolean }> = ({ isPopout = fals
               </button>
             )}
             <button
-              onClick={() => void handleSummarize()}
+              onClick={() => void handleSummarize(Boolean(effectiveSummary))}
               disabled={loadingSummary}
               className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[12px] font-medium transition hover:opacity-85"
               style={{ color: 'var(--accent-text)' }}
+              title={effectiveSummary ? 'Refresh AI summary' : 'Summarize this thread'}
             >
               <Sparkles size={13} />
-              {loadingSummary ? 'Summarizing…' : 'Summarize'}
+              {loadingSummary ? 'Summarizing…' : effectiveSummary ? 'Refresh Summary' : 'Summarize'}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleReclassify()}
+              disabled={reclassifying}
+              className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11.5px] font-medium transition hover:bg-[var(--bg-hover)] disabled:opacity-50"
+              style={{ color: 'var(--text-muted)' }}
+              title="Re-classify thread with Fast Sorter"
+              aria-label="Re-classify thread"
+            >
+              <RefreshCw size={11.5} className={reclassifying ? 'animate-spin' : ''} />
+              <span>{reclassifying ? 'Classifying…' : 'Re-classify'}</span>
             </button>
             {!(loadingDraft || activePreDraft) && (
               <button
@@ -797,8 +870,7 @@ export const ThreadReader: React.FC<{ isPopout?: boolean }> = ({ isPopout = fals
               }}
               onDismiss={async () => {
                 setLocalPreDraft(null)
-                await window.glassmail.deletePreDraft(selectedThread.id)
-                await refreshAll()
+                await dismissPreDraft(selectedThread.id)
               }}
               onSend={async () => {
                 if (!activePreDraft || !editablePreDraftBody.trim()) return
@@ -940,29 +1012,109 @@ export const ThreadReader: React.FC<{ isPopout?: boolean }> = ({ isPopout = fals
             </div>
           )}
 
+          {/* Implicit Calendar Event ("Meeting detected") Banner */}
+          {aiMeta?.implicitEvent && (
+            <div
+              className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3.5"
+              style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-strong)' }}
+            >
+              <div className="flex min-w-0 items-center gap-3">
+                <div
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+                  style={{ background: 'var(--accent-soft)', color: 'var(--accent-text)' }}
+                >
+                  <CalendarPlus size={17} />
+                </div>
+                <div className="min-w-0">
+                  <div
+                    className="text-[10.5px] font-semibold uppercase tracking-wide"
+                    style={{ color: 'var(--accent-text)' }}
+                  >
+                    Meeting detected
+                  </div>
+                  <div className="truncate text-[13px] font-semibold" style={{ color: 'var(--text-primary)' }}>
+                    {aiMeta.implicitEvent.title}
+                  </div>
+                  <div className="truncate text-[12px]" style={{ color: 'var(--text-secondary)' }}>
+                    {formatImplicitEventTime(aiMeta.implicitEvent.startIso, aiMeta.implicitEvent.endIso)}
+                    {aiMeta.implicitEvent.location ? ` · ${aiMeta.implicitEvent.location}` : ''}
+                  </div>
+                </div>
+              </div>
+              {addedImplicitThreadIds[selectedThread.id] ? (
+                <span
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold"
+                  style={{ background: 'rgba(45, 212, 191, 0.14)', color: 'var(--success)' }}
+                >
+                  <Check size={13} /> Added to Calendar
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  disabled={addingImplicitEvent}
+                  onClick={async () => {
+                    if (!aiMeta.implicitEvent) return
+                    setAddingImplicitEvent(true)
+                    try {
+                      const res = await createCalendarEventFromImplicit(
+                        selectedThread.accountId,
+                        aiMeta.implicitEvent,
+                        selectedThread.id
+                      )
+                      if (res.ok) {
+                        setAddedImplicitThreadIds((prev) => ({ ...prev, [selectedThread.id]: true }))
+                      }
+                    } finally {
+                      setAddingImplicitEvent(false)
+                    }
+                  }}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+                  style={{ background: 'var(--accent)' }}
+                >
+                  <CalendarPlus size={13} />
+                  {addingImplicitEvent ? 'Adding…' : 'Add to Calendar'}
+                </button>
+              )}
+            </div>
+          )}
+
           {/* AI Thread Summary Card */}
-          {summary && (
+          {effectiveSummary && (
             <div
               className="mt-4 rounded-xl border p-4"
               style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-strong)' }}
             >
-              <div className="flex items-center justify-between text-[11.5px] font-medium" style={{ color: 'var(--accent-text)' }}>
+              <div className="flex items-center justify-between gap-2 text-[11.5px] font-medium" style={{ color: 'var(--accent-text)' }}>
                 <span className="inline-flex items-center gap-1.5">
                   <Sparkles size={13} /> Thread Summary
                 </span>
-                <span style={{ color: 'var(--text-muted)' }}>{summary.providerLabel}</span>
+                <div className="flex items-center gap-2">
+                  <span style={{ color: 'var(--text-muted)' }}>{effectiveSummary.providerLabel}</span>
+                  <button
+                    type="button"
+                    disabled={loadingSummary}
+                    onClick={() => void handleSummarize(true)}
+                    className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium transition hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                    style={{ color: 'var(--text-secondary)' }}
+                    title="Regenerate thread summary"
+                    aria-label="Refresh thread summary"
+                  >
+                    <RefreshCw size={11} className={loadingSummary ? 'animate-spin' : ''} />
+                    <span>Refresh</span>
+                  </button>
+                </div>
               </div>
-              <p className="mt-2 text-[13.5px] leading-relaxed">{summary.gist}</p>
-              {summary.actionItems.length > 0 && (
+              <p className="mt-2 text-[13.5px] leading-relaxed">{effectiveSummary.gist}</p>
+              {effectiveSummary.actionItems.length > 0 && (
                 <ul className="mt-2.5 list-disc space-y-1 pl-5 text-[12.5px]" style={{ color: 'var(--text-secondary)' }}>
-                  {summary.actionItems.map((item, idx) => (
+                  {effectiveSummary.actionItems.map((item, idx) => (
                     <li key={idx}>{item}</li>
                   ))}
                 </ul>
               )}
-              {summary.keyDates.length > 0 && (
+              {effectiveSummary.keyDates.length > 0 && (
                 <div className="mt-2.5 flex flex-wrap gap-1.5">
-                  {summary.keyDates.map((d, idx) => (
+                  {effectiveSummary.keyDates.map((d, idx) => (
                     <span
                       key={idx}
                       className="rounded-md px-2 py-0.5 text-[11px] font-medium"

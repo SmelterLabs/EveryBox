@@ -4,12 +4,14 @@ import type {
   Account,
   ActiveView,
   AppSettings,
+  AppUpdateStatus,
   AutopilotLogEntry,
   AutopilotRule,
   CalendarEvent,
   ComposerAttachment,
   CreateReminderPayload,
   Folder,
+  ImplicitCalendarEvent,
   InboxCategory,
   MailboxId,
   ParsedSearchQuery,
@@ -18,6 +20,7 @@ import type {
   SendEmailPayload,
   Snippet,
   SubscriptionGroup,
+  ThreadAIMeta,
   ThreadDetail,
   ThreadPreDraft,
   ThreadSummary,
@@ -95,9 +98,10 @@ interface AppState {
   todayEvents: CalendarEvent[]
   calendarEvents: CalendarEvent[]
 
-  // Reminders, Pre-Drafts, Autopilot & Voice Profiles
+  // Reminders, Pre-Drafts, Autopilot, Decision AI & Voice Profiles
   reminders: Reminder[]
   preDrafts: ThreadPreDraft[]
+  threadAiMeta: Record<string, ThreadAIMeta>
   autopilotRules: AutopilotRule[]
   autopilotLogs: AutopilotLogEntry[]
   voiceProfiles: VoiceProfile[]
@@ -125,6 +129,9 @@ interface AppState {
   composer: ComposerState
   toast: { id: number; message: string; undo?: () => Promise<void>; durationMs: number } | null
   isSyncing: boolean
+  appVersion: string
+  updateStatus: AppUpdateStatus | null
+  checkingForUpdates: boolean
 
   // Actions
   bootstrap: () => Promise<void>
@@ -172,6 +179,16 @@ interface AppState {
     label: string
   }) => Promise<void>
 
+  // Decision AI & Thread Triage
+  loadThreadAiMetaBatch: (threadIds: string[]) => Promise<void>
+  reclassifyThread: (threadId: string) => Promise<ThreadAIMeta | null>
+  dismissPreDraft: (threadId: string) => Promise<void>
+  createCalendarEventFromImplicit: (
+    accountId: string,
+    event: ImplicitCalendarEvent,
+    threadId: string
+  ) => Promise<{ ok: boolean; id?: string; error?: string }>
+
   // Overlays
   setSidebarVisible: (v: boolean) => void
   setAssistantOpen: (v: boolean) => void
@@ -204,6 +221,7 @@ interface AppState {
   ) => void
   triggerSync: () => Promise<void>
   saveSettings: (s: AppSettings) => Promise<void>
+  checkForUpdates: (opts?: { silent?: boolean }) => Promise<AppUpdateStatus | null>
 }
 
 let toastTimer: number | null = null
@@ -241,6 +259,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   reminders: [],
   preDrafts: [],
+  threadAiMeta: {},
   autopilotRules: [],
   autopilotLogs: [],
   voiceProfiles: [],
@@ -268,17 +287,21 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   toast: null,
   isSyncing: false,
+  appVersion: '',
+  updateStatus: null,
+  checkingForUpdates: false,
 
   bootstrap: async () => {
-    const [settings, accounts, workspaces, snippets] = await Promise.all([
+    const [settings, accounts, workspaces, snippets, appVersion] = await Promise.all([
       window.glassmail.getSettings(),
       window.glassmail.listAccounts(),
       window.glassmail.listWorkspaces(),
-      window.glassmail.listSnippets()
+      window.glassmail.listSnippets(),
+      window.glassmail.getAppVersion().catch(() => '')
     ])
     document.documentElement.setAttribute('data-theme', settings.theme)
     document.documentElement.setAttribute('data-ui-theme', settings.uiTheme || 'everybox')
-    set({ settings, accounts, workspaces, snippets })
+    set({ settings, accounts, workspaces, snippets, appVersion })
     await get().refreshAll()
   },
 
@@ -340,6 +363,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const searchAccountIds = searchScopeAccountId ? [searchScopeAccountId] : undefined
       const { parsed, threads } = await window.glassmail.searchMail(searchQuery, searchAccountIds, searchIncludeTrash)
       set({ parsedSearch: parsed, threads })
+      void get().loadThreadAiMetaBatch(threads.map((t) => t.id))
       return
     }
 
@@ -359,6 +383,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       folderName: activeFolderName || undefined
     })
     set({ threads, parsedSearch: null })
+    void get().loadThreadAiMetaBatch(threads.map((t) => t.id))
 
     // Keep selected thread fresh if open
     const selId = get().selectedThreadId
@@ -391,6 +416,13 @@ export const useAppStore = create<AppState>((set, get) => ({
         ? { ...s.lastSelectedThreadByAccount, [detail.accountId]: threadId }
         : s.lastSelectedThreadByAccount
     }))
+    if (!get().threadAiMeta[threadId]) {
+      void window.glassmail.getThreadAiMeta(threadId).then((meta) => {
+        if (meta) {
+          set((s) => ({ threadAiMeta: { ...s.threadAiMeta, [threadId]: meta } }))
+        }
+      })
+    }
     if (detail && !detail.isRead) {
       await window.glassmail.setRead([threadId], true)
       await get().refreshAll()
@@ -764,6 +796,51 @@ export const useAppStore = create<AppState>((set, get) => ({
     get().showToast(`Marked ${unreadIds.length} email${unreadIds.length === 1 ? '' : 's'} in ${label} as read`, undefined, 3000)
   },
 
+  loadThreadAiMetaBatch: async (threadIds) => {
+    const uniqueIds = Array.from(new Set(threadIds.filter(Boolean)))
+    if (uniqueIds.length === 0) return
+    try {
+      const batch = await window.glassmail.getThreadAiMetaBatch(uniqueIds)
+      if (batch && Object.keys(batch).length > 0) {
+        set((s) => ({ threadAiMeta: { ...s.threadAiMeta, ...batch } }))
+      }
+    } catch {
+      // Ignore batch metadata fetch errors to keep thread list responsive
+    }
+  },
+
+  reclassifyThread: async (threadId) => {
+    const meta = await window.glassmail.reclassifyThread(threadId)
+    if (meta) {
+      set((s) => ({ threadAiMeta: { ...s.threadAiMeta, [threadId]: meta } }))
+    }
+    return meta
+  },
+
+  dismissPreDraft: async (threadId) => {
+    set((s) => ({
+      preDrafts: s.preDrafts.filter((p) => p.threadId !== threadId)
+    }))
+    await window.glassmail.dismissPreDraft(threadId)
+    const preDrafts = await window.glassmail.listPreDrafts()
+    set({ preDrafts })
+  },
+
+  createCalendarEventFromImplicit: async (accountId, event, threadId) => {
+    const res = await window.glassmail.createCalendarEventFromImplicit({
+      accountId,
+      threadId,
+      event
+    })
+    if (res.ok) {
+      await get().refreshTodayEvents()
+      get().showToast(`Added "${event.title}" to Calendar`, undefined, 3000)
+    } else {
+      get().showToast(res.error || 'Could not add event to Calendar', undefined, 4000)
+    }
+    return res
+  },
+
   setSidebarVisible: (v) => set({ sidebarVisible: v }),
   setAssistantOpen: (v) => set({ assistantOpen: v }),
   toggleAssistant: () => set((s) => ({ assistantOpen: !s.assistantOpen })),
@@ -920,5 +997,34 @@ export const useAppStore = create<AppState>((set, get) => ({
     document.documentElement.setAttribute('data-theme', s.theme)
     document.documentElement.setAttribute('data-ui-theme', s.uiTheme || 'everybox')
     set({ settings: s })
+  },
+
+  checkForUpdates: async (opts) => {
+    if (get().checkingForUpdates) return get().updateStatus
+    set({ checkingForUpdates: true })
+    try {
+      const status = await window.glassmail.checkForUpdates()
+      set({
+        updateStatus: status,
+        appVersion: status.currentVersion || get().appVersion
+      })
+      if (!opts?.silent) {
+        if (status.error) {
+          get().showToast(status.error, undefined, 4000)
+        } else if (status.updateAvailable && status.latestVersion) {
+          get().showToast(`Update available: v${status.latestVersion}`, undefined, 4500)
+        } else {
+          get().showToast(`EveryBox v${status.currentVersion} is up to date`, undefined, 3000)
+        }
+      }
+      return status
+    } catch {
+      if (!opts?.silent) {
+        get().showToast('Could not check for updates', undefined, 4000)
+      }
+      return null
+    } finally {
+      set({ checkingForUpdates: false })
+    }
   }
 }))

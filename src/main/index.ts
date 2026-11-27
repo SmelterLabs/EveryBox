@@ -17,6 +17,8 @@ import {
 import { SyncManager } from './mail/sync-manager'
 import { CalendarManager } from './calendar/calendar-manager'
 import { detectLocalAI } from './ai/provider'
+import { DECISION_SECRET_KEYS, readDecisionApiKeys, testDecisionProvider } from './ai/decisions'
+import { TriageWorker } from './ai/triage-worker'
 import { askInboxAssistant } from './ai/assistant'
 import { summarizeThread } from './ai/summarizer'
 import { draftVoiceMatchedReply, learnVoiceProfile } from './ai/writer'
@@ -27,6 +29,7 @@ import {
   runAutopilotPass
 } from './ai/autopilot'
 import { parseNaturalLanguageSearch } from './ai/nl-search'
+import { checkForAppUpdates } from './updater'
 import type {
   Account,
   AppSettings,
@@ -34,7 +37,9 @@ import type {
   ComposerAttachment,
   CreateCalendarEventPayload,
   CreateReminderPayload,
+  DecisionAISettings,
   Folder,
+  ImplicitCalendarEvent,
   MailboxId,
   SendEmailPayload,
   Snippet,
@@ -50,6 +55,7 @@ let db: GlassmailDB
 let secrets: SecretStore
 let syncManager: SyncManager
 let calendarManager: CalendarManager
+let triageWorker: TriageWorker
 
 // Prevent transient network/socket errors (e.g. IMAP TLS ECONNRESET) from popping up
 // Electron's blocking native modal dialog and freezing the main process.
@@ -985,6 +991,49 @@ function registerIpc(): void {
     if (res.ok) broadcastDataUpdated()
     return res
   })
+  ipcMain.handle(
+    'calendar:createFromImplicitEvent',
+    async (
+      _,
+      input: {
+        accountId: string
+        threadId?: string
+        event: ImplicitCalendarEvent
+      }
+    ): Promise<{ ok: boolean; id?: string; error?: string }> => {
+      try {
+        const startAt = Date.parse(input.event.startIso)
+        if (!Number.isFinite(startAt)) {
+          return { ok: false, error: 'Invalid event start time.' }
+        }
+        const parsedEnd = input.event.endIso ? Date.parse(input.event.endIso) : NaN
+        const endAt = Number.isFinite(parsedEnd) && parsedEnd > startAt ? parsedEnd : startAt + 60 * 60_000
+
+        const descriptionParts: string[] = []
+        if (input.event.notes?.trim()) descriptionParts.push(input.event.notes.trim())
+        if (input.threadId) {
+          const detail = db.getThreadDetail(input.threadId)
+          if (detail?.subject) {
+            descriptionParts.push(`From email: ${detail.subject}`)
+          }
+        }
+
+        const res = await calendarManager.createEvent({
+          accountId: input.accountId,
+          title: input.event.title,
+          description: descriptionParts.join('\n\n'),
+          location: input.event.location,
+          startAt,
+          endAt,
+          allDay: false
+        })
+        if (res.ok) broadcastDataUpdated()
+        return res
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+  )
 
   // ---- AI Suite ----
   ipcMain.handle(
@@ -995,12 +1044,62 @@ function registerIpc(): void {
   ipcMain.handle('ai:ask', (_, question: string, accountIds?: string[]) =>
     askInboxAssistant(question, accountIds, db, secrets)
   )
-  ipcMain.handle('ai:summarize', (_, threadId: string) => summarizeThread(threadId, db, secrets))
+  ipcMain.handle('ai:summarize', async (_, threadId: string, forceRefresh?: boolean) => {
+    const detail = db.getThreadDetail(threadId)
+    const meta = db.getThreadAiMeta(threadId)
+    const cachedSummary =
+      !forceRefresh && meta?.summary && (!detail || meta.updatedAt >= detail.lastMessageAt)
+        ? meta.summary
+        : null
+    const summary = await summarizeThread(threadId, db, secrets, { cachedSummary, forceRefresh })
+    if (summary && !summary.providerLabel.startsWith('AI Error')) {
+      db.updateThreadAiSummary(threadId, summary)
+    }
+    return summary
+  })
   ipcMain.handle(
     'ai:draft',
     (_, opts: { accountId: string; threadId?: string; instruction: string; voiceProfileId?: string }) =>
       draftVoiceMatchedReply({ ...opts, db, secrets })
   )
+
+  // ---- Decision AI & Thread Triage ----
+  ipcMain.handle(
+    'ai:saveDecisionApiKey',
+    (_, provider: 'jev' | 'openrouter' | 'gemini' | 'openai', apiKey: string) => {
+      const secretKey = DECISION_SECRET_KEYS[provider]
+      const trimmed = (apiKey || '').trim()
+      if (trimmed) {
+        secrets.set(secretKey, trimmed)
+      } else {
+        secrets.delete(secretKey)
+      }
+      return { ok: true }
+    }
+  )
+  ipcMain.handle('ai:testDecisionProvider', (_, override?: Partial<DecisionAISettings>) => {
+    const settings = db.getSettings()
+    const mergedAi = override
+      ? {
+          ...settings.ai,
+          decision: {
+            enabled: true,
+            provider: 'auto' as const,
+            ...settings.ai.decision,
+            ...override
+          }
+        }
+      : settings.ai
+    return testDecisionProvider(mergedAi, readDecisionApiKeys(secrets), secrets)
+  })
+  ipcMain.handle('ai:getThreadMeta', (_, threadId: string) => db.getThreadAiMeta(threadId))
+  ipcMain.handle('ai:getThreadMetaBatch', (_, threadIds: string[]) => db.getThreadAiMetaBatch(threadIds))
+  ipcMain.handle('ai:reclassifyThread', (_, threadId: string) => triageWorker.classifyThreadNow(threadId, true))
+  ipcMain.handle('ai:dismissPreDraft', (_, threadId: string) => {
+    db.updatePreDraftStatus(threadId, 'dismissed')
+    broadcastDataUpdated()
+    return { ok: true }
+  })
 
   // ---- Reminders ----
   ipcMain.handle('reminders:list', (_, accountIds?: string[]) => db.listReminders(accountIds))
@@ -1048,13 +1147,17 @@ function registerIpc(): void {
           ? detail.subject
           : `Re: ${detail.subject}`
         : 'Re:'
+      const latestMsg = detail?.messages[detail.messages.length - 1]
       const pd: ThreadPreDraft = {
         threadId: opts.threadId,
         accountId: opts.accountId,
         subject: subj,
         body: res.draft,
         providerLabel: res.providerLabel,
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        messageId: latestMsg?.id,
+        status: 'ready',
+        source: 'manual'
       }
       db.upsertPreDraft(pd)
       broadcastDataUpdated()
@@ -1169,6 +1272,10 @@ function registerIpc(): void {
       env: { EVERYBOX_DATA_DIR: app.getPath('userData') }
     }
   })
+
+  // ---- App Version & Updates ----
+  ipcMain.handle('app:getVersion', () => app.getVersion())
+  ipcMain.handle('app:checkForUpdates', () => checkForAppUpdates(app.getVersion()))
 }
 
 if (process.platform === 'win32') {
@@ -1183,10 +1290,16 @@ app.whenReady().then(() => {
 
   syncManager = new SyncManager(db, secrets, broadcastDataUpdated)
   calendarManager = new CalendarManager(db, secrets)
+  triageWorker = new TriageWorker(db, secrets, broadcastDataUpdated)
+  syncManager.setOnThreadsSynced((threadIds) => triageWorker.enqueueThreads(threadIds))
 
   registerIpc()
   createWindow()
   syncManager.startBackgroundLoop()
+  // Triage recent inbox & sent threads shortly after startup
+  setTimeout(() => {
+    triageWorker.enqueueRecentInbox(40)
+  }, 4_000)
   // Sync calendars on startup and every 5 minutes so primary-calendar updates appear automatically
   setTimeout(() => {
     void calendarManager.syncAllCalendars().then(broadcastDataUpdated)
@@ -1214,6 +1327,7 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
+  triageWorker?.stop()
   syncManager?.stop()
   if (process.platform !== 'darwin') app.quit()
 })
