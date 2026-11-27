@@ -29,6 +29,7 @@ import {
   runAutopilotPass
 } from './ai/autopilot'
 import { parseNaturalLanguageSearch } from './ai/nl-search'
+import { checkForAppUpdates } from './updater'
 import type {
   Account,
   AppSettings,
@@ -1271,6 +1272,10 @@ function registerIpc(): void {
       env: { EVERYBOX_DATA_DIR: app.getPath('userData') }
     }
   })
+
+  // ---- App Version & Updates ----
+  ipcMain.handle('app:getVersion', () => app.getVersion())
+  ipcMain.handle('app:checkForUpdates', () => checkForAppUpdates(app.getVersion()))
 }
 
 if (process.platform === 'win32') {

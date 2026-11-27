@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type {
   Account,
   AppSettings,
+  AppUpdateStatus,
   AssistantResponse,
   AutopilotLogEntry,
   AutopilotRule,
@@ -305,7 +306,11 @@ const api = {
   openThreadWindow: (threadId: string): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke('window:open-thread', threadId),
   getMcpConfig: (): Promise<{ command: string; args: string[]; env: Record<string, string> }> =>
-    ipcRenderer.invoke('mcp:get-config')
+    ipcRenderer.invoke('mcp:get-config'),
+
+  // App Version & Updates
+  getAppVersion: (): Promise<string> => ipcRenderer.invoke('app:getVersion'),
+  checkForUpdates: (): Promise<AppUpdateStatus> => ipcRenderer.invoke('app:checkForUpdates')
 }
 
 export type GlassmailAPI = typeof api

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Check, ChevronDown, Command, Layers, PanelLeft, Search, X } from 'lucide-react'
+import { ArrowUpCircle, Check, ChevronDown, Command, Layers, PanelLeft, Search, X } from 'lucide-react'
 import { isMac, modKeyPrefix } from './utils/platform'
 import { getEffectiveShortcut, matchesCombo } from './utils/shortcuts'
 import { buildReplyComposerState } from './utils/replyHelper'
@@ -43,6 +43,7 @@ export const App: React.FC = () => {
     shortcutHelpOpen,
     confirmDialog,
     toast,
+    updateStatus,
     setSidebarVisible,
     setActiveView,
     setCommandPaletteOpen,
@@ -153,7 +154,11 @@ export const App: React.FC = () => {
       setActiveView('mail')
       void selectThread(threadId)
     })
+    const updateTimer = window.setTimeout(() => {
+      void useAppStore.getState().checkForUpdates({ silent: true })
+    }, 10_000)
     return () => {
+      window.clearTimeout(updateTimer)
       unsubData()
       unsubFocus()
     }
@@ -592,7 +597,26 @@ export const App: React.FC = () => {
           </button>
         </div>
 
-        <div className="w-8 shrink-0" />
+        <div className="app-no-drag flex shrink-0 items-center justify-end gap-2">
+          {updateStatus?.updateAvailable && updateStatus.latestVersion && updateStatus.releaseUrl ? (
+            <button
+              type="button"
+              onClick={() => void window.glassmail.openExternal(updateStatus.releaseUrl!)}
+              className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11.5px] font-medium transition hover:opacity-90"
+              style={{
+                background: 'var(--accent-soft)',
+                borderColor: 'color-mix(in srgb, var(--accent) 35%, transparent)',
+                color: 'var(--accent-text)'
+              }}
+              title={`Download EveryBox v${updateStatus.latestVersion}`}
+            >
+              <ArrowUpCircle size={12} className="shrink-0" />
+              <span>Update v{updateStatus.latestVersion}</span>
+            </button>
+          ) : (
+            <div className="w-8 shrink-0" />
+          )}
+        </div>
       </header>
 
       {/* Main Content Area */}

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertCircle, Check, ChevronDown, ChevronRight, Copy, Key, Keyboard, Layout, Mail, Moon, Palette, Plus, RefreshCw, RotateCcw, Shield, Sparkles, Sun, Terminal, Trash2, X } from 'lucide-react'
+import { AlertCircle, Check, ChevronDown, ChevronRight, Copy, Download, Key, Keyboard, Layout, Mail, Moon, Palette, Plus, RefreshCw, RotateCcw, Shield, Sparkles, Sun, Terminal, Trash2, X } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { isMac } from '../utils/platform'
 import { detectPresetByEmail, MAIL_PROVIDER_PRESETS, type MailProviderPreset } from '../utils/mailPresets'
@@ -48,7 +48,11 @@ export const SettingsModal: React.FC = () => {
     snippets,
     saveSettings,
     refreshAll,
-    showToast
+    showToast,
+    appVersion,
+    updateStatus,
+    checkingForUpdates,
+    checkForUpdates
   } = useAppStore()
 
   const [tab, setTab] = useState(settingsInitialTab)
@@ -2581,13 +2585,47 @@ export const SettingsModal: React.FC = () => {
             )}
           </div>
           <div
-            className="flex shrink-0 items-center justify-end border-t px-6 py-3"
+            className="flex shrink-0 items-center justify-between gap-3 border-t px-6 py-3"
             style={{ borderColor: 'var(--border-subtle)' }}
           >
+            <div className="flex min-w-0 flex-wrap items-center gap-2.5 text-[12px]">
+              <span className="font-medium" style={{ color: 'var(--text-muted)' }}>
+                EveryBox {appVersion ? `v${appVersion}` : ''}
+              </span>
+              <button
+                type="button"
+                disabled={checkingForUpdates}
+                onClick={() => void checkForUpdates()}
+                className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11.5px] font-medium transition hover:bg-[var(--bg-hover)] disabled:opacity-60"
+                style={{ borderColor: 'var(--border-strong)', color: 'var(--text-secondary)' }}
+              >
+                <RefreshCw size={11} className={checkingForUpdates ? 'animate-spin' : ''} />
+                <span>{checkingForUpdates ? 'Checking…' : 'Check for Updates'}</span>
+              </button>
+              {updateStatus?.updateAvailable && updateStatus.latestVersion && updateStatus.releaseUrl ? (
+                <button
+                  type="button"
+                  onClick={() => void window.glassmail.openExternal(updateStatus.releaseUrl!)}
+                  className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11.5px] font-semibold transition hover:opacity-90"
+                  style={{ background: 'var(--accent-soft)', color: 'var(--accent-text)' }}
+                >
+                  <Download size={11} />
+                  <span>Update available (v{updateStatus.latestVersion}) — Download</span>
+                </button>
+              ) : updateStatus && !updateStatus.error && !checkingForUpdates ? (
+                <span className="text-[11.5px]" style={{ color: 'var(--text-muted)' }}>
+                  Up to date
+                </span>
+              ) : updateStatus?.error && !checkingForUpdates ? (
+                <span className="truncate text-[11.5px]" style={{ color: 'var(--danger)' }} title={updateStatus.error}>
+                  {updateStatus.error}
+                </span>
+              ) : null}
+            </div>
             <button
               type="button"
               onClick={closeSettings}
-              className="rounded-lg px-4 py-1.5 text-[12.5px] font-semibold text-white transition hover:opacity-90"
+              className="shrink-0 rounded-lg px-4 py-1.5 text-[12.5px] font-semibold text-white transition hover:opacity-90"
               style={{ background: 'var(--accent)' }}
             >
               Done
