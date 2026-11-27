@@ -24,6 +24,7 @@ import type {
   FolderRenameInput,
   HabitLearningIpcAPI,
   HabitSuggestion,
+  HabitSuggestionSample,
   ImplicitCalendarEvent,
   LocalAIStatus,
   MailboxId,
@@ -337,6 +338,8 @@ const api = {
   // Habit Learning & Rule Suggestions
   listHabitSuggestions: (status?: 'pending' | 'accepted' | 'dismissed' | 'all'): Promise<HabitSuggestion[]> =>
     ipcRenderer.invoke('habits:listSuggestions', status),
+  getHabitSuggestionSamples: (suggestionId: string, limit?: number): Promise<HabitSuggestionSample[]> =>
+    ipcRenderer.invoke('habits:getSuggestionSamples', suggestionId, limit),
   acceptHabitSuggestion: (
     suggestionId: string
   ): Promise<{ ok: boolean; rule?: AutopilotRule; error?: string }> =>

@@ -748,12 +748,32 @@ export interface HabitSuggestion {
   resolvedAt?: number | null
 }
 
+export interface HabitSuggestionSample {
+  threadId: string
+  accountId: string
+  accountEmail?: string
+  accountColor?: string
+  subject: string
+  snippet: string
+  bodyExcerpt: string
+  fromName: string
+  fromEmail: string
+  date: number
+  messageCount: number
+  folderRole: Folder['role']
+  folderName: string
+  matchedAction?: HabitActionType | null
+  matchedFolderName?: string | null
+  matchedAt?: number | null
+}
+
 /**
  * Habit Learning & Rule Suggestions IPC contract to be implemented on `GlassmailAPI`
  * in `src/preload/index.ts` and `src/main/index.ts`.
  */
 export interface HabitLearningIpcAPI {
   listHabitSuggestions: (status?: 'pending' | 'accepted' | 'dismissed' | 'all') => Promise<HabitSuggestion[]>
+  getHabitSuggestionSamples: (suggestionId: string, limit?: number) => Promise<HabitSuggestionSample[]>
   acceptHabitSuggestion: (
     suggestionId: string
   ) => Promise<{ ok: boolean; rule?: AutopilotRule; error?: string }>

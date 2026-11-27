@@ -19,6 +19,7 @@ import type {
   HabitEvent,
   HabitSuggestion,
   HabitSuggestionKind,
+  HabitSuggestionSample,
   ImplicitCalendarEvent,
   MailboxId,
   Message,
@@ -4236,6 +4237,246 @@ export class GlassmailDB {
     this.db
       .prepare('UPDATE habit_suggestions SET status = ?, resolved_at = ? WHERE id = ?')
       .run(status, resolvedAt, id)
+  }
+
+  getHabitSuggestionSamples(suggestionId: string, limit = 5): HabitSuggestionSample[] {
+    const suggestion = this.getHabitSuggestion(suggestionId)
+    if (!suggestion) return []
+
+    const cap = Math.max(1, Math.min(10, Math.floor(limit) || 5))
+    const seenThreadIds = new Set<string>()
+    const matchedEvents: {
+      threadId: string
+      action: HabitActionType
+      folderName: string | null
+      createdAt: number
+    }[] = []
+
+    const pushEventRows = (rows: Record<string, unknown>[]) => {
+      for (const r of rows) {
+        const tid = r.thread_id ? String(r.thread_id) : ''
+        if (!tid || seenThreadIds.has(tid)) continue
+        seenThreadIds.add(tid)
+        matchedEvents.push({
+          threadId: tid,
+          action: String(r.action) as HabitActionType,
+          folderName: r.folder_name ? String(r.folder_name) : null,
+          createdAt: Number(r.created_at || 0)
+        })
+        if (matchedEvents.length >= cap) break
+      }
+    }
+
+    if (
+      (suggestion.kind === 'sender_archive' ||
+        suggestion.kind === 'sender_trash' ||
+        suggestion.kind === 'sender_move') &&
+      suggestion.senderEmail
+    ) {
+      const email = suggestion.senderEmail.trim().toLowerCase()
+      if (suggestion.kind === 'sender_archive') {
+        pushEventRows(
+          this.db
+            .prepare(
+              `SELECT thread_id, action, folder_name, created_at
+               FROM user_habit_events
+               WHERE sender_email = ? AND action = 'archive' AND thread_id IS NOT NULL
+               ORDER BY created_at DESC LIMIT 30`
+            )
+            .all(email) as Record<string, unknown>[]
+        )
+      } else if (suggestion.kind === 'sender_trash') {
+        pushEventRows(
+          this.db
+            .prepare(
+              `SELECT thread_id, action, folder_name, created_at
+               FROM user_habit_events
+               WHERE sender_email = ? AND action = 'trash' AND thread_id IS NOT NULL
+               ORDER BY created_at DESC LIMIT 30`
+            )
+            .all(email) as Record<string, unknown>[]
+        )
+      } else if (suggestion.kind === 'sender_move' && suggestion.targetFolder) {
+        pushEventRows(
+          this.db
+            .prepare(
+              `SELECT thread_id, action, folder_name, created_at
+               FROM user_habit_events
+               WHERE sender_email = ? AND action = 'move_folder'
+                 AND LOWER(COALESCE(folder_name, '')) = LOWER(?)
+                 AND thread_id IS NOT NULL
+               ORDER BY created_at DESC LIMIT 30`
+            )
+            .all(email, suggestion.targetFolder) as Record<string, unknown>[]
+        )
+      }
+    } else if (
+      (suggestion.kind === 'bundle_archive' || suggestion.kind === 'bundle_move') &&
+      suggestion.bundle
+    ) {
+      pushEventRows(
+        this.db
+          .prepare(
+            `SELECT thread_id, action, folder_name, created_at
+             FROM user_habit_events
+             WHERE bundle = ? AND action IN ('archive', 'trash', 'move_folder')
+               AND thread_id IS NOT NULL
+             ORDER BY created_at DESC LIMIT 30`
+          )
+          .all(suggestion.bundle) as Record<string, unknown>[]
+      )
+    }
+
+    const extractExcerpt = (bodyText: string, bodyHtml: string, fallbackSnippet: string): string => {
+      let raw = (bodyText || '').trim()
+      if (!raw && bodyHtml) {
+        raw = bodyHtml
+          .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+          .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+          .replace(/<br\s*\/?>/gi, '\n')
+          .replace(/<\/(p|div|li|tr|h[1-6])>/gi, '\n')
+          .replace(/<[^>]+>/g, ' ')
+      }
+      if (!raw) return fallbackSnippet
+      const cleaned = cleanSnippet(
+        raw
+          .replace(/<https?:\/\/[^>]+>/gi, '')
+          .replace(/https?:\/\/\S{45,}/gi, '')
+          .replace(/\r\n/g, '\n')
+          .replace(/[ \t]+/g, ' ')
+          .replace(/\n{3,}/g, '\n\n')
+          .trim()
+      )
+      if (!cleaned) return fallbackSnippet
+      return cleaned.length > 480 ? `${cleaned.slice(0, 477).trimEnd()}…` : cleaned
+    }
+
+    const buildSampleFromRow = (
+      row: Record<string, unknown>,
+      ev?: { action: HabitActionType; folderName: string | null; createdAt: number }
+    ): HabitSuggestionSample => {
+      const threadId = String(row.id)
+      let fromName = ''
+      let fromEmail = ''
+      try {
+        const parsed = JSON.parse(String(row.latest_from_json || '{}')) as EmailAddress
+        fromName = (parsed.name || '').trim()
+        fromEmail = (parsed.email || '').trim()
+      } catch {
+        // ignore malformed json
+      }
+      const snippet = cleanSnippet(String(row.snippet || ''))
+      const latestMsg = this.db
+        .prepare(
+          `SELECT body_text, body_html, snippet
+           FROM messages
+           WHERE thread_id = ?
+           ORDER BY date DESC
+           LIMIT 1`
+        )
+        .get(threadId) as Record<string, unknown> | undefined
+      const bodyExcerpt = extractExcerpt(
+        String(latestMsg?.body_text || ''),
+        String(latestMsg?.body_html || ''),
+        snippet
+      )
+
+      return {
+        threadId,
+        accountId: String(row.account_id),
+        accountEmail: row.account_email ? String(row.account_email) : undefined,
+        accountColor: row.account_color ? String(row.account_color) : undefined,
+        subject: repairMojibake(String(row.subject || '(No subject)')),
+        snippet,
+        bodyExcerpt,
+        fromName: repairMojibake(fromName),
+        fromEmail,
+        date: Number(row.last_message_at || 0),
+        messageCount: Number(row.message_count || 1),
+        folderRole: (String(row.folder_role || 'inbox') as Folder['role']),
+        folderName: String(row.folder_name || 'Inbox'),
+        matchedAction: ev?.action ?? null,
+        matchedFolderName: ev?.folderName ?? null,
+        matchedAt: ev?.createdAt ?? null
+      }
+    }
+
+    const samples: HabitSuggestionSample[] = []
+    const resolvedThreadIds = new Set<string>()
+
+    if (matchedEvents.length > 0) {
+      const eventByThreadId = new Map(matchedEvents.map((e) => [e.threadId, e]))
+      const ph = matchedEvents.map(() => '?').join(',')
+      const rows = this.db
+        .prepare(
+          `SELECT t.id, t.account_id, t.subject, t.snippet, t.last_message_at,
+                  t.message_count, t.folder_role, t.folder_name, t.latest_from_json,
+                  a.email AS account_email, a.color AS account_color
+           FROM threads t
+           LEFT JOIN accounts a ON a.id = t.account_id
+           WHERE t.id IN (${ph})`
+        )
+        .all(...matchedEvents.map((e) => e.threadId)) as Record<string, unknown>[]
+      const rowById = new Map(rows.map((r) => [String(r.id), r]))
+      for (const ev of matchedEvents) {
+        const row = rowById.get(ev.threadId)
+        if (!row) continue
+        resolvedThreadIds.add(ev.threadId)
+        samples.push(buildSampleFromRow(row, eventByThreadId.get(ev.threadId)))
+        if (samples.length >= cap) break
+      }
+    }
+
+    // Fallback: top up with recent matching threads if recorded habit events lacked thread_ids or threads were purged
+    if (samples.length < cap) {
+      const remaining = cap - samples.length
+      if (suggestion.senderEmail) {
+        const emailLower = suggestion.senderEmail.trim().toLowerCase()
+        const pattern = `%${emailLower}%`
+        const fallbackRows = this.db
+          .prepare(
+            `SELECT t.id, t.account_id, t.subject, t.snippet, t.last_message_at,
+                    t.message_count, t.folder_role, t.folder_name, t.latest_from_json,
+                    a.email AS account_email, a.color AS account_color
+             FROM threads t
+             LEFT JOIN accounts a ON a.id = t.account_id
+             WHERE LOWER(t.latest_from_json) LIKE ?
+             ORDER BY t.last_message_at DESC
+             LIMIT ?`
+          )
+          .all(pattern, remaining + resolvedThreadIds.size + 4) as Record<string, unknown>[]
+        for (const row of fallbackRows) {
+          const tid = String(row.id)
+          if (resolvedThreadIds.has(tid)) continue
+          resolvedThreadIds.add(tid)
+          samples.push(buildSampleFromRow(row))
+          if (samples.length >= cap) break
+        }
+      } else if (suggestion.bundle) {
+        const fallbackRows = this.db
+          .prepare(
+            `SELECT t.id, t.account_id, t.subject, t.snippet, t.last_message_at,
+                    t.message_count, t.folder_role, t.folder_name, t.latest_from_json,
+                    a.email AS account_email, a.color AS account_color
+             FROM threads t
+             INNER JOIN thread_ai_meta m ON m.thread_id = t.id
+             LEFT JOIN accounts a ON a.id = t.account_id
+             WHERE m.bundle = ?
+             ORDER BY t.last_message_at DESC
+             LIMIT ?`
+          )
+          .all(suggestion.bundle, remaining + resolvedThreadIds.size + 4) as Record<string, unknown>[]
+        for (const row of fallbackRows) {
+          const tid = String(row.id)
+          if (resolvedThreadIds.has(tid)) continue
+          resolvedThreadIds.add(tid)
+          samples.push(buildSampleFromRow(row))
+          if (samples.length >= cap) break
+        }
+      }
+    }
+
+    return samples
   }
 
   // ---- Voice Profiles ----
