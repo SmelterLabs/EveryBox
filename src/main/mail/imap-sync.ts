@@ -239,16 +239,19 @@ export async function syncImapAccount(
           if (total > 0) {
             const startSeq = Math.max(1, total - target.limit + 1)
             const missingUids: number[] = []
+            const folderKey =
+              target.role === 'custom'
+                ? `custom-${Buffer.from(target.path.toLowerCase()).toString('base64url').slice(0, 24)}`
+                : target.role
+            const makeMsgId = (uid: number) =>
+              target.role === 'inbox' ? `${account.id}|imap-${uid}` : `${account.id}|imap-${folderKey}-${uid}`
 
             // Fast pass: fetch only UID + flags so already-cached messages never re-download MIME bodies or rebuild FTS5
             for await (const meta of client.fetch(`${startSeq}:${total}`, {
               uid: true,
               flags: true
             })) {
-              const msgId =
-                target.role === 'inbox'
-                  ? `${account.id}|imap-${meta.uid}`
-                  : `${account.id}|imap-${target.role}-${meta.uid}`
+              const msgId = makeMsgId(meta.uid)
               if (cachedMessageIds.has(msgId)) {
                 const f = meta.flags || new Set<string>()
                 db.updateLocalMessageFlagsById(
@@ -323,11 +326,8 @@ export async function syncImapAccount(
                   isSent
                 })
 
-                // Keep inbox msgId backwards-compatible; namespace non-inbox UIDs so UIDs across folders never collide
-                const msgId =
-                  target.role === 'inbox'
-                    ? `${account.id}|imap-${msg.uid}`
-                    : `${account.id}|imap-${target.role}-${msg.uid}`
+                // Keep inbox msgId backwards-compatible; namespace non-inbox UIDs (including per-custom-folder) so UIDs never collide
+                const msgId = makeMsgId(msg.uid)
                 const normalizedSubj = subject.replace(/^(re|fwd|fw):\s*/gi, '').trim().toLowerCase()
                 const remoteThreadId = parsed.inReplyTo || normalizedSubj || `${target.role}-${msg.uid}`
                 const threadId = `${account.id}|${Buffer.from(remoteThreadId).toString('base64url').slice(0, 32)}`
@@ -394,6 +394,8 @@ export async function syncImapAccount(
                 db.upsertMessageAndThread(message, remoteThreadId)
                 cachedMessageIds.add(msgId)
                 synced += 1
+                // Yield to the event loop between messages so UI IPC calls stay responsive during folder downloads
+                await new Promise<void>((r) => setImmediate(r))
               } catch {
                 // Skip malformed single email so rest of folder still loads
               }
