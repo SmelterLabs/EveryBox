@@ -717,9 +717,15 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
             <p className="mt-1 text-[12.5px]" style={{ color: 'var(--text-muted)' }}>
               {parsedSearch
                 ? `${sortedThreads.length} result${sortedThreads.length === 1 ? '' : 's'}`
-                : activeMailbox === 'inbox'
-                  ? `${counts.inbox || 0} unread`
-                  : `${threads.length} conversations`}
+                : activeFolderName
+                  ? (() => {
+                      const unreadInFolder = threads.filter((t) => !t.isRead).length
+                      const convLabel = `${threads.length} ${threads.length === 1 ? 'conversation' : 'conversations'}`
+                      return unreadInFolder > 0 ? `${unreadInFolder} unread · ${convLabel}` : convLabel
+                    })()
+                  : activeMailbox === 'inbox'
+                    ? `${counts.inbox || 0} unread`
+                    : `${threads.length} conversations`}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
@@ -949,7 +955,7 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
         {/* People / Updates / All Tabs + Right-Aligned Sort Tabs */}
         {activeMailbox !== 'scheduled' && (
           <div className="mt-2.5 flex flex-wrap items-center justify-between gap-1">
-            {activeMailbox === 'inbox' && !parsedSearch ? (
+            {activeMailbox === 'inbox' && !activeFolderName && !parsedSearch ? (
               <div className="flex items-center gap-1">
                 {categories.map((c) => {
                   const active = activeCategory === c.id

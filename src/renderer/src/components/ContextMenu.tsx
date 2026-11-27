@@ -15,6 +15,7 @@ export type ContextMenuItem =
       disabled?: boolean
       onClick?: () => void | Promise<void>
       children?: ContextMenuItem[]
+      disableFilter?: boolean
     }
 
 export interface ContextMenuState {
@@ -29,7 +30,8 @@ const MenuPanel: React.FC<{
   y: number
   onClose: () => void
   parentRect?: DOMRect
-}> = ({ items, x, y, onClose, parentRect }) => {
+  disableFilter?: boolean
+}> = ({ items, x, y, onClose, parentRect, disableFilter }) => {
   const ref = useRef<HTMLDivElement | null>(null)
   const [pos, setPos] = useState<{ left: number; top: number }>({ left: x, top: y })
   const [openSubIdx, setOpenSubIdx] = useState<number | null>(null)
@@ -40,7 +42,7 @@ const MenuPanel: React.FC<{
     () => items.filter((it) => it.type !== 'separator' && it.type !== 'header').length,
     [items]
   )
-  const showFilter = Boolean(parentRect && actionItemCount > 10)
+  const showFilter = Boolean(parentRect && !disableFilter && actionItemCount > 10)
 
   const visibleItems = useMemo(() => {
     const q = filterText.trim().toLowerCase()
@@ -219,6 +221,7 @@ const MenuPanel: React.FC<{
             x={subAnchorRect.right - 2}
             y={subAnchorRect.top - 4}
             parentRect={subAnchorRect}
+            disableFilter={openSubItem.disableFilter}
             onClose={onClose}
           />,
           document.body
