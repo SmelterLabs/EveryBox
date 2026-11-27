@@ -9,3 +9,12 @@ dist/
 secrets.dpapi.json
 .local/
 journal/
+apps/mobile/.expo/
+apps/mobile/android/
+apps/mobile/ios/
+apps/mobile/dist/
+apps/mobile/modules/*/android/build/
+apps/mobile/modules/*/.gradle/
+*.apk
+*.aab
+*.keystore

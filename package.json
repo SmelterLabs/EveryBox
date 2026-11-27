@@ -3,11 +3,18 @@
   "version": "0.2.0",
   "description": "EveryBox for Windows — every inbox and calendar in one calm place, with private local AI",
   "main": "./out/main/index.js",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "shared:typecheck": "npm --workspace=@everybox/shared run typecheck",
+    "mobile:typecheck": "npm --workspace=@everybox/mobile run typecheck",
+    "mobile:android": "npm --workspace=@everybox/mobile run android",
     "mcp": "node ./out/mcp/server.js",
     "package": "electron-vite build && electron-builder --win"
   },
