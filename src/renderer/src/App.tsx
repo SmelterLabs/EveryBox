@@ -37,6 +37,7 @@ export const App: React.FC = () => {
     selectedThread,
     checkedThreadIds,
     threads,
+    visibleThreadIds,
     workspaces,
     sidebarVisible,
     assistantOpen,
@@ -321,17 +322,23 @@ export const App: React.FC = () => {
 
       if (match('nextThread') || (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'j')) {
         e.preventDefault()
-        const curIdx = threads.findIndex((t) => t.id === selectedThreadId)
-        const next = threads[curIdx + 1] || threads[0]
-        if (next) void selectThread(next.id)
+        const orderedIds = visibleThreadIds.length > 0 ? visibleThreadIds : threads.map((t) => t.id)
+        if (orderedIds.length === 0) return
+        const curIdx = selectedThreadId ? orderedIds.indexOf(selectedThreadId) : -1
+        const nextId =
+          curIdx === -1 ? orderedIds[0] : orderedIds[Math.min(orderedIds.length - 1, curIdx + 1)]
+        if (nextId && nextId !== selectedThreadId) void selectThread(nextId)
         return
       }
 
       if (match('prevThread') || (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'k')) {
         e.preventDefault()
-        const curIdx = threads.findIndex((t) => t.id === selectedThreadId)
-        const prev = threads[Math.max(0, curIdx - 1)]
-        if (prev) void selectThread(prev.id)
+        const orderedIds = visibleThreadIds.length > 0 ? visibleThreadIds : threads.map((t) => t.id)
+        if (orderedIds.length === 0) return
+        const curIdx = selectedThreadId ? orderedIds.indexOf(selectedThreadId) : -1
+        const prevId =
+          curIdx === -1 ? orderedIds[orderedIds.length - 1] : orderedIds[Math.max(0, curIdx - 1)]
+        if (prevId && prevId !== selectedThreadId) void selectThread(prevId)
         return
       }
 
@@ -375,6 +382,7 @@ export const App: React.FC = () => {
     selectedThread,
     checkedThreadIds,
     threads,
+    visibleThreadIds,
     workspaces,
     toast,
     shortcutHelpOpen,
