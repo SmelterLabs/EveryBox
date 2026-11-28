@@ -601,11 +601,37 @@ export interface AssistantCard {
   reason: string
 }
 
+export type AssistantProposedAction =
+  | {
+      id: string
+      type: 'create_rule'
+      label: string
+      description: string
+      rule: Omit<AutopilotRule, 'id' | 'runCount' | 'lastRunAt' | 'createdAt'>
+      alsoApplyThreadIds?: string[]
+    }
+  | {
+      id: string
+      type: 'trash_threads' | 'archive_threads' | 'mark_read' | 'mark_unread' | 'star_threads'
+      label: string
+      description: string
+      threadIds: string[]
+    }
+  | {
+      id: string
+      type: 'move_threads'
+      label: string
+      description: string
+      threadIds: string[]
+      folderName: string
+    }
+
 export interface AssistantResponse {
   summary: string
   counts: { needsYou: number; worthALook: number; updates: number }
   dateRange: string
   cards: AssistantCard[]
+  actions?: AssistantProposedAction[]
   followUps: string[]
   providerLabel: string
 }
