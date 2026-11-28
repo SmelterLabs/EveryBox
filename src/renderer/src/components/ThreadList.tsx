@@ -85,6 +85,7 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
     setActiveMailbox,
     setActiveCategory,
     selectThread,
+    setVisibleThreadIds,
     selectAllAccounts,
     runSearch,
     clearSearch,
@@ -242,6 +243,18 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
     }
     return ids
   }, [grouped, collapsedGroups])
+
+  useEffect(() => {
+    setVisibleThreadIds(visibleThreadIds)
+  }, [visibleThreadIds, setVisibleThreadIds])
+
+  useEffect(() => {
+    if (!selectedThreadId) return
+    const el = document.querySelector(`[data-thread-id="${CSS.escape(selectedThreadId)}"]`)
+    if (el && typeof el.scrollIntoView === 'function') {
+      el.scrollIntoView({ block: 'nearest' })
+    }
+  }, [selectedThreadId])
 
   const isSelecting = checkedThreadIds.length > 0
   const checkedSet = useMemo(() => new Set(checkedThreadIds), [checkedThreadIds])
@@ -1307,6 +1320,7 @@ export const ThreadList: React.FC<{ width?: number }> = ({ width = 340 }) => {
                     return (
                       <div
                         key={t.id}
+                        data-thread-id={t.id}
                         role="option"
                         aria-selected={isSelected}
                         draggable

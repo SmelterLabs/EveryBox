@@ -96,6 +96,7 @@ export const GmailShell: React.FC<{
     selectAllAccounts,
     soloAccount,
     selectThread,
+    setVisibleThreadIds,
     runSearch,
     clearSearch,
     toggleCheckThread,
@@ -132,6 +133,18 @@ export const GmailShell: React.FC<{
     if (!showDateGroups) return [['', threads]]
     return groupThreadsByDate(threads)
   }, [threads, showDateGroups])
+
+  const visibleThreadIds = useMemo(() => {
+    const ids: string[] = []
+    for (const [, items] of groupedThreads) {
+      for (const t of items) ids.push(t.id)
+    }
+    return ids
+  }, [groupedThreads])
+
+  useEffect(() => {
+    setVisibleThreadIds(visibleThreadIds)
+  }, [visibleThreadIds, setVisibleThreadIds])
 
   useEffect(() => {
     setSummary(null)

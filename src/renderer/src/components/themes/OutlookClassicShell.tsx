@@ -88,6 +88,7 @@ export const OutlookClassicShell: React.FC<{
     soloAccount,
     selectAccountMailbox,
     selectThread,
+    setVisibleThreadIds,
     runSearch,
     clearSearch,
     openComposer,
@@ -300,6 +301,19 @@ export const OutlookClassicShell: React.FC<{
       return acc
     }, {})
   }, [filteredSortedThreads, sortField, showDateGroups])
+
+  const visibleThreadIds = useMemo(() => {
+    const ids: string[] = []
+    for (const [bucket, items] of Object.entries(groupedThreads)) {
+      if (bucket && collapsedGroups[bucket]) continue
+      for (const t of items) ids.push(t.id)
+    }
+    return ids
+  }, [groupedThreads, collapsedGroups])
+
+  useEffect(() => {
+    setVisibleThreadIds(visibleThreadIds)
+  }, [visibleThreadIds, setVisibleThreadIds])
 
   const handleSummarize = async () => {
     if (!selectedThread) return

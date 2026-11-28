@@ -102,6 +102,7 @@ interface AppState {
 
   // Mail state
   threads: ThreadSummary[]
+  visibleThreadIds: string[]
   selectedThreadId: string | null
   selectedThread: ThreadDetail | null
   lastSelectedThreadByAccount: Record<string, string>
@@ -164,6 +165,7 @@ interface AppState {
   refreshThreads: () => Promise<void>
   refreshTodayEvents: () => Promise<void>
   selectThread: (threadId: string | null) => Promise<void>
+  setVisibleThreadIds: (ids: string[]) => void
   setActiveView: (view: ActiveView) => void
   setActiveMailbox: (mailbox: MailboxId) => Promise<void>
   setActiveCategory: (cat: InboxCategory) => Promise<void>
@@ -387,6 +389,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   recentMovedFolderIds: initialRecentMovedFolderIds,
 
   threads: [],
+  visibleThreadIds: [],
   selectedThreadId: null,
   selectedThread: null,
   lastSelectedThreadByAccount: {},
@@ -599,6 +602,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       await window.glassmail.setRead([threadId], true)
       await get().refreshAll()
     }
+  },
+
+  setVisibleThreadIds: (ids) => {
+    const cur = get().visibleThreadIds
+    if (cur.length === ids.length && cur.every((id, i) => id === ids[i])) return
+    set({ visibleThreadIds: ids })
   },
 
   setActiveView: (view) => {
@@ -821,17 +830,19 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   archiveThreads: async (threadIds) => {
     if (!threadIds.length) return
-    const { threads, selectedThreadId } = get()
-    const currentIdx = threads.findIndex((t) => t.id === selectedThreadId)
+    const { threads, visibleThreadIds, selectedThreadId } = get()
+    const orderedIds = visibleThreadIds.length > 0 ? visibleThreadIds : threads.map((t) => t.id)
+    const currentIdx = selectedThreadId ? orderedIds.indexOf(selectedThreadId) : -1
+    const removedSet = new Set(threadIds)
+    const remainingOrdered = orderedIds.filter((id) => !removedSet.has(id))
     await window.glassmail.moveThreads(threadIds, 'archive', 'Archive')
     set({ checkedThreadIds: [], lastCheckedThreadId: null })
     await get().refreshAll()
 
-    // Auto-advance to next thread like Glassmail
-    if (selectedThreadId && threadIds.includes(selectedThreadId)) {
-      const remaining = get().threads
-      const next = remaining[currentIdx] || remaining[currentIdx - 1] || null
-      await get().selectThread(next?.id || null)
+    // Auto-advance to next visible thread in visual order
+    if (selectedThreadId && removedSet.has(selectedThreadId)) {
+      const nextId = remainingOrdered[currentIdx] || remainingOrdered[currentIdx - 1] || null
+      await get().selectThread(nextId)
     }
     get().showToast(`Archived ${threadIds.length === 1 ? 'conversation' : `${threadIds.length} conversations`}`, async () => {
       await window.glassmail.moveThreads(threadIds, 'inbox', 'Inbox')
@@ -841,8 +852,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   trashThreads: async (threadIds) => {
     if (!threadIds.length) return
-    const { threads, selectedThreadId, activeMailbox } = get()
-    const currentIdx = threads.findIndex((t) => t.id === selectedThreadId)
+    const { threads, visibleThreadIds, selectedThreadId, activeMailbox } = get()
+    const orderedIds = visibleThreadIds.length > 0 ? visibleThreadIds : threads.map((t) => t.id)
+    const currentIdx = selectedThreadId ? orderedIds.indexOf(selectedThreadId) : -1
+    const removedSet = new Set(threadIds)
+    const remainingOrdered = orderedIds.filter((id) => !removedSet.has(id))
     if (activeMailbox === 'trash') {
       await window.glassmail.deleteThreadsPermanently(threadIds)
     } else {
@@ -851,10 +865,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ checkedThreadIds: [], lastCheckedThreadId: null })
     await get().refreshAll()
 
-    if (selectedThreadId && threadIds.includes(selectedThreadId)) {
-      const remaining = get().threads
-      const next = remaining[currentIdx] || remaining[currentIdx - 1] || null
-      await get().selectThread(next?.id || null)
+    if (selectedThreadId && removedSet.has(selectedThreadId)) {
+      const nextId = remainingOrdered[currentIdx] || remainingOrdered[currentIdx - 1] || null
+      await get().selectThread(nextId)
     }
     if (activeMailbox !== 'trash') {
       get().showToast(
@@ -950,8 +963,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   moveThreadsToFolder: async (threadIds, role, folderName, targetFolderId) => {
     if (!threadIds.length) return
-    const { threads, selectedThreadId, selectedThread, folders, activeAccountIds, recentMovedFolderIds } = get()
-    const currentIdx = threads.findIndex((t) => t.id === selectedThreadId)
+    const { threads, visibleThreadIds, selectedThreadId, selectedThread, folders, activeAccountIds, recentMovedFolderIds } = get()
+    const orderedIds = visibleThreadIds.length > 0 ? visibleThreadIds : threads.map((t) => t.id)
+    const currentIdx = selectedThreadId ? orderedIds.indexOf(selectedThreadId) : -1
+    const removedSet = new Set(threadIds)
+    const remainingOrdered = orderedIds.filter((id) => !removedSet.has(id))
 
     // Resolve target folder ID for fast Move-To recency ranking
     let resolvedFolderId = targetFolderId
@@ -985,10 +1001,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ checkedThreadIds: [], lastCheckedThreadId: null })
     await get().refreshAll()
 
-    if (selectedThreadId && threadIds.includes(selectedThreadId)) {
-      const remaining = get().threads
-      const next = remaining[currentIdx] || remaining[currentIdx - 1] || null
-      await get().selectThread(next?.id || null)
+    if (selectedThreadId && removedSet.has(selectedThreadId)) {
+      const nextId = remainingOrdered[currentIdx] || remainingOrdered[currentIdx - 1] || null
+      await get().selectThread(nextId)
     }
     const destLabel = folderName || role.charAt(0).toUpperCase() + role.slice(1)
     get().showToast(
