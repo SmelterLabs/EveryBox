@@ -1,8 +1,31 @@
 import React, { useEffect, useState } from 'react'
-import { Archive, ArrowUp, Clock, Sparkles, X } from 'lucide-react'
+import { Archive, ArrowUp, Check, Clock, FolderInput, MailOpen, Sparkles, Star, Trash2, X, Zap } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { usePaneZoom } from '../hooks/usePaneZoom'
-import type { AssistantResponse } from '../../../shared/types'
+import type { AssistantProposedAction, AssistantResponse, AutopilotAction, AutopilotCondition } from '../../../shared/types'
+
+function formatRuleConditionPills(c: AutopilotCondition): string[] {
+  const pills: string[] = []
+  if (c.fromContains) pills.push(`From contains "${c.fromContains}"`)
+  if (c.subjectContains) pills.push(`Subject contains "${c.subjectContains}"`)
+  if (c.bodyContains) pills.push(`Body contains "${c.bodyContains}"`)
+  if (c.category) pills.push(`Category: ${c.category}`)
+  if (c.hasSignInCode) pills.push('Has 2FA code')
+  if (c.olderThanHours) pills.push(`Older than ${c.olderThanHours}h`)
+  if (c.aiPrompt) pills.push(`AI check: "${c.aiPrompt}"`)
+  return pills
+}
+
+function formatRuleActionLabel(a: AutopilotAction): string {
+  if (a.type === 'trash') return 'Move to Trash'
+  if (a.type === 'archive') return 'Archive'
+  if (a.type === 'markRead') return 'Mark read'
+  if (a.type === 'star') return 'Star'
+  if (a.type === 'moveToFolder') return `Move to ${a.folderName || 'Folder'}`
+  if (a.type === 'notify') return 'Notify'
+  if (a.type === 'preDraft') return 'Pre-draft reply'
+  return a.type
+}
 
 interface Turn {
   question: string
@@ -27,12 +50,100 @@ export const AssistantView: React.FC<{ width?: number }> = ({ width = 390 }) => 
     setActiveView,
     setAssistantOpen,
     archiveThreads,
+    trashThreads,
+    moveThreadsToFolder,
+    setReadThreads,
+    setStarredThreads,
+    refreshAll,
     showToast
   } = useAppStore()
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [turns, setTurns] = useState<Turn[]>([])
+  const [completedActions, setCompletedActions] = useState<Record<string, string>>({})
+  const [busyActionId, setBusyActionId] = useState<string | null>(null)
   const { ref: zoomRef, zoom, zoomBadge } = usePaneZoom<HTMLDivElement>('assistant')
+
+  const executeProposedAction = async (
+    action: AssistantProposedAction,
+    opts?: { alsoApplyExisting?: boolean }
+  ) => {
+    if (busyActionId) return
+    setBusyActionId(action.id)
+    try {
+      if (action.type === 'create_rule') {
+        await window.glassmail.saveAutopilotRule({
+          ...action.rule,
+          id: '',
+          runCount: 0,
+          lastRunAt: null,
+          createdAt: Date.now()
+        })
+        const applyIds = opts?.alsoApplyExisting ? action.alsoApplyThreadIds || [] : []
+        if (applyIds.length > 0) {
+          const primaryAct = action.rule.actions[0]
+          if (primaryAct?.type === 'trash') {
+            await trashThreads(applyIds)
+          } else if (primaryAct?.type === 'archive') {
+            await archiveThreads(applyIds)
+          } else if (primaryAct?.type === 'moveToFolder' && primaryAct.folderName) {
+            await moveThreadsToFolder(applyIds, 'custom', primaryAct.folderName)
+          } else if (primaryAct?.type === 'markRead') {
+            await setReadThreads(applyIds, true)
+          } else if (primaryAct?.type === 'star') {
+            await setStarredThreads(applyIds, true)
+          }
+        }
+        await refreshAll()
+        const statusText =
+          applyIds.length > 0
+            ? `Rule enabled & applied to ${applyIds.length} email${applyIds.length === 1 ? '' : 's'}`
+            : 'Rule enabled in Autopilot'
+        setCompletedActions((prev) => ({ ...prev, [action.id]: statusText }))
+        if (applyIds.length === 0) {
+          showToast(`Enabled rule: ${action.rule.name}`, undefined, 3500)
+        }
+      } else if (action.type === 'trash_threads') {
+        await trashThreads(action.threadIds)
+        setCompletedActions((prev) => ({
+          ...prev,
+          [action.id]: `Moved ${action.threadIds.length} to Trash`
+        }))
+      } else if (action.type === 'archive_threads') {
+        await archiveThreads(action.threadIds)
+        setCompletedActions((prev) => ({
+          ...prev,
+          [action.id]: `Archived ${action.threadIds.length}`
+        }))
+      } else if (action.type === 'move_threads') {
+        await moveThreadsToFolder(action.threadIds, 'custom', action.folderName)
+        setCompletedActions((prev) => ({
+          ...prev,
+          [action.id]: `Moved ${action.threadIds.length} to ${action.folderName}`
+        }))
+      } else if (action.type === 'mark_read') {
+        await setReadThreads(action.threadIds, true)
+        setCompletedActions((prev) => ({
+          ...prev,
+          [action.id]: `Marked ${action.threadIds.length} as read`
+        }))
+      } else if (action.type === 'mark_unread') {
+        await setReadThreads(action.threadIds, false)
+        setCompletedActions((prev) => ({
+          ...prev,
+          [action.id]: `Marked ${action.threadIds.length} as unread`
+        }))
+      } else if (action.type === 'star_threads') {
+        await setStarredThreads(action.threadIds, true)
+        setCompletedActions((prev) => ({
+          ...prev,
+          [action.id]: `Starred ${action.threadIds.length}`
+        }))
+      }
+    } finally {
+      setBusyActionId(null)
+    }
+  }
 
   const ask = async (q: string) => {
     const clean = q.trim()
@@ -119,7 +230,7 @@ export const AssistantView: React.FC<{ width?: number }> = ({ width = 390 }) => 
               </div>
               <h1 className="mt-4 text-[22px] font-semibold">Ask anything about your mail</h1>
               <p className="mt-1 text-[13.5px]" style={{ color: 'var(--text-secondary)' }}>
-                Get prioritized action cards, find who hasn&apos;t replied, or check upcoming deadlines.
+                Ask about your mail, create Autopilot rules, or clean up your inbox in one click.
               </p>
               <div className="mt-6 flex flex-wrap justify-center gap-2">
                 {[
@@ -169,6 +280,200 @@ export const AssistantView: React.FC<{ width?: number }> = ({ width = 390 }) => 
                   </div>
                   <div className="min-w-0 flex-1 space-y-4">
                     <p className="text-[14.5px] font-medium leading-relaxed">{response.summary}</p>
+
+                    {/* Proposed 1-click Autopilot Rule & Mail Action Cards */}
+                    {response.actions && response.actions.length > 0 && (
+                      <div className="space-y-2.5">
+                        {response.actions.map((action) => {
+                          const doneText = completedActions[action.id]
+                          const isBusy = busyActionId === action.id
+
+                          if (action.type === 'create_rule') {
+                            const condPills = formatRuleConditionPills(action.rule.conditions)
+                            const actPills = action.rule.actions.map(formatRuleActionLabel)
+                            const existingCount = action.alsoApplyThreadIds?.length || 0
+                            const primaryVerb =
+                              action.rule.actions[0]?.type === 'trash'
+                                ? 'Trash'
+                                : action.rule.actions[0]?.type === 'archive'
+                                  ? 'Archive'
+                                  : action.rule.actions[0]?.type === 'moveToFolder'
+                                    ? 'Move'
+                                    : 'Apply to'
+
+                            return (
+                              <div
+                                key={action.id}
+                                className="rounded-xl border p-3.5"
+                                style={{
+                                  background: 'var(--bg-elevated)',
+                                  borderColor: 'color-mix(in srgb, var(--accent) 45%, var(--border-subtle))'
+                                }}
+                              >
+                                <div className="flex items-start gap-2">
+                                  <Zap
+                                    size={14}
+                                    fill="#f5b841"
+                                    className="mt-0.5 shrink-0"
+                                    style={{ color: '#e5a424' }}
+                                  />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="text-[13px] font-semibold" style={{ color: 'var(--text-primary)' }}>
+                                      {action.rule.name}
+                                    </div>
+                                    {action.description && (
+                                      <p className="mt-0.5 text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                                        {action.description}
+                                      </p>
+                                    )}
+                                    <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
+                                      {condPills.map((p) => (
+                                        <span
+                                          key={p}
+                                          className="rounded-md px-2 py-0.5 font-medium"
+                                          style={{ background: 'var(--bg-main)', color: 'var(--text-secondary)' }}
+                                        >
+                                          {p}
+                                        </span>
+                                      ))}
+                                      <span style={{ color: 'var(--text-muted)' }}>→</span>
+                                      {actPills.map((p) => (
+                                        <span
+                                          key={p}
+                                          className="rounded-md px-2 py-0.5 font-semibold"
+                                          style={{ background: 'var(--accent-soft)', color: 'var(--accent-text)' }}
+                                        >
+                                          {p}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="mt-3 flex flex-wrap items-center gap-2">
+                                  {doneText ? (
+                                    <>
+                                      <span
+                                        className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[12px] font-semibold"
+                                        style={{
+                                          background: 'color-mix(in srgb, var(--success) 16%, transparent)',
+                                          color: 'var(--success)'
+                                        }}
+                                      >
+                                        <Check size={13} />
+                                        {doneText}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => setActiveView('autopilot')}
+                                        className="text-[11.5px] font-medium hover:underline"
+                                        style={{ color: 'var(--accent-text)' }}
+                                      >
+                                        View in Autopilot
+                                      </button>
+                                    </>
+                                  ) : existingCount > 0 ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        disabled={isBusy}
+                                        onClick={() =>
+                                          void executeProposedAction(action, { alsoApplyExisting: true })
+                                        }
+                                        className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+                                        style={{ background: 'var(--accent)' }}
+                                      >
+                                        <Check size={13} />
+                                        Enable Rule &amp; {primaryVerb} {existingCount} Now
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={isBusy}
+                                        onClick={() =>
+                                          void executeProposedAction(action, { alsoApplyExisting: false })
+                                        }
+                                        className="rounded-lg border px-2.5 py-1.5 text-[12px] font-medium transition hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                                        style={{ borderColor: 'var(--border-strong)', color: 'var(--text-secondary)' }}
+                                      >
+                                        Enable Rule Only
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      disabled={isBusy}
+                                      onClick={() => void executeProposedAction(action)}
+                                      className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+                                      style={{ background: 'var(--accent)' }}
+                                    >
+                                      <Check size={13} />
+                                      Enable Autopilot Rule
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          }
+
+                          const ActionIcon =
+                            action.type === 'trash_threads'
+                              ? Trash2
+                              : action.type === 'archive_threads'
+                                ? Archive
+                                : action.type === 'move_threads'
+                                  ? FolderInput
+                                  : action.type === 'star_threads'
+                                    ? Star
+                                    : MailOpen
+                          const isDanger = action.type === 'trash_threads'
+
+                          return (
+                            <div
+                              key={action.id}
+                              className="flex items-center justify-between gap-3 rounded-xl border p-3"
+                              style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="text-[12.5px] font-semibold" style={{ color: 'var(--text-primary)' }}>
+                                  {action.label}
+                                </div>
+                                {action.description && (
+                                  <div className="mt-0.5 text-[11.5px]" style={{ color: 'var(--text-muted)' }}>
+                                    {action.description}
+                                  </div>
+                                )}
+                              </div>
+                              {doneText ? (
+                                <span
+                                  className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1 text-[11.5px] font-semibold"
+                                  style={{
+                                    background: 'color-mix(in srgb, var(--success) 16%, transparent)',
+                                    color: 'var(--success)'
+                                  }}
+                                >
+                                  <Check size={12} />
+                                  {doneText}
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  disabled={isBusy}
+                                  onClick={() => void executeProposedAction(action)}
+                                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold transition hover:opacity-90 disabled:opacity-50"
+                                  style={{
+                                    background: isDanger ? 'var(--danger)' : 'var(--accent)',
+                                    color: '#fff'
+                                  }}
+                                >
+                                  <ActionIcon size={12} />
+                                  Run
+                                </button>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
 
                     {/* Count Pills */}
                     <div className="flex flex-wrap items-center gap-2 text-[11.5px]">
